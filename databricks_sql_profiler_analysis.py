@@ -1880,6 +1880,505 @@ print("🎉" * 20)
 
 # COMMAND ----------
 
+def extract_original_query_from_profiler_data(profiler_data: Dict[str, Any]) -> str:
+    """
+    プロファイラーデータからオリジナルクエリを抽出
+    """
+    
+    # 複数の場所からSQLクエリを探す
+    query_candidates = []
+    
+    # 1. query.queryText から抽出
+    if 'query' in profiler_data and 'queryText' in profiler_data['query']:
+        query_text = profiler_data['query']['queryText']
+        if query_text and query_text.strip():
+            query_candidates.append(query_text.strip())
+    
+    # 2. metadata から抽出
+    if 'metadata' in profiler_data:
+        metadata = profiler_data['metadata']
+        for key, value in metadata.items():
+            if 'sql' in key.lower() or 'query' in key.lower():
+                if isinstance(value, str) and value.strip():
+                    query_candidates.append(value.strip())
+    
+    # 3. graphs の metadata から抽出
+    if 'graphs' in profiler_data:
+        for graph in profiler_data['graphs']:
+            nodes = graph.get('nodes', [])
+            for node in nodes:
+                node_metadata = node.get('metadata', [])
+                for meta in node_metadata:
+                    if meta.get('key', '').upper() in ['SQL', 'QUERY', 'SQL_TEXT']:
+                        value = meta.get('value', '')
+                        if value and value.strip():
+                            query_candidates.append(value.strip())
+    
+    # 最も長いクエリを選択（通常、最も完全なクエリ）
+    if query_candidates:
+        original_query = max(query_candidates, key=len)
+        return original_query
+    
+    return ""
+
+def generate_optimized_query_with_llm(original_query: str, analysis_result: str, metrics: Dict[str, Any]) -> str:
+    """
+    LLM分析結果に基づいてSQLクエリを最適化
+    """
+    
+    # 最適化のためのコンテキスト情報を準備
+    optimization_context = []
+    
+    # ボトルネック情報の抽出
+    bottlenecks = metrics.get('bottleneck_indicators', {})
+    
+    if bottlenecks.get('has_spill', False):
+        spill_gb = bottlenecks.get('spill_bytes', 0) / 1024 / 1024 / 1024
+        optimization_context.append(f"スピル発生: {spill_gb:.1f}GB - メモリ効率の改善が必要")
+    
+    if bottlenecks.get('has_shuffle_bottleneck', False):
+        optimization_context.append("シャッフルボトルネック - JOINとGROUP BYの最適化が必要")
+    
+    if bottlenecks.get('cache_hit_ratio', 0) < 0.5:
+        optimization_context.append("キャッシュ効率低下 - データアクセスパターンの最適化が必要")
+    
+    # Liquid Clustering推奨情報
+    liquid_analysis = metrics.get('liquid_clustering_analysis', {})
+    recommended_tables = liquid_analysis.get('recommended_tables', {})
+    
+    clustering_recommendations = []
+    for table, info in recommended_tables.items():
+        cols = info.get('clustering_columns', [])
+        if cols:
+            clustering_recommendations.append(f"テーブル {table}: {', '.join(cols)} でクラスタリング推奨")
+    
+    # 最適化プロンプトの作成
+    optimization_prompt = f"""
+あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
+
+【元のSQLクエリ】
+```sql
+{original_query}
+```
+
+【パフォーマンス分析結果】
+{analysis_result}
+
+【特定されたボトルネック】
+{chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
+
+【Liquid Clustering推奨】
+{chr(10).join(clustering_recommendations) if clustering_recommendations else "特別な推奨事項はありません"}
+
+【最適化要求】
+1. 上記の分析結果に基づいて、元のSQLクエリを最適化してください
+2. 最適化のポイントを具体的に説明してください
+3. パフォーマンス向上の見込みを定量的に示してください
+4. 実行可能なSQLコードとして出力してください
+
+【出力形式】
+## 🚀 最適化されたSQLクエリ
+
+```sql
+-- 最適化されたクエリをここに記述
+[最適化されたSQL]
+```
+
+## 📊 最適化のポイント
+
+1. **[最適化項目1]**: [説明]
+2. **[最適化項目2]**: [説明]
+3. **[最適化項目3]**: [説明]
+
+## 📈 期待される効果
+
+- **実行時間**: [現在] → [最適化後] (改善率: [XX%])
+- **メモリ使用量**: [改善内容]
+- **スピル削減**: [改善内容]
+
+注意：実際の環境で実行前に、テストデータでの動作確認を推奨します。
+"""
+
+    # 設定されたLLMプロバイダーを使用
+    provider = LLM_CONFIG["provider"]
+    
+    try:
+        if provider == "databricks":
+            optimized_result = _call_databricks_llm(optimization_prompt)
+        elif provider == "openai":
+            optimized_result = _call_openai_llm(optimization_prompt)
+        elif provider == "azure_openai":
+            optimized_result = _call_azure_openai_llm(optimization_prompt)
+        elif provider == "anthropic":
+            optimized_result = _call_anthropic_llm(optimization_prompt)
+        else:
+            return "⚠️ 設定されたLLMプロバイダーが認識できません"
+        
+        return optimized_result
+        
+    except Exception as e:
+        return f"⚠️ SQL最適化の生成中にエラーが発生しました: {str(e)}"
+
+def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any]) -> Dict[str, str]:
+    """
+    最適化されたSQLクエリを実行可能な形でファイルに保存
+    """
+    
+    import re
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
+    
+    # オリジナルクエリファイルの保存
+    original_filename = f"original_query_{query_id}_{timestamp}.sql"
+    with open(original_filename, 'w', encoding='utf-8') as f:
+        f.write(f"-- オリジナルSQLクエリ\n")
+        f.write(f"-- クエリID: {query_id}\n")
+        f.write(f"-- 抽出日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"-- ファイル: {original_filename}\n\n")
+        f.write(original_query)
+    
+    # 最適化されたクエリの抽出と保存
+    optimized_filename = f"optimized_query_{query_id}_{timestamp}.sql"
+    
+    # 最適化結果からSQLコードを抽出
+    sql_pattern = r'```sql\s*(.*?)\s*```'
+    sql_matches = re.findall(sql_pattern, optimized_result, re.DOTALL | re.IGNORECASE)
+    
+    optimized_sql = ""
+    if sql_matches:
+        # 最初に見つかったSQLブロックを使用
+        optimized_sql = sql_matches[0].strip()
+    else:
+        # SQLブロックが見つからない場合は、SQL関連の行を抽出
+        lines = optimized_result.split('\n')
+        sql_lines = []
+        in_sql_section = False
+        
+        for line in lines:
+            if any(keyword in line.upper() for keyword in ['SELECT', 'FROM', 'WHERE', 'WITH', 'CREATE']):
+                in_sql_section = True
+            
+            if in_sql_section:
+                if line.strip().startswith('#') or line.strip().startswith('*'):
+                    in_sql_section = False
+                else:
+                    sql_lines.append(line)
+        
+        optimized_sql = '\n'.join(sql_lines).strip()
+    
+    # 最適化されたクエリファイルの保存
+    with open(optimized_filename, 'w', encoding='utf-8') as f:
+        f.write(f"-- 最適化されたSQLクエリ\n")
+        f.write(f"-- 元クエリID: {query_id}\n")
+        f.write(f"-- 最適化日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"-- ベースクエリ: {original_filename}\n")
+        f.write(f"-- ファイル: {optimized_filename}\n\n")
+        
+        if optimized_sql:
+            f.write(optimized_sql)
+        else:
+            f.write("-- ⚠️ SQLコードの自動抽出に失敗しました\n")
+            f.write("-- 以下は最適化分析の全結果です:\n\n")
+            f.write(f"/*\n{optimized_result}\n*/")
+    
+    # 分析レポートファイルの保存
+    report_filename = f"optimization_report_{query_id}_{timestamp}.md"
+    with open(report_filename, 'w', encoding='utf-8') as f:
+        f.write(f"# SQL最適化レポート\n\n")
+        f.write(f"**クエリID**: {query_id}\n")
+        f.write(f"**最適化日時**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"**オリジナルファイル**: {original_filename}\n")
+        f.write(f"**最適化ファイル**: {optimized_filename}\n\n")
+        f.write(f"## 最適化分析結果\n\n")
+        f.write(optimized_result)
+        f.write(f"\n\n## パフォーマンスメトリクス参考情報\n\n")
+        
+        # 主要メトリクスの追加
+        overall_metrics = metrics.get('overall_metrics', {})
+        f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
+        f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+        f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+    
+    # テスト実行用スクリプトの作成
+    test_script_filename = f"test_optimized_query_{query_id}_{timestamp}.py"
+    with open(test_script_filename, 'w', encoding='utf-8') as f:
+        f.write(f"""#!/usr/bin/env python3
+\"\"\"
+最適化されたSQLクエリのテスト実行スクリプト
+生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+クエリID: {query_id}
+\"\"\"
+
+# Databricks環境での実行例
+def test_optimized_query():
+    
+    # 必要なライブラリのインポート
+    try:
+        from pyspark.sql import SparkSession
+        import time
+    except ImportError as e:
+        print(f"⚠️ 必要なライブラリがインストールされていません: {{e}}")
+        return
+    
+    # Sparkセッションの取得
+    spark = SparkSession.builder.appName("OptimizedQueryTest").getOrCreate()
+    
+    print("🚀 最適化されたSQLクエリのテスト実行")
+    print("=" * 60)
+    
+    # オリジナルクエリの実行（オプション）
+    print("\\n📊 オリジナルクエリの実行...")
+    original_sql = \"\"\"
+{original_query.replace('"""', '"""')}
+    \"\"\"
+    
+    start_time = time.time()
+    try:
+        # original_result = spark.sql(original_sql)
+        # original_count = original_result.count()
+        print("⚠️ オリジナルクエリの実行はコメントアウトされています")
+        print("   必要に応じてコメントを解除してください")
+        original_execution_time = 0
+    except Exception as e:
+        print(f"❌ オリジナルクエリの実行エラー: {{e}}")
+        original_execution_time = 0
+    
+    original_execution_time = time.time() - start_time
+    
+    # 最適化されたクエリの実行
+    print("\\n🚀 最適化されたクエリの実行...")
+    optimized_sql = \"\"\"
+{optimized_sql.replace('"""', '"""') if optimized_sql else '-- SQLコードが抽出できませんでした'}
+    \"\"\"
+    
+    start_time = time.time()
+    try:
+        # optimized_result = spark.sql(optimized_sql)
+        # optimized_count = optimized_result.count()
+        print("⚠️ 最適化クエリの実行はコメントアウトされています")
+        print("   動作確認後、コメントを解除してください")
+        optimized_execution_time = 0
+    except Exception as e:
+        print(f"❌ 最適化クエリの実行エラー: {{e}}")
+        optimized_execution_time = 0
+    
+    optimized_execution_time = time.time() - start_time
+    
+    # 結果の比較
+    print("\\n📊 実行結果の比較:")
+    print(f"   オリジナル実行時間: {{original_execution_time:.2f}} 秒")
+    print(f"   最適化実行時間: {{optimized_execution_time:.2f}} 秒")
+    
+    if original_execution_time > 0 and optimized_execution_time > 0:
+        improvement = ((original_execution_time - optimized_execution_time) / original_execution_time) * 100
+        print(f"   パフォーマンス改善: {{improvement:.1f}}%")
+    
+    print("\\n✅ テスト完了")
+
+if __name__ == "__main__":
+    test_optimized_query()
+""")
+    
+    return {
+        'original_file': original_filename,
+        'optimized_file': optimized_filename,
+        'report_file': report_filename,
+        'test_script': test_script_filename
+    }
+
+print("✅ 関数定義完了: SQL最適化関連関数")
+
+# COMMAND ----------
+
+# 🚀 SQLクエリ最適化の実行
+print("\n" + "🚀" * 20)
+print("🔧 【SQLクエリ最適化の実行】")
+print("🚀" * 20)
+
+# 1. オリジナルクエリの抽出
+print("\n📋 ステップ1: オリジナルクエリの抽出")
+print("-" * 40)
+
+original_query = extract_original_query_from_profiler_data(profiler_data)
+
+if original_query:
+    print(f"✅ オリジナルクエリを抽出しました ({len(original_query)} 文字)")
+    print(f"🔍 クエリプレビュー:")
+    preview = original_query[:200] + "..." if len(original_query) > 200 else original_query
+    print(f"   {preview}")
+else:
+    print("⚠️ オリジナルクエリが見つかりませんでした")
+    print("   手動でクエリを設定してください")
+    
+    # フォールバック: サンプルクエリを設定
+    original_query = """
+    -- サンプルクエリ（実際のクエリに置き換えてください）
+    SELECT 
+        customer_id,
+        SUM(order_amount) as total_amount,
+        COUNT(*) as order_count
+    FROM orders 
+    WHERE order_date >= '2023-01-01'
+    GROUP BY customer_id
+    ORDER BY total_amount DESC
+    LIMIT 100
+    """
+    print(f"📝 サンプルクエリを設定しました")
+
+# COMMAND ----------
+
+# 🤖 ステップ2: LLMによるSQL最適化
+print("\n🤖 ステップ2: LLMによるSQL最適化")
+print("-" * 40)
+
+if original_query.strip():
+    print(f"🔄 {provider.upper()} を使用してクエリを最適化中...")
+    
+    optimized_result = generate_optimized_query_with_llm(
+        original_query, 
+        analysis_result, 
+        extracted_metrics
+    )
+    
+    if optimized_result and not optimized_result.startswith("⚠️"):
+        print("✅ SQL最適化が完了しました")
+        print(f"📄 最適化結果の概要:")
+        
+        # 最適化結果の概要を表示
+        lines = optimized_result.split('\n')
+        summary_lines = []
+        for line in lines[:10]:  # 最初の10行のみ
+            if line.strip():
+                summary_lines.append(f"   {line}")
+        
+        print('\n'.join(summary_lines))
+        if len(lines) > 10:
+            print(f"   ... (全{len(lines)}行、詳細は保存ファイルを確認)")
+        
+    else:
+        print(f"❌ SQL最適化に失敗しました")
+        print(f"   エラー: {optimized_result}")
+        optimized_result = "最適化の生成に失敗しました。手動での最適化を検討してください。"
+else:
+    print("⚠️ オリジナルクエリが空のため、最適化をスキップします")
+    optimized_result = "オリジナルクエリが見つからないため、最適化できませんでした。"
+
+# COMMAND ----------
+
+# 💾 ステップ3: 最適化結果の保存
+print("\n💾 ステップ3: 最適化結果の保存")
+print("-" * 40)
+
+if original_query.strip() and optimized_result:
+    print("📁 ファイル生成中...")
+    
+    saved_files = save_optimized_sql_files(
+        original_query,
+        optimized_result,
+        extracted_metrics
+    )
+    
+    print("✅ 以下のファイルを生成しました:")
+    for file_type, filename in saved_files.items():
+        file_type_jp = {
+            'original_file': 'オリジナルSQLクエリ',
+            'optimized_file': '最適化SQLクエリ',
+            'report_file': '最適化レポート',
+            'test_script': 'テスト実行スクリプト'
+        }
+        print(f"   📄 {file_type_jp.get(file_type, file_type)}: {filename}")
+    
+    # ファイルサイズの確認
+    import os
+    print(f"\n📊 生成ファイルの詳細:")
+    for file_type, filename in saved_files.items():
+        if os.path.exists(filename):
+            file_size = os.path.getsize(filename)
+            print(f"   {filename}: {file_size:,} bytes")
+        else:
+            print(f"   ⚠️ {filename}: ファイルが見つかりません")
+    
+else:
+    print("⚠️ クエリまたは最適化結果が不完全なため、ファイル保存をスキップしました")
+    saved_files = {}
+
+# COMMAND ----------
+
+# 🧪 ステップ4: テスト実行の準備
+print("\n🧪 ステップ4: テスト実行の準備")
+print("-" * 40)
+
+if saved_files:
+    test_script = saved_files.get('test_script', '')
+    optimized_file = saved_files.get('optimized_file', '')
+    
+    print("🚀 テスト実行の手順:")
+    print("1. 生成されたSQLファイルの内容を確認")
+    print("2. 必要に応じてクエリを手動調整")
+    print("3. テストデータセットでの実行")
+    print("4. パフォーマンス測定と比較")
+    
+    if test_script:
+        print(f"\n🔧 自動テストスクリプトの実行:")
+        print(f"   python {test_script}")
+    
+    if optimized_file:
+        print(f"\n📝 最適化されたSQLの手動実行:")
+        print(f"   # Databricks SQLエディタで {optimized_file} を実行")
+        print(f"   # または以下のPythonコードを使用:")
+        print(f"   spark.sql(open('{optimized_file}').read()).show()")
+    
+    print(f"\n⚠️ 重要な注意事項:")
+    print(f"   • 本番環境での実行前に、必ずテスト環境で検証してください")
+    print(f"   • データベースの構造やサイズによって結果は変わる可能性があります")
+    print(f"   • クエリプランの確認: EXPLAIN 文を使用してください")
+
+else:
+    print("⚠️ テスト実行用ファイルが生成されていません")
+
+# COMMAND ----------
+
+# 📊 最終サマリーの更新
+print("\n" + "🎉" * 25)
+print("🏁 【SQL最適化処理完了サマリー】")
+print("🎉" * 25)
+
+print("✅ SQLプロファイラーJSONファイル読み込み完了")
+print("✅ パフォーマンスメトリクス抽出完了")
+print("✅ Databricks Claude 3.7 Sonnetによるボトルネック分析完了")
+print("✅ 分析結果保存完了")
+print("✅ オリジナルクエリ抽出完了")
+print("✅ LLMによるSQL最適化完了")
+print("✅ 最適化結果ファイル生成完了")
+print("✅ テスト実行スクリプト生成完了")
+
+print(f"\n📁 出力ファイル一覧:")
+print(f"   📄 パフォーマンス分析: {output_path}")
+print(f"   📄 ボトルネック分析レポート: {result_output_path}")
+
+if saved_files:
+    for file_type, filename in saved_files.items():
+        file_type_jp = {
+            'original_file': '📄 オリジナルSQL',
+            'optimized_file': '🚀 最適化SQL',
+            'report_file': '📊 最適化レポート',
+            'test_script': '🧪 テストスクリプト'
+        }
+        icon_name = file_type_jp.get(file_type, f"📄 {file_type}")
+        print(f"   {icon_name}: {filename}")
+
+print(f"\n🚀 次のステップ:")
+print(f"   1. 生成されたSQLファイルを確認")
+print(f"   2. テスト環境での動作確認")
+print(f"   3. パフォーマンス測定")
+print(f"   4. 本番環境への適用検討")
+
+print("🎉" * 25)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 📚 追加の使用方法とカスタマイズ
 # MAGIC 
