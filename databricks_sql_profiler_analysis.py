@@ -113,7 +113,8 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
         "overall_metrics": {},
         "stage_metrics": [],
         "node_metrics": [],
-        "bottleneck_indicators": {}
+        "bottleneck_indicators": {},
+        "liquid_clustering_analysis": {}
     }
     
     # 基本的なクエリ情報
@@ -193,6 +194,9 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
     # ボトルネック指標の計算
     metrics["bottleneck_indicators"] = calculate_bottleneck_indicators(metrics)
     
+    # Liquid Clustering分析
+    metrics["liquid_clustering_analysis"] = analyze_liquid_clustering_opportunities(profiler_data, metrics)
+    
     return metrics
 
 print("✅ 関数定義完了: extract_performance_metrics")
@@ -261,6 +265,166 @@ print("✅ 関数定義完了: calculate_bottleneck_indicators")
 
 # COMMAND ----------
 
+def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    SQLプロファイラーデータからLiquid Clusteringに効果的なカラムを特定
+    """
+    import re
+    
+    clustering_analysis = {
+        "recommended_tables": {},
+        "filter_columns": [],
+        "join_columns": [],
+        "groupby_columns": [],
+        "data_skew_indicators": {},
+        "performance_impact": {},
+        "summary": {}
+    }
+    
+    # クエリテキストの解析
+    query_text = metrics.get('query_info', {}).get('query_text', '').upper()
+    
+    if query_text:
+        # WHERE句からフィルターカラムを抽出
+        where_patterns = [
+            r'WHERE\s+(\w+\.\w+|\w+)\s*[=<>!]',
+            r'AND\s+(\w+\.\w+|\w+)\s*[=<>!]',
+            r'OR\s+(\w+\.\w+|\w+)\s*[=<>!]'
+        ]
+        for pattern in where_patterns:
+            matches = re.findall(pattern, query_text)
+            clustering_analysis["filter_columns"].extend([col.strip() for col in matches])
+        
+        # JOIN句からキーカラムを抽出
+        join_patterns = [
+            r'JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)',
+            r'LEFT\s+JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)',
+            r'INNER\s+JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)'
+        ]
+        for pattern in join_patterns:
+            matches = re.findall(pattern, query_text)
+            for match in matches:
+                clustering_analysis["join_columns"].extend([col.strip() for col in match])
+        
+        # GROUP BY句からグルーピングカラムを抽出
+        groupby_pattern = r'GROUP\s+BY\s+((?:\w+\.\w+|\w+)(?:\s*,\s*(?:\w+\.\w+|\w+))*)'
+        groupby_matches = re.findall(groupby_pattern, query_text)
+        for match in groupby_matches:
+            cols = [col.strip() for col in match.split(',')]
+            clustering_analysis["groupby_columns"].extend(cols)
+    
+    # ノードメトリクスからデータスキューとパーティション情報を分析
+    node_metrics = metrics.get('node_metrics', [])
+    table_scan_nodes = []
+    join_nodes = []
+    shuffle_nodes = []
+    
+    for node in node_metrics:
+        node_name = node.get('name', '').upper()
+        node_tag = node.get('tag', '').upper()
+        
+        # テーブルスキャンノードの特定
+        if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN', 'PARQUET']):
+            table_scan_nodes.append(node)
+            
+            # データスキュー指標の計算
+            key_metrics = node.get('key_metrics', {})
+            rows_num = key_metrics.get('rowsNum', 0)
+            duration_ms = key_metrics.get('durationMs', 0)
+            
+            # ノード名からテーブル名を抽出
+            table_match = re.search(r'(\w+\.\w+|\w+)', node_name)
+            table_name = table_match.group(1) if table_match else f"table_{node.get('node_id', 'unknown')}"
+            
+            clustering_analysis["data_skew_indicators"][table_name] = {
+                "rows_scanned": rows_num,
+                "scan_duration_ms": duration_ms,
+                "avg_rows_per_ms": rows_num / max(duration_ms, 1),
+                "node_name": node_name
+            }
+        
+        # JOINノードの特定
+        elif any(keyword in node_name for keyword in ['JOIN', 'HASH']):
+            join_nodes.append(node)
+        
+        # Shuffleノードの特定
+        elif any(keyword in node_name for keyword in ['SHUFFLE', 'EXCHANGE']):
+            shuffle_nodes.append(node)
+    
+    # 各テーブルの推奨クラスタリングカラムを決定
+    all_columns = set()
+    all_columns.update(clustering_analysis["filter_columns"])
+    all_columns.update(clustering_analysis["join_columns"])
+    all_columns.update(clustering_analysis["groupby_columns"])
+    
+    # テーブル毎の推奨事項
+    for table_name, skew_info in clustering_analysis["data_skew_indicators"].items():
+        table_columns = [col for col in all_columns if '.' not in col or col.startswith(table_name.split('.')[0])]
+        
+        # カラムの重要度スコア計算
+        column_scores = {}
+        for col in table_columns:
+            score = 0
+            clean_col = col.split('.')[-1] if '.' in col else col
+            
+            # フィルター条件での使用頻度
+            score += clustering_analysis["filter_columns"].count(col) * 3
+            
+            # JOIN条件での使用頻度
+            score += clustering_analysis["join_columns"].count(col) * 2
+            
+            # GROUP BY での使用頻度
+            score += clustering_analysis["groupby_columns"].count(col) * 1
+            
+            if score > 0:
+                column_scores[clean_col] = score
+        
+        # 上位カラムを推奨
+        if column_scores:
+            sorted_columns = sorted(column_scores.items(), key=lambda x: x[1], reverse=True)
+            recommended_cols = [col for col, score in sorted_columns[:4]]  # 最大4カラム
+            
+            clustering_analysis["recommended_tables"][table_name] = {
+                "clustering_columns": recommended_cols,
+                "column_scores": column_scores,
+                "scan_performance": {
+                    "rows_scanned": skew_info["rows_scanned"],
+                    "scan_duration_ms": skew_info["scan_duration_ms"],
+                    "efficiency_score": skew_info["avg_rows_per_ms"]
+                }
+            }
+    
+    # パフォーマンス向上の見込み評価
+    total_scan_time = sum(info["scan_duration_ms"] for info in clustering_analysis["data_skew_indicators"].values())
+    total_shuffle_time = 0
+    
+    for node in shuffle_nodes:
+        total_shuffle_time += node.get('key_metrics', {}).get('durationMs', 0)
+    
+    clustering_analysis["performance_impact"] = {
+        "total_scan_time_ms": total_scan_time,
+        "total_shuffle_time_ms": total_shuffle_time,
+        "potential_scan_improvement": "30-70%" if total_scan_time > 10000 else "10-30%",
+        "potential_shuffle_reduction": "20-50%" if total_shuffle_time > 5000 else "5-20%",
+        "estimated_overall_improvement": "25-60%" if (total_scan_time + total_shuffle_time) > 15000 else "10-25%"
+    }
+    
+    # サマリー情報
+    clustering_analysis["summary"] = {
+        "tables_identified": len(clustering_analysis["recommended_tables"]),
+        "total_filter_columns": len(set(clustering_analysis["filter_columns"])),
+        "total_join_columns": len(set(clustering_analysis["join_columns"])),
+        "total_groupby_columns": len(set(clustering_analysis["groupby_columns"])),
+        "high_impact_tables": len([t for t, info in clustering_analysis["recommended_tables"].items() 
+                                 if info["scan_performance"]["scan_duration_ms"] > 5000])
+    }
+    
+    return clustering_analysis
+
+print("✅ 関数定義完了: analyze_liquid_clustering_opportunities")
+
+# COMMAND ----------
+
 def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
     """
     Databricks Claude 3.7 Sonnetエンドポイントを使用してボトルネック分析を行う
@@ -304,15 +468,35 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 主要ノード詳細:
 {chr(10).join([f"- {n['name']} (ID:{n['node_id']}): 行数={n['key_metrics'].get('rowsNum', 0):,}, 時間={n['key_metrics'].get('durationMs', 0):,}ms, メモリ={n['key_metrics'].get('peakMemoryBytes', 0)/1024/1024:.2f}MB" for n in metrics['node_metrics'][:15]])}
 
+【Liquid Clustering推奨分析】
+対象テーブル数: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}
+高インパクトテーブル数: {metrics['liquid_clustering_analysis']['summary'].get('high_impact_tables', 0)}
+
+テーブル別推奨クラスタリングカラム:
+{chr(10).join([f"- {table}: {', '.join(info['clustering_columns'])}" for table, info in metrics['liquid_clustering_analysis']['recommended_tables'].items()])}
+
+カラム使用パターン:
+- フィルターカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['filter_columns']))[:10])}
+- JOINカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['join_columns']))[:10])}
+- GROUP BYカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['groupby_columns']))[:10])}
+
+パフォーマンス向上見込み:
+- スキャン改善: {metrics['liquid_clustering_analysis']['performance_impact'].get('potential_scan_improvement', 'N/A')}
+- Shuffle削減: {metrics['liquid_clustering_analysis']['performance_impact'].get('potential_shuffle_reduction', 'N/A')}
+- 全体改善: {metrics['liquid_clustering_analysis']['performance_impact'].get('estimated_overall_improvement', 'N/A')}
+
 【分析して欲しい内容】
 1. 主要なボトルネックの特定と原因分析
 2. パフォーマンス改善の優先順位付け
 3. 具体的な最適化案の提示（SQL改善、設定変更、インフラ最適化など）
-4. 予想される改善効果
-5. Photon最適化の推奨事項
-6. 重要な注意点や推奨事項
+4. **Liquid Clustering実装の具体的推奨事項と手順**
+5. **各テーブルのクラスタリングカラム選定理由と期待効果**
+6. **Liquid Clustering導入時の注意点と実装順序**
+7. 予想される改善効果
+8. Photon最適化の推奨事項
+9. 重要な注意点や推奨事項
 
-日本語で詳細な分析結果を提供してください。
+特に、Liquid Clusteringの実装については詳細な手順と期待効果を含めて、日本語で詳細な分析結果を提供してください。
 """
     
     try:
@@ -443,6 +627,12 @@ print(f"🎯 データ選択性: {bottleneck_indicators.get('data_selectivity', 
 print(f"🔧 ステージ数: {len(extracted_metrics['stage_metrics'])}")
 print(f"🏗️ ノード数: {len(extracted_metrics['node_metrics'])}")
 
+# Liquid Clustering分析結果の表示
+liquid_analysis = extracted_metrics['liquid_clustering_analysis']
+liquid_summary = liquid_analysis.get('summary', {})
+print(f"🗂️ Liquid Clustering対象テーブル数: {liquid_summary.get('tables_identified', 0)}")
+print(f"📊 高インパクトテーブル数: {liquid_summary.get('high_impact_tables', 0)}")
+
 # COMMAND ----------
 
 # 📋 ボトルネック指標の詳細表示
@@ -505,6 +695,68 @@ for i, node in enumerate(extracted_metrics['node_metrics'][:10]):
     memory_icon = "💚" if memory_mb < 100 else "💛" if memory_mb < 1000 else "❤️"
     
     print(f"{i+1:2d}. {time_icon}{memory_icon} {node['name'][:40]:40} | 行数: {rows_num:>8,} | 時間: {duration_ms:>6,}ms | メモリ: {memory_mb:>6.1f}MB")
+
+print()
+
+# COMMAND ----------
+
+# 🗂️ Liquid Clustering分析結果の詳細表示
+print("\n" + "=" * 50)
+print("🗂️ Liquid Clustering推奨分析")
+print("=" * 50)
+
+liquid_analysis = extracted_metrics['liquid_clustering_analysis']
+
+# 推奨テーブル一覧
+recommended_tables = liquid_analysis.get('recommended_tables', {})
+if recommended_tables:
+    print("\n📋 テーブル別推奨クラスタリングカラム:")
+    for table_name, table_info in recommended_tables.items():
+        clustering_cols = table_info.get('clustering_columns', [])
+        scan_perf = table_info.get('scan_performance', {})
+        
+        # テーブル名の表示
+        print(f"\n📊 テーブル: {table_name}")
+        print(f"   🎯 推奨クラスタリングカラム: {', '.join(clustering_cols)}")
+        print(f"   📈 スキャン行数: {scan_perf.get('rows_scanned', 0):,} 行")
+        print(f"   ⏱️ スキャン時間: {scan_perf.get('scan_duration_ms', 0):,} ms")
+        print(f"   🚀 スキャン効率: {scan_perf.get('efficiency_score', 0):.2f} 行/ms")
+        
+        # カラムスコア詳細
+        column_scores = table_info.get('column_scores', {})
+        if column_scores:
+            sorted_scores = sorted(column_scores.items(), key=lambda x: x[1], reverse=True)
+            print(f"   📊 カラム重要度: {', '.join([f'{col}({score})' for col, score in sorted_scores[:3]])}")
+
+# パフォーマンス影響分析
+performance_impact = liquid_analysis.get('performance_impact', {})
+print(f"\n🔄 パフォーマンス向上見込み:")
+print(f"   📈 スキャン改善: {performance_impact.get('potential_scan_improvement', 'N/A')}")
+print(f"   🔀 Shuffle削減: {performance_impact.get('potential_shuffle_reduction', 'N/A')}")
+print(f"   🏆 全体改善: {performance_impact.get('estimated_overall_improvement', 'N/A')}")
+
+# カラム使用統計
+filter_cols = set(liquid_analysis.get('filter_columns', []))
+join_cols = set(liquid_analysis.get('join_columns', []))
+groupby_cols = set(liquid_analysis.get('groupby_columns', []))
+
+if filter_cols or join_cols or groupby_cols:
+    print(f"\n🔍 カラム使用パターン:")
+    if filter_cols:
+        print(f"   🔎 フィルターカラム ({len(filter_cols)}個): {', '.join(list(filter_cols)[:5])}")
+    if join_cols:
+        print(f"   🔗 JOINカラム ({len(join_cols)}個): {', '.join(list(join_cols)[:5])}")
+    if groupby_cols:
+        print(f"   📊 GROUP BYカラム ({len(groupby_cols)}個): {', '.join(list(groupby_cols)[:5])}")
+
+# SQL実装例
+if recommended_tables:
+    print(f"\n💡 実装例:")
+    for table_name, table_info in list(recommended_tables.items())[:2]:  # 上位2テーブル
+        clustering_cols = table_info.get('clustering_columns', [])
+        if clustering_cols:
+            cluster_by_clause = ', '.join(clustering_cols)
+            print(f"   ALTER TABLE {table_name} CLUSTER BY ({cluster_by_clause});")
 
 print()
 
