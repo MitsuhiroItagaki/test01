@@ -467,6 +467,9 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
         elif column_analysis["total_usage"] >= 3:
             column_analysis["performance_impact"] = "medium"
         
+        # set型をlist型に変換
+        column_analysis["associated_tables"] = list(column_analysis["associated_tables"])
+        
         clustering_analysis["detailed_column_analysis"][column] = column_analysis
     
     # テーブル毎の推奨事項（強化版）
@@ -558,7 +561,10 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
         "total_join_columns": len(set(clustering_analysis["join_columns"])),
         "total_groupby_columns": len(set(clustering_analysis["groupby_columns"])),
         "high_impact_tables": len([t for t, info in clustering_analysis["recommended_tables"].items() 
-                                 if info["scan_performance"]["scan_duration_ms"] > 5000])
+                                 if info["scan_performance"]["scan_duration_ms"] > 5000]),
+        "unique_filter_columns": list(set(clustering_analysis["filter_columns"])),
+        "unique_join_columns": list(set(clustering_analysis["join_columns"])),
+        "unique_groupby_columns": list(set(clustering_analysis["groupby_columns"]))
     }
     
     return clustering_analysis
@@ -811,10 +817,27 @@ print()
 # COMMAND ----------
 
 # 💾 抽出したメトリクスをJSONファイルとして保存
+def convert_sets_to_lists(obj):
+    """set型をlist型に変換してJSONシリアライズ可能にする"""
+    if isinstance(obj, set):
+        return list(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_sets_to_lists(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_sets_to_lists(item) for item in obj]
+    else:
+        return obj
+
 output_path = 'extracted_metrics.json'
-with open(output_path, 'w', encoding='utf-8') as file:
-    json.dump(extracted_metrics, file, indent=2, ensure_ascii=False)
-print(f"✅ 抽出メトリクスを保存しました: {output_path}")
+try:
+    # set型をlist型に変換してからJSONに保存
+    serializable_metrics = convert_sets_to_lists(extracted_metrics)
+    with open(output_path, 'w', encoding='utf-8') as file:
+        json.dump(serializable_metrics, file, indent=2, ensure_ascii=False)
+    print(f"✅ 抽出メトリクスを保存しました: {output_path}")
+except Exception as e:
+    print(f"⚠️ メトリクス保存でエラーが発生しましたがスキップします: {e}")
+    print("✅ 分析は正常に継続されます")
 
 # SparkDataFrameとしても表示
 if extracted_metrics['stage_metrics']:
