@@ -1390,7 +1390,31 @@ elif provider == "anthropic":
 print("📝 分析プロンプトを簡潔化してタイムアウトリスクを軽減しています...")
 print()
 
-analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
+# extracted_metrics変数が定義されているかチェック
+try:
+    extracted_metrics
+    print("✅ extracted_metrics変数が確認されました")
+    analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
+except NameError:
+    print("❌ extracted_metrics変数が定義されていません")
+    print("⚠️ セル11 (パフォーマンスメトリクス抽出) を先に実行してください")
+    print("📋 正しい実行順序: セル10 → セル11 → セル13")
+    print("🔄 デフォルトの分析結果を設定します")
+    analysis_result = """
+🤖 LLMボトルネック分析結果
+
+❌ 分析に必要なメトリクスデータが見つかりませんでした。
+
+📋 解決方法:
+1. セル10でJSONファイルを読み込む
+2. セル11でメトリクスを抽出する  
+3. このセル（セル13）を再実行する
+
+⚠️ 先にメトリクス抽出を完了してから分析を実行してください。
+"""
+except Exception as e:
+    print(f"❌ LLM分析中にエラーが発生しました: {str(e)}")
+    analysis_result = f"LLM分析エラー: {str(e)}"
 
 # COMMAND ----------
 
