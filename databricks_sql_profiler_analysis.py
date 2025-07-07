@@ -1609,7 +1609,9 @@ def convert_sets_to_lists(obj):
     else:
         return obj
 
-output_path = 'extracted_metrics.json'
+from datetime import datetime
+metrics_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+output_path = f'extracted_metrics_{metrics_timestamp}.json'
 try:
     # set型をlist型に変換してからJSONに保存
     serializable_metrics = convert_sets_to_lists(extracted_metrics)
@@ -2105,7 +2107,9 @@ print("=" * 80)
 # COMMAND ----------
 
 # 💾 分析結果の保存と完了サマリー
-result_output_path = 'bottleneck_analysis_result.txt'
+from datetime import datetime
+result_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+result_output_path = f'bottleneck_analysis_result_{result_timestamp}.txt'
 with open(result_output_path, 'w', encoding='utf-8') as file:
     file.write("Databricks SQLプロファイラー ボトルネック分析結果\n")
     file.write("=" * 60 + "\n\n")
@@ -2121,9 +2125,9 @@ print("\n" + "🎉" * 20)
 print("🏁 【処理完了サマリー】")
 print("🎉" * 20)
 print("✅ SQLプロファイラーJSONファイル読み込み完了")
-print("✅ パフォーマンスメトリクス抽出完了 (extracted_metrics.json)")
+print(f"✅ パフォーマンスメトリクス抽出完了 ({output_path})")
 print("✅ Databricks Claude 3.7 Sonnetによるボトルネック分析完了")
-print("✅ 分析結果保存完了 (bottleneck_analysis_result.txt)")
+print(f"✅ 分析結果保存完了 ({result_output_path})")
 print()
 print("📁 出力ファイル:")
 print(f"   📄 {output_path}")
@@ -2291,11 +2295,11 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     import re
     from datetime import datetime
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
     
     # オリジナルクエリファイルの保存
-    original_filename = f"original_query_{query_id}_{timestamp}.sql"
+    original_filename = f"original_query_{timestamp}.sql"
     with open(original_filename, 'w', encoding='utf-8') as f:
         f.write(f"-- オリジナルSQLクエリ\n")
         f.write(f"-- クエリID: {query_id}\n")
@@ -2304,7 +2308,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(original_query)
     
     # 最適化されたクエリの抽出と保存
-    optimized_filename = f"optimized_query_{query_id}_{timestamp}.sql"
+    optimized_filename = f"optimized_query_{timestamp}.sql"
     
     # 最適化結果からSQLコードを抽出
     sql_pattern = r'```sql\s*(.*?)\s*```'
@@ -2348,7 +2352,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write(f"/*\n{optimized_result}\n*/")
     
     # 分析レポートファイルの保存
-    report_filename = f"optimization_report_{query_id}_{timestamp}.md"
+    report_filename = f"optimization_report_{timestamp}.md"
     with open(report_filename, 'w', encoding='utf-8') as f:
         f.write(f"# SQL最適化レポート\n\n")
         f.write(f"**クエリID**: {query_id}\n")
@@ -2366,7 +2370,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
     
     # テスト実行用スクリプトの作成
-    test_script_filename = f"test_optimized_query_{query_id}_{timestamp}.py"
+    test_script_filename = f"test_optimized_query_{timestamp}.py"
     with open(test_script_filename, 'w', encoding='utf-8') as f:
         # f-stringの中で三重引用符を含む場合のエスケープ処理
         escaped_original_query = original_query.replace('"""', '\\"""')
@@ -2377,6 +2381,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
 最適化されたSQLクエリのテスト実行スクリプト
 生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 クエリID: {query_id}
+タイムスタンプ: {timestamp}
 \"\"\"
 
 # Databricks環境での実行例
