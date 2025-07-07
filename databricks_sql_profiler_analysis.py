@@ -998,6 +998,7 @@ if extracted_metrics['stage_metrics']:
 # 🐌 最も時間がかかっている処理TOP10
 print(f"\n🐌 最も時間がかかっている処理TOP10")
 print("=" * 80)
+print("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
 
 # ノードを実行時間でソート
 sorted_nodes = sorted(extracted_metrics['node_metrics'], 
@@ -1037,19 +1038,62 @@ if sorted_nodes:
         # メモリ使用量のアイコン
         memory_icon = "�" if memory_mb < 100 else "⚠️" if memory_mb < 1000 else "🚨"
         
-        # ノード名を短縮（重要部分を抽出）
+        # ノード名を短縮（100バイトまで）
         node_name = node['name']
-        short_name = node_name[:45] + "..." if len(node_name) > 45 else node_name
+        short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
         
-        print(f"{i+1:2d}. {time_icon}{memory_icon} [{severity:8}] {short_name:50}")
+        # 並列度情報の取得
+        num_tasks = 0
+        for stage in extracted_metrics.get('stage_metrics', []):
+            if duration_ms > 0:  # このノードに関連するステージを推定
+                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+        
+        # ディスクスピルアウトの検出
+        detailed_metrics = node.get('detailed_metrics', {})
+        spill_detected = False
+        spill_bytes = 0
+        for metric_key, metric_info in detailed_metrics.items():
+            if 'SPILL' in metric_key.upper() or 'DISK' in metric_key.upper():
+                metric_value = metric_info.get('value', 0)
+                if metric_value > 0:
+                    spill_detected = True
+                    spill_bytes += metric_value
+        
+        # データスキューの検出（行数とメモリ使用量から推定）
+        skew_detected = False
+        if rows_num > 0 and memory_mb > 0:
+            # メモリ使用量が行数に比べて異常に高い場合はスキューの可能性
+            memory_per_row = memory_mb * 1024 * 1024 / rows_num  # bytes per row
+            if memory_per_row > 10000:  # 1行あたり10KB以上は高い
+                skew_detected = True
+        
+        # または実行時間が行数に比べて異常に長い場合
+        if rows_num > 0 and duration_ms > 0:
+            ms_per_thousand_rows = (duration_ms * 1000) / rows_num
+            if ms_per_thousand_rows > 1000:  # 1000行あたり1秒以上は遅い
+                skew_detected = True
+        
+        # 並列度アイコン
+        parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
+        # スピルアイコン
+        spill_icon = "💿" if spill_detected else "✅"
+        # スキューアイコン
+        skew_icon = "⚖️" if skew_detected else "✅"
+        
+        print(f"{i+1:2d}. {time_icon}{memory_icon}{parallelism_icon}{spill_icon}{skew_icon} [{severity:8}] {short_name}")
         print(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
         print(f"    📊 処理行数: {rows_num:>8,} 行")
         print(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
+        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'あり' if skew_detected else 'なし'}")
         
         # 効率性指標（行/秒）を計算
         if duration_ms > 0:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
+        
+        # スピル詳細情報
+        if spill_detected and spill_bytes > 0:
+            print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
         
         # ノードIDも表示
         print(f"    🆔 ノードID: {node.get('node_id', 'N/A')}")
@@ -1130,7 +1174,9 @@ pushdown_filters = liquid_analysis.get('pushdown_filters', [])
 if pushdown_filters:
     print(f"\n🔍 プッシュダウンフィルター ({len(pushdown_filters)}件):")
     for i, filter_info in enumerate(pushdown_filters[:3]):
-        print(f"   {i+1}. ノード: {filter_info.get('node_name', '')[:30]}")
+        node_name_display = filter_info.get('node_name', '')
+        truncated_node_name = node_name_display[:100] + "..." if len(node_name_display) > 100 else node_name_display
+        print(f"   {i+1}. ノード: {truncated_node_name}")
         print(f"      📋 フィルター: {filter_info.get('filter_expression', '')[:60]}")
         print(f"      🔧 メトリクス: {filter_info.get('metric_key', '')}")
 
