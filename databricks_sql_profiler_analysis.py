@@ -249,16 +249,19 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                         "key_metrics": node.get('keyMetrics', {})
                     }
                     
-                    # 重要なメトリクスのみ詳細抽出
+                    # 重要なメトリクスのみ詳細抽出（スピル関連キーワード追加）
                     detailed_metrics = {}
                     for metric in node.get('metrics', []):
                         metric_key = metric.get('key', '')
+                        # スピル関連のキーワードを追加
                         if any(keyword in metric_key.upper() for keyword in 
-                               ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE']):
+                               ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE', 
+                                'SPILL', 'DISK', 'PRESSURE', 'SINK']):
                             detailed_metrics[metric_key] = {
                                 'value': metric.get('value', 0),
                                 'label': metric.get('label', ''),
-                                'type': metric.get('metricType', '')
+                                'type': metric.get('metricType', ''),
+                                'full_key': metric_key  # 完全なキー名を保存
                             }
                     node_metric['detailed_metrics'] = detailed_metrics
                     metrics["node_metrics"].append(node_metric)
@@ -1224,16 +1227,64 @@ if sorted_nodes:
             if duration_ms > 0:  # このノードに関連するステージを推定
                 num_tasks = max(num_tasks, stage.get('num_tasks', 0))
         
-        # ディスクスピルアウトの検出
+        # ディスクスピルアウトの検出（強化版）
         detailed_metrics = node.get('detailed_metrics', {})
         spill_detected = False
         spill_bytes = 0
+        spill_details = []
+        
+        # デバッグ: 利用可能なメトリクス名を確認（TOP10表示の最初の3ノードのみ）
+        if i < 3:
+            print(f"    🔍 デバッグ: ノード{i+1}のメトリクス検査")
+            for metric_key in detailed_metrics.keys():
+                if any(keyword in metric_key.upper() for keyword in ['SPILL', 'DISK', 'PRESSURE', 'MEMORY']):
+                    metric_value = detailed_metrics[metric_key].get('value', 0)
+                    print(f"        📊 {metric_key}: {metric_value}")
+        
         for metric_key, metric_info in detailed_metrics.items():
-            if 'SPILL' in metric_key.upper() or 'DISK' in metric_key.upper():
-                metric_value = metric_info.get('value', 0)
-                if metric_value > 0:
-                    spill_detected = True
-                    spill_bytes += metric_value
+            metric_value = metric_info.get('value', 0)
+            metric_label = metric_info.get('label', '')
+            
+            # より具体的なスピル関連メトリクスの検出パターン
+            spill_patterns = [
+                'SPILL',
+                'DISK',
+                'PRESSURE',
+                'SINK.*SPILL',
+                'BYTES.*SPILL.*DISK',
+                'MEMORY.*PRESSURE',
+                'SPILL.*TO.*DISK',
+                'NUM.*BYTES.*SPILL'
+            ]
+            
+            # パターンマッチング
+            is_spill_metric = False
+            for pattern in spill_patterns:
+                if pattern.replace('.*', '').replace('.', '') in metric_key.upper().replace(' ', '').replace('-', ''):
+                    is_spill_metric = True
+                    break
+            
+            # より具体的な判定
+            if is_spill_metric and metric_value > 0:
+                spill_detected = True
+                spill_bytes += metric_value
+                spill_details.append({
+                    'metric_name': metric_key,
+                    'value': metric_value,
+                    'label': metric_label
+                })
+        
+        # key_metricsからもスピル情報を確認
+        key_metrics = node.get('key_metrics', {})
+        for key_metric_name, key_metric_value in key_metrics.items():
+            if ('spill' in key_metric_name.lower() or 'disk' in key_metric_name.lower()) and key_metric_value > 0:
+                spill_detected = True
+                spill_bytes += key_metric_value
+                spill_details.append({
+                    'metric_name': f"key_metrics.{key_metric_name}",
+                    'value': key_metric_value,
+                    'label': f"Key metric: {key_metric_name}"
+                })
         
         # データスキューの検出（行数とメモリ使用量から推定）
         skew_detected = False
@@ -1267,9 +1318,25 @@ if sorted_nodes:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
         
-        # スピル詳細情報
-        if spill_detected and spill_bytes > 0:
-            print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
+        # スピル詳細情報（強化版）
+        if spill_detected:
+            if spill_bytes > 0:
+                print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
+            
+            # スピルメトリクスの詳細表示（デバッグ用・最初の3ノードのみ）
+            if i < 3 and spill_details:
+                print(f"    🔍 検出されたスピルメトリクス:")
+                for detail in spill_details[:3]:  # 最大3個まで表示
+                    metric_name = detail['metric_name']
+                    value = detail['value']
+                    # メトリクス名を短縮
+                    short_name = metric_name[:60] + "..." if len(metric_name) > 60 else metric_name
+                    if value > 0:
+                        print(f"        📊 {short_name}: {value:,} bytes ({value/1024/1024:.2f} MB)")
+                    else:
+                        print(f"        📊 {short_name}: {value}")
+        elif i < 3:
+            print(f"    💿 スピル: 検出されませんでした（メトリクス数: {len(detailed_metrics)}）")
         
         # ノードIDも表示
         print(f"    🆔 ノードID: {node.get('node_id', 'N/A')}")
