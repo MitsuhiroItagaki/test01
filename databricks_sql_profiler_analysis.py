@@ -290,6 +290,207 @@ print("✅ 関数定義完了: extract_performance_metrics")
 
 # COMMAND ----------
 
+def get_meaningful_node_name(node: Dict[str, Any], extracted_metrics: Dict[str, Any]) -> str:
+    """
+    より意味のあるノード名を取得する関数
+    汎用的な名前（Whole Stage Codegenなど）を具体的な処理名に変換
+    """
+    original_name = node.get('name', '')
+    node_id = node.get('node_id', node.get('id', ''))
+    node_tag = node.get('tag', '')
+    
+    # メタデータから詳細情報を取得
+    metadata = node.get('metadata', [])
+    metadata_info = {}
+    for meta in metadata:
+        key = meta.get('key', '')
+        value = meta.get('value', '')
+        label = meta.get('label', '')
+        if value:
+            metadata_info[key] = value
+    
+    # 1. 汎用的な名前を具体的な名前に置き換え
+    if 'whole stage codegen' in original_name.lower():
+        # より具体的な処理名を推測するためのヒューリスティック
+        
+        # ノードIDベースでの関連性を推測（隣接ID）
+        node_id_num = None
+        try:
+            node_id_num = int(node_id) if node_id else None
+        except:
+            pass
+        
+        if node_id_num:
+            # 同じファイル内の近いIDの具体的な処理を探す
+            all_nodes = extracted_metrics.get('node_metrics', [])
+            nearby_specific_nodes = []
+            
+            for other_node in all_nodes:
+                other_id = other_node.get('node_id', '')
+                other_name = other_node.get('name', '')
+                
+                try:
+                    other_id_num = int(other_id) if other_id else None
+                    if other_id_num and abs(other_id_num - node_id_num) <= 10:  # 近隣10個以内
+                        if is_specific_process_name(other_name):
+                            nearby_specific_nodes.append(other_name)
+                except:
+                    continue
+            
+            # 最も具体的な処理名を選択
+            if nearby_specific_nodes:
+                specific_name = get_most_specific_process_name_from_list(nearby_specific_nodes)
+                if specific_name and specific_name != original_name:
+                    return f"{specific_name} (Whole Stage Codegen)"
+        
+        # フォールバック: tagからより具体的な情報を抽出
+        if 'CODEGEN' in node_tag:
+            # メタデータから子タグ情報を確認
+            child_tag = metadata_info.get('CHILD_TAG', '')
+            if child_tag and child_tag != 'Child':
+                return f"Whole Stage Codegen ({child_tag})"
+    
+    # 2. より具体的なタグ情報をノード名に反映
+    tag_to_name_mapping = {
+        'PHOTON_SHUFFLE_EXCHANGE_SINK_EXEC': 'Photon Shuffle Exchange',
+        'PHOTON_GROUPING_AGG_EXEC': 'Photon Grouping Aggregate', 
+        'UNKNOWN_DATA_SOURCE_SCAN_EXEC': 'Data Source Scan',
+        'HASH_AGGREGATE_EXEC': 'Hash Aggregate',
+        'WHOLE_STAGE_CODEGEN_EXEC': 'Whole Stage Codegen'
+    }
+    
+    if node_tag in tag_to_name_mapping:
+        mapped_name = tag_to_name_mapping[node_tag]
+        if mapped_name != original_name and mapped_name != 'Whole Stage Codegen':
+            # タグの方がより具体的な場合は使用
+            enhanced_name = mapped_name
+        else:
+            enhanced_name = original_name
+    else:
+        enhanced_name = original_name
+    
+    # 3. メタデータから処理の詳細を追加
+    
+    # データベース・テーブル情報を追加
+    if 'SCAN_TABLE' in metadata_info:
+        table_name = metadata_info['SCAN_TABLE']
+        if 'scan' in enhanced_name.lower():
+            enhanced_name = f"Scan {table_name}"
+    
+    # Photon情報を追加
+    if 'IS_PHOTON' in metadata_info and metadata_info['IS_PHOTON'] == 'true':
+        if not enhanced_name.startswith('Photon'):
+            enhanced_name = f"Photon {enhanced_name}"
+    
+    return enhanced_name
+
+def find_related_specific_nodes(target_node_id: str, nodes: list, edges: list) -> list:
+    """指定ノードに関連する具体的な処理ノードを検索"""
+    
+    # エッジから関連ノードを特定
+    related_node_ids = set()
+    
+    # 直接接続されているノード
+    for edge in edges:
+        from_id = edge.get('fromId', '')
+        to_id = edge.get('toId', '')
+        
+        if from_id == target_node_id:
+            related_node_ids.add(to_id)
+        elif to_id == target_node_id:
+            related_node_ids.add(from_id)
+    
+    # 関連ノードの詳細を取得
+    related_nodes = []
+    for node in nodes:
+        node_id = node.get('id', '')
+        if node_id in related_node_ids:
+            node_name = node.get('name', '')
+            # 具体的な処理名を持つノードのみ選択
+            if is_specific_process_name(node_name):
+                related_nodes.append(node)
+    
+    return related_nodes
+
+def is_specific_process_name(name: str) -> bool:
+    """具体的な処理名かどうかを判定"""
+    specific_keywords = [
+        'columnar to row', 'row to columnar', 'filter', 'project', 'join',
+        'aggregate', 'sort', 'exchange', 'broadcast', 'scan', 'union'
+    ]
+    
+    generic_keywords = [
+        'whole stage codegen', 'stage', 'query', 'result'
+    ]
+    
+    name_lower = name.lower()
+    
+    # 具体的なキーワードを含む場合
+    for keyword in specific_keywords:
+        if keyword in name_lower:
+            return True
+    
+    # 汎用的なキーワードのみの場合は除外
+    for keyword in generic_keywords:
+        if keyword in name_lower and len(name_lower.split()) <= 3:
+            return False
+    
+    return True
+
+def get_most_specific_process_name(nodes: list) -> str:
+    """最も具体的な処理名を選択"""
+    if not nodes:
+        return ""
+    
+    # 優先順位: より具体的で意味のある処理名
+    priority_keywords = [
+        'columnar to row', 'row to columnar', 'filter', 'project',
+        'hash join', 'broadcast join', 'sort merge join',
+        'hash aggregate', 'sort aggregate', 'grouping aggregate'
+    ]
+    
+    for keyword in priority_keywords:
+        for node in nodes:
+            node_name = node.get('name', '').lower()
+            if keyword in node_name:
+                return node.get('name', '')
+    
+    # フォールバック: 最初の具体的なノード名
+    for node in nodes:
+        node_name = node.get('name', '')
+        if is_specific_process_name(node_name):
+            return node_name
+    
+    return ""
+
+def get_most_specific_process_name_from_list(node_names: list) -> str:
+    """ノード名のリストから最も具体的な処理名を選択"""
+    if not node_names:
+        return ""
+    
+    # 優先順位: より具体的で意味のある処理名
+    priority_keywords = [
+        'columnar to row', 'row to columnar', 'filter', 'project',
+        'hash join', 'broadcast join', 'sort merge join',
+        'hash aggregate', 'sort aggregate', 'grouping aggregate'
+    ]
+    
+    for keyword in priority_keywords:
+        for name in node_names:
+            if keyword in name.lower():
+                return name
+    
+    # フォールバック: 最初の具体的なノード名
+    for name in node_names:
+        if is_specific_process_name(name):
+            return name
+    
+    return ""
+
+print("✅ 関数定義完了: get_meaningful_node_name")
+
+# COMMAND ----------
+
 def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     """ボトルネック指標を計算"""
     indicators = {}
@@ -1229,8 +1430,9 @@ if sorted_nodes:
         # メモリ使用量のアイコン
         memory_icon = "�" if memory_mb < 100 else "⚠️" if memory_mb < 1000 else "🚨"
         
-        # ノード名を短縮（100バイトまで）
-        node_name = node['name']
+        # より意味のあるノード名を取得
+        raw_node_name = node['name']
+        node_name = get_meaningful_node_name(node, extracted_metrics)
         short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
         
         # 並列度情報の取得
