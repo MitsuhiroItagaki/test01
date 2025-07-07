@@ -157,9 +157,9 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                 "read_files_count": query_metrics.get('readFilesCount', 0),
                 "task_total_time_ms": query_metrics.get('taskTotalTimeMs', 0),
                 "photon_total_time_ms": query_metrics.get('photonTotalTimeMs', 0),
-                # Photon利用状況の分析
+                # Photon利用状況の分析（Photon実行時間/タスク合計時間）
                 "photon_enabled": query_metrics.get('photonTotalTimeMs', 0) > 0,
-                "photon_utilization_ratio": query_metrics.get('photonTotalTimeMs', 0) / max(query_metrics.get('totalTimeMs', 1), 1)
+                "photon_utilization_ratio": min(query_metrics.get('photonTotalTimeMs', 0) / max(query_metrics.get('taskTotalTimeMs', 1), 1), 1.0)
             }
     
     # グラフデータからステージとノードのメトリクスを抽出
@@ -243,11 +243,13 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     if rows_read > 0:
         indicators['data_selectivity'] = rows_produced / rows_read
     
-    # Photon使用率
+    # Photon使用率（タスク実行時間に対する割合）
     task_time = overall.get('task_total_time_ms', 0)
     photon_time = overall.get('photon_total_time_ms', 0)
     if task_time > 0:
-        indicators['photon_ratio'] = photon_time / task_time
+        indicators['photon_ratio'] = min(photon_time / task_time, 1.0)  # 最大100%に制限
+    else:
+        indicators['photon_ratio'] = 0.0
     
     # スピル検出
     spill_bytes = overall.get('spill_to_disk_bytes', 0)
@@ -653,7 +655,8 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
     
     # Photonと並列度の情報を追加
     photon_enabled = metrics['overall_metrics'].get('photon_enabled', False)
-    photon_utilization = metrics['overall_metrics'].get('photon_utilization_ratio', 0) * 100
+    photon_utilization_ratio = metrics['overall_metrics'].get('photon_utilization_ratio', 0)
+    photon_utilization = min(photon_utilization_ratio * 100, 100.0)  # 最大100%に制限
     shuffle_count = metrics['bottleneck_indicators'].get('shuffle_operations_count', 0)
     has_shuffle_bottleneck = metrics['bottleneck_indicators'].get('has_shuffle_bottleneck', False)
     has_low_parallelism = metrics['bottleneck_indicators'].get('has_low_parallelism', False)
@@ -790,7 +793,7 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 
 ## ⚡ Photonエンジン分析
 - **Photon有効**: {'はい' if photon_enabled else 'いいえ'}
-- **Photon利用率**: {photon_utilization:.1f}%
+- **Photon利用率**: {min(photon_utilization, 100.0):.1f}%
 - **推奨**: {'Photon利用率向上が必要' if photon_utilization < 80 else '最適化済み'}
 
 ## � 並列度・シャッフル分析
@@ -910,9 +913,18 @@ print("=" * 50)
 
 # Photon関連指標
 photon_enabled = overall_metrics.get('photon_enabled', False)
-photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
+photon_utilization_ratio = overall_metrics.get('photon_utilization_ratio', 0)
+photon_utilization = min(photon_utilization_ratio * 100, 100.0)  # 最大100%に制限
 photon_emoji = "✅" if photon_enabled and photon_utilization > 80 else "⚠️" if photon_enabled else "❌"
-print(f"{photon_emoji} Photonエンジン: {'有効' if photon_enabled else '無効'} (利用率: {photon_utilization:.1f}%)")
+
+# 利用率に関する詳細情報
+if photon_enabled:
+    photon_total_ms = overall_metrics.get('photon_total_time_ms', 0)
+    task_total_ms = overall_metrics.get('task_total_time_ms', 0)
+    print(f"{photon_emoji} Photonエンジン: 有効 (利用率: {photon_utilization:.1f}%)")
+    print(f"   📊 Photon実行時間: {photon_total_ms:,} ms | タスク合計時間: {task_total_ms:,} ms")
+else:
+    print(f"{photon_emoji} Photonエンジン: 無効")
 
 # 並列度・シャッフル関連指標
 shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
