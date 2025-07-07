@@ -17,19 +17,59 @@
 # MAGIC    - ボトルネック指標の計算
 # MAGIC 
 # MAGIC 3. **AI によるボトルネック分析**
-# MAGIC    - Databricks Claude 3.7 Sonnetエンドポイントを使用
+# MAGIC    - 設定可能なLLMエンドポイント (Databricks, OpenAI, Azure OpenAI, Anthropic)
 # MAGIC    - 抽出メトリクスからボトルネック特定
 # MAGIC    - 具体的な改善案の提示
 # MAGIC 
 # MAGIC ---
 # MAGIC 
 # MAGIC **事前準備:**
-# MAGIC - Databricks Claude 3.7 Sonnetエンドポイントの設定
+# MAGIC - LLMエンドポイントの設定（Databricks Model Serving または 外部API）
+# MAGIC - 必要なAPIキーの設定
 # MAGIC - SQLプロファイラーJSONファイルの準備（DBFS または FileStore）
 
 # COMMAND ----------
 
-# 🔧 設定: 分析対象のJSONファイルパスを指定
+# 🤖 LLMエンドポイント設定
+LLM_CONFIG = {
+    # エンドポイントタイプ: 'databricks', 'openai', 'azure_openai', 'anthropic'
+    "provider": "databricks",
+    
+    # Databricks Model Serving設定
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
+        "max_tokens": 2000,
+        "temperature": 0.1
+    },
+    
+    # OpenAI設定
+    "openai": {
+        "api_key": "",  # OpenAI APIキー (環境変数OPENAI_API_KEYでも可)
+        "model": "gpt-4o",  # gpt-4o, gpt-4-turbo, gpt-3.5-turbo
+        "max_tokens": 2000,
+        "temperature": 0.1
+    },
+    
+    # Azure OpenAI設定
+    "azure_openai": {
+        "api_key": "",  # Azure OpenAI APIキー (環境変数AZURE_OPENAI_API_KEYでも可)
+        "endpoint": "",  # https://your-resource.openai.azure.com/
+        "deployment_name": "",  # デプロイメント名
+        "api_version": "2024-02-01",
+        "max_tokens": 2000,
+        "temperature": 0.1
+    },
+    
+    # Anthropic設定
+    "anthropic": {
+        "api_key": "",  # Anthropic APIキー (環境変数ANTHROPIC_API_KEYでも可)
+        "model": "claude-3-5-sonnet-20241022",  # claude-3-5-sonnet-20241022, claude-3-opus-20240229
+        "max_tokens": 2000,
+        "temperature": 0.1
+    }
+}
+
+# 📁 SQLプロファイラーJSONファイルのパス設定
 JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
 
 # 以下から選択して変更してください:
@@ -37,8 +77,24 @@ JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォル
 # JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/your_username/profiler_log.json'
 # JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/your_username/profiler_log.json'
 
-print("🔧 設定完了")
+print("🤖 LLM・ファイル設定完了")
 print(f"📁 分析対象ファイル: {JSON_FILE_PATH}")
+print(f"🤖 LLMプロバイダー: {LLM_CONFIG['provider']}")
+
+if LLM_CONFIG['provider'] == 'databricks':
+    print(f"🔗 Databricksエンドポイント: {LLM_CONFIG['databricks']['endpoint_name']}")
+elif LLM_CONFIG['provider'] == 'openai':
+    print(f"🔗 OpenAIモデル: {LLM_CONFIG['openai']['model']}")
+elif LLM_CONFIG['provider'] == 'azure_openai':
+    print(f"🔗 Azure OpenAIデプロイメント: {LLM_CONFIG['azure_openai']['deployment_name']}")
+elif LLM_CONFIG['provider'] == 'anthropic':
+    print(f"🔗 Anthropicモデル: {LLM_CONFIG['anthropic']['model']}")
+
+print()
+print("💡 LLMプロバイダー切り替え例:")
+print('   LLM_CONFIG["provider"] = "openai"      # OpenAI GPT-4に切り替え')
+print('   LLM_CONFIG["provider"] = "anthropic"   # Anthropic Claudeに切り替え')
+print('   LLM_CONFIG["provider"] = "azure_openai" # Azure OpenAIに切り替え')
 print()
 
 # 必要なライブラリのインポート
@@ -46,6 +102,7 @@ import json
 import pandas as pd
 from typing import Dict, List, Any
 import requests
+import os
 from pyspark.sql import SparkSession
 
 # PySpark関数を安全にインポート
@@ -631,9 +688,9 @@ print("✅ 関数定義完了: analyze_liquid_clustering_opportunities")
 
 # COMMAND ----------
 
-def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
+def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     """
-    Databricks Claude 3.7 Sonnetエンドポイントを使用してボトルネック分析を行う
+    設定されたLLMエンドポイントを使用してボトルネック分析を行う
     """
     
     # メトリクス要約の準備（簡潔版）
@@ -709,73 +766,22 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 """
     
     try:
-        # Databricks Model Serving APIを使用
-        try:
-            token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-        except Exception:
-            # 代替手段でトークンを取得
-            import os
-            token = os.environ.get('DATABRICKS_TOKEN')
-            if not token:
-                return "❌ Databricksトークンの取得に失敗しました。環境変数DATABRICKS_TOKENを設定するか、dbutils.secrets.get()を使用してください。"
-        
-        try:
-            workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
-        except Exception:
-            workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().get("browserHostName").get()
-        
-        endpoint_url = f"https://{workspace_url}/serving-endpoints/databricks-claude-3-7-sonnet/invocations"
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": analysis_prompt
-                }
-            ],
-            "max_tokens": 2000,
-            "temperature": 0.1
-        }
-        
-        print("🤖 Databricks Claude 3.7 Sonnetエンドポイントに分析リクエストを送信中...")
+        # 設定されたLLMプロバイダーに基づいて分析実行
+        provider = LLM_CONFIG["provider"]
+        print(f"🤖 {provider}エンドポイントに分析リクエストを送信中...")
         print("⏳ 大きなデータのため処理に時間がかかる場合があります...")
         
-        # リトライ機能を追加（最大2回試行）
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    print(f"🔄 リトライ中... (試行 {attempt + 1}/{max_retries})")
-                
-                response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    analysis_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    print("✅ ボトルネック分析が完了しました")
-                    return analysis_text
-                else:
-                    error_msg = f"APIエラー: ステータスコード {response.status_code}"
-                    if attempt == max_retries - 1:  # 最後の試行
-                        print(f"❌ {error_msg}\nレスポンス: {response.text}")
-                        return error_msg
-                    else:
-                        print(f"⚠️ {error_msg} - リトライします...")
-                        continue
-                        
-            except requests.exceptions.Timeout:
-                if attempt == max_retries - 1:  # 最後の試行
-                    timeout_msg = "⏰ タイムアウトエラー: Claude 3.7 Sonnetの応答が180秒以内に完了しませんでした。\n\n【代替案】\n1. Model Servingエンドポイントの設定を確認\n2. より小さなデータセットで再試行\n3. エンドポイントの負荷状況を確認"
-                    print(f"❌ {timeout_msg}")
-                    return timeout_msg
-                else:
-                    print(f"⏰ タイムアウト発生 - リトライします... (試行 {attempt + 1}/{max_retries})")
-                    continue
+        # プロバイダー別の処理
+        if provider == "databricks":
+            return _call_databricks_llm(analysis_prompt)
+        elif provider == "openai":
+            return _call_openai_llm(analysis_prompt)
+        elif provider == "azure_openai":
+            return _call_azure_openai_llm(analysis_prompt)
+        elif provider == "anthropic":
+            return _call_anthropic_llm(analysis_prompt)
+        else:
+            return f"❌ サポートされていないLLMプロバイダー: {provider}"
             
     except Exception as e:
         error_msg = f"分析エラー: {str(e)}"
@@ -783,7 +789,7 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
         
         # フォールバック: 基本的な分析結果を提供
         fallback_analysis = f"""
-🔧 **基本的なボトルネック分析結果** (Claude 3.7 Sonnet利用不可のため簡易版)
+🔧 **基本的なボトルネック分析結果** ({provider} LLM利用不可のため簡易版)
 
 ## 📊 パフォーマンス概要
 - **実行時間**: {total_time_sec:.1f}秒
@@ -826,11 +832,183 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 
 **重要**: パーティショニングやZORDERは使用せず、Liquid Clusteringのみで最適化してください。
 
-**注意**: Claude 3.7 Sonnetエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
+**注意**: {provider} LLMエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
         """
         return fallback_analysis
 
-print("✅ 関数定義完了: analyze_bottlenecks_with_claude")
+def _call_databricks_llm(prompt: str) -> str:
+    """Databricks Model Serving APIを呼び出す"""
+    try:
+        # Databricksトークンの取得
+        try:
+            token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+        except Exception:
+            token = os.environ.get('DATABRICKS_TOKEN')
+            if not token:
+                return "❌ Databricksトークンの取得に失敗しました。環境変数DATABRICKS_TOKENを設定してください。"
+        
+        # ワークスペースURLの取得
+        try:
+            workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
+        except Exception:
+            workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().get("browserHostName").get()
+        
+        config = LLM_CONFIG["databricks"]
+        endpoint_url = f"https://{workspace_url}/serving-endpoints/{config['endpoint_name']}/invocations"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"]
+        }
+        
+        # リトライ機能
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"🔄 リトライ中... (試行 {attempt + 1}/{max_retries})")
+                
+                response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    analysis_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    print("✅ ボトルネック分析が完了しました")
+                    return analysis_text
+                else:
+                    error_msg = f"APIエラー: ステータスコード {response.status_code}"
+                    if attempt == max_retries - 1:
+                        print(f"❌ {error_msg}\nレスポンス: {response.text}")
+                        return error_msg
+                    else:
+                        print(f"⚠️ {error_msg} - リトライします...")
+                        continue
+                        
+            except requests.exceptions.Timeout:
+                if attempt == max_retries - 1:
+                    timeout_msg = "⏰ タイムアウトエラー: Databricksエンドポイントの応答が180秒以内に完了しませんでした。"
+                    print(f"❌ {timeout_msg}")
+                    return timeout_msg
+                else:
+                    print(f"⏰ タイムアウト発生 - リトライします... (試行 {attempt + 1}/{max_retries})")
+                    continue
+                    
+    except Exception as e:
+        return f"Databricks API呼び出しエラー: {str(e)}"
+
+def _call_openai_llm(prompt: str) -> str:
+    """OpenAI APIを呼び出す"""
+    try:
+        config = LLM_CONFIG["openai"]
+        api_key = config["api_key"] or os.environ.get('OPENAI_API_KEY')
+        
+        if not api_key:
+            return "❌ OpenAI APIキーが設定されていません。LLM_CONFIG['openai']['api_key']または環境変数OPENAI_API_KEYを設定してください。"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": config["model"],
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"]
+        }
+        
+        response = requests.post("https://api.openai.com/v1/chat/completions", 
+                               headers=headers, json=payload, timeout=180)
+        
+        if response.status_code == 200:
+            result = response.json()
+            analysis_text = result['choices'][0]['message']['content']
+            print("✅ OpenAI分析が完了しました")
+            return analysis_text
+        else:
+            return f"OpenAI APIエラー: ステータスコード {response.status_code}\n{response.text}"
+            
+    except Exception as e:
+        return f"OpenAI API呼び出しエラー: {str(e)}"
+
+def _call_azure_openai_llm(prompt: str) -> str:
+    """Azure OpenAI APIを呼び出す"""
+    try:
+        config = LLM_CONFIG["azure_openai"]
+        api_key = config["api_key"] or os.environ.get('AZURE_OPENAI_API_KEY')
+        
+        if not api_key or not config["endpoint"] or not config["deployment_name"]:
+            return "❌ Azure OpenAI設定が不完全です。api_key、endpoint、deployment_nameを設定してください。"
+        
+        endpoint_url = f"{config['endpoint']}/openai/deployments/{config['deployment_name']}/chat/completions?api-version={config['api_version']}"
+        
+        headers = {
+            "api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"]
+        }
+        
+        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
+        
+        if response.status_code == 200:
+            result = response.json()
+            analysis_text = result['choices'][0]['message']['content']
+            print("✅ Azure OpenAI分析が完了しました")
+            return analysis_text
+        else:
+            return f"Azure OpenAI APIエラー: ステータスコード {response.status_code}\n{response.text}"
+            
+    except Exception as e:
+        return f"Azure OpenAI API呼び出しエラー: {str(e)}"
+
+def _call_anthropic_llm(prompt: str) -> str:
+    """Anthropic APIを呼び出す"""
+    try:
+        config = LLM_CONFIG["anthropic"]
+        api_key = config["api_key"] or os.environ.get('ANTHROPIC_API_KEY')
+        
+        if not api_key:
+            return "❌ Anthropic APIキーが設定されていません。LLM_CONFIG['anthropic']['api_key']または環境変数ANTHROPIC_API_KEYを設定してください。"
+        
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        
+        payload = {
+            "model": config["model"],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"],
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        
+        response = requests.post("https://api.anthropic.com/v1/messages", 
+                               headers=headers, json=payload, timeout=180)
+        
+        if response.status_code == 200:
+            result = response.json()
+            analysis_text = result['content'][0]['text']
+            print("✅ Anthropic分析が完了しました")
+            return analysis_text
+        else:
+            return f"Anthropic APIエラー: ステータスコード {response.status_code}\n{response.text}"
+            
+    except Exception as e:
+        return f"Anthropic API呼び出しエラー: {str(e)}"
+
+print("✅ 関数定義完了: analyze_bottlenecks_with_llm")
 
 # COMMAND ----------
 
@@ -1326,19 +1504,35 @@ print()
 
 # COMMAND ----------
 
-# 🤖 Databricks Claude 3.7 Sonnetを使用してボトルネック分析
-print("🤖 Claude 3.7 Sonnetによるボトルネック分析を開始します...")
-print("⚠️  Model Servingエンドポイント 'databricks-claude-3-7-sonnet' が必要です")
+# 🤖 設定されたLLMエンドポイントを使用してボトルネック分析
+provider = LLM_CONFIG["provider"]
+if provider == "databricks":
+    endpoint_name = LLM_CONFIG["databricks"]["endpoint_name"]
+    print(f"🤖 Databricks Model Serving ({endpoint_name}) によるボトルネック分析を開始します...")
+    print(f"⚠️  Model Servingエンドポイント '{endpoint_name}' が必要です")
+elif provider == "openai":
+    model = LLM_CONFIG["openai"]["model"]
+    print(f"🤖 OpenAI ({model}) によるボトルネック分析を開始します...")
+    print("⚠️  OpenAI APIキーが必要です")
+elif provider == "azure_openai":
+    deployment = LLM_CONFIG["azure_openai"]["deployment_name"]
+    print(f"🤖 Azure OpenAI ({deployment}) によるボトルネック分析を開始します...")
+    print("⚠️  Azure OpenAI APIキーとエンドポイントが必要です")
+elif provider == "anthropic":
+    model = LLM_CONFIG["anthropic"]["model"]
+    print(f"🤖 Anthropic ({model}) によるボトルネック分析を開始します...")
+    print("⚠️  Anthropic APIキーが必要です")
+
 print("📝 分析プロンプトを簡潔化してタイムアウトリスクを軽減しています...")
 print()
 
-analysis_result = analyze_bottlenecks_with_claude(extracted_metrics)
+analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
 
 # COMMAND ----------
 
 # 📊 分析結果の表示
 print("\n" + "=" * 80)
-print("🎯 【Databricks Claude 3.7 Sonnet による SQLボトルネック分析結果】")
+print(f"🎯 【{provider.upper()} LLM による SQLボトルネック分析結果】")
 print("=" * 80)
 print()
 print(analysis_result)
@@ -1400,13 +1594,16 @@ print("🎉" * 20)
 # MAGIC 
 # MAGIC ### 🎛️ カスタマイズポイント
 # MAGIC 
+# MAGIC - **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
 # MAGIC - **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
-# MAGIC - **分析プロンプト**: `analyze_bottlenecks_with_claude` 関数内の分析指示
+# MAGIC - **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
 # MAGIC - **表示形式**: emoji と出力フォーマットの調整
 # MAGIC 
 # MAGIC ### 🔍 エラー対処方法
 # MAGIC 
-# MAGIC 1. **Claude エンドポイントエラー**: Model Serving で `databricks-claude-3-7-sonnet` が稼働中か確認
+# MAGIC 1. **LLMエンドポイントエラー**: 
+# MAGIC    - Databricks: Model Servingエンドポイントの状態確認
+# MAGIC    - OpenAI/Azure/Anthropic: APIキーとクォータ確認
 # MAGIC 2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
 # MAGIC 3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
 # MAGIC 
@@ -1429,7 +1626,7 @@ print("🎉" * 20)
 # MAGIC 
 # MAGIC ## 🎯 このNotebookの使用方法
 # MAGIC 
-# MAGIC 1. **エンドポイント設定**: Model Serving で `databricks-claude-3-7-sonnet` エンドポイントを作成
+# MAGIC 1. **LLM設定**: セル2で `LLM_CONFIG` のプロバイダーとAPIキーを設定
 # MAGIC 2. **ファイル準備**: SQLプロファイラーJSONファイルをVolumes、FileStore、またはDBFSにアップロード
 # MAGIC 3. **パス設定**: セル2で `JSON_FILE_PATH` を実際のファイルパスに変更
 # MAGIC 4. **実行**: 「Run All」をクリックまたは各セルを順番に実行
