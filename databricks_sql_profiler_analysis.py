@@ -1245,76 +1245,7 @@ if sorted_nodes:
         spill_bytes = 0
         spill_details = []
         
-        # 強化されたデバッグ情報（TOP3ノードのみ）
-        if i < 3:
-            node_id = node.get('node_id', node.get('id', 'N/A'))
-            print(f"    🔍 デバッグ: ノード{i+1} ({node_id}) の詳細メトリクス検査")
-            print(f"        ノード名: {node_name}")
-            print(f"        メトリクス総数: {len(detailed_metrics)}")
-            print(f"        キーメトリクス: {list(node.get('key_metrics', {}).keys())}")
-            
-            # すべてのメトリクス名を確認（デバッグ用）
-            if detailed_metrics:
-                print(f"        利用可能なメトリクス（最初の10個）:")
-                for j, (metric_key, metric_info) in enumerate(list(detailed_metrics.items())[:10]):
-                    metric_value = metric_info.get('value', 0)
-                    print(f"          {j+1}. {metric_key}: {metric_value}")
-            else:
-                print(f"        ⚠️ detailed_metricsが空です")
-                
-                # 生のメトリクス情報を確認
-                raw_metrics = node.get('metrics', [])
-                if raw_metrics:
-                    print(f"        生メトリクス数: {len(raw_metrics)}")
-                    for j, metric in enumerate(raw_metrics[:5]):
-                        metric_key = metric.get('key', '')
-                        metric_value = metric.get('value', 0)
-                        print(f"          生{j+1}. {metric_key}: {metric_value}")
-                else:
-                    print(f"        ⚠️ 生メトリクスも空です")
-            
-            spill_metrics_found = 0
-            for metric_key, metric_info in detailed_metrics.items():
-                metric_value = metric_info.get('value', 0)
-                metric_label = metric_info.get('label', '')
-                
-                # スピル関連キーワードの検査（改良版と同じロジック）
-                metric_key_clean = metric_key.upper().replace(' ', '').replace('-', '').replace('_', '')
-                metric_label_clean = metric_label.upper().replace(' ', '').replace('-', '').replace('_', '')
-                
-                is_spill_related = False
-                spill_keywords = ['SPILL', 'DISK', 'PRESSURE']
-                for keyword in spill_keywords:
-                    if keyword in metric_key_clean or keyword in metric_label_clean:
-                        is_spill_related = True
-                        break
-                
-                # より具体的なスピル関連の組み合わせもチェック
-                spill_combinations = [
-                    ('SPILL', 'DISK'), ('SPILL', 'MEMORY'), ('BYTES', 'SPILL'), 
-                    ('ROWS', 'SPILL'), ('SINK', 'SPILL'), ('SPILL', 'PRESSURE')
-                ]
-                for word1, word2 in spill_combinations:
-                    if (word1 in metric_key_clean and word2 in metric_key_clean) or \
-                       (word1 in metric_label_clean and word2 in metric_label_clean):
-                        is_spill_related = True
-                        break
-                
-                if is_spill_related:
-                    spill_metrics_found += 1
-                    status = "🔴 値あり" if metric_value > 0 else "⚪ 値ゼロ"
-                    print(f"        📊 {status} {metric_key}")
-                    if metric_label and metric_label != metric_key:
-                        print(f"           ラベル: {metric_label}")
-                    if metric_value > 0:
-                        print(f"           値: {metric_value:,} bytes ({metric_value/1024/1024:.2f} MB)")
-                    else:
-                        print(f"           値: {metric_value}")
-            
-            if spill_metrics_found == 0:
-                print(f"        ⚠️ スピル関連メトリクスは見つかりませんでした")
-            else:
-                print(f"        ✅ {spill_metrics_found}個のスピル関連メトリクスを検出")
+
         
         # 強化されたスピル検出ロジック（detailed_metricsと生メトリクスの両方をチェック）
         
@@ -1327,6 +1258,12 @@ if sorted_nodes:
             is_spill_metric = False
             metric_key_clean = metric_key.upper().replace(' ', '').replace('-', '').replace('_', '')
             metric_label_clean = metric_label.upper().replace(' ', '').replace('-', '').replace('_', '')
+            
+            # 時間関連のメトリクスを除外（スピル容量ではない）
+            time_exclusions = ['TIME', 'DURATION', 'ELAPSED', 'LATENCY', 'DELAY']
+            for exclusion in time_exclusions:
+                if exclusion in metric_key_clean or exclusion in metric_label_clean:
+                    return False
             
             # 基本的なスピル関連キーワードの検査
             for pattern in spill_patterns:
@@ -1438,41 +1375,8 @@ if sorted_nodes:
             if spill_bytes > 0:
                 print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
             
-            # スピルメトリクスの詳細表示（デバッグ用・最初の3ノードのみ）
-            if i < 3 and spill_details:
-                print(f"    🔍 検出されたスピルメトリクス ({len(spill_details)}個):")
-                for detail in spill_details[:5]:  # 最大5個まで表示
-                    metric_name = detail['metric_name']
-                    value = detail['value']
-                    source = detail.get('source', 'unknown')
-                    # メトリクス名を短縮
-                    short_name = metric_name[:60] + "..." if len(metric_name) > 60 else metric_name
-                    source_icon = "📊" if source == 'detailed_metrics' else "🔍" if source == 'raw_metrics' else "🔧"
-                    if value > 0:
-                        print(f"        {source_icon} {short_name}: {value:,} bytes ({value/1024/1024:.2f} MB) [{source}]")
-                    else:
-                        print(f"        {source_icon} {short_name}: {value} [{source}]")
-        elif i < 3:
-            # スピル関連メトリクスの存在確認
-            spill_metrics_count = 0
-            for metric_key, metric_info in detailed_metrics.items():
-                metric_label = metric_info.get('label', '')
-                metric_key_clean = metric_key.upper().replace(' ', '').replace('-', '').replace('_', '')
-                metric_label_clean = metric_label.upper().replace(' ', '').replace('-', '').replace('_', '')
-                
-                is_spill_related = False
-                for keyword in ['SPILL', 'DISK', 'PRESSURE']:
-                    if keyword in metric_key_clean or keyword in metric_label_clean:
-                        is_spill_related = True
-                        break
-                        
-                if is_spill_related:
-                    spill_metrics_count += 1
-            
-            if spill_metrics_count > 0:
-                print(f"    💿 スピル: 検出されませんでした（{spill_metrics_count}個のスピル関連メトリクスあり、すべて値ゼロ）")
-            else:
-                print(f"    💿 スピル: 検出されませんでした（スピル関連メトリクスなし、メトリクス総数: {len(detailed_metrics)}）")
+
+
         
         # ノードIDも表示
         print(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
