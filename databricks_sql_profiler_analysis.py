@@ -2554,23 +2554,34 @@ else:
 print("\n💾 ステップ3: 最適化結果の保存")
 print("-" * 40)
 
-# 必要な変数が定義されているかチェック
+# 必要な変数が定義されているかチェックし、デフォルト値を設定
 missing_variables = []
 
+# original_query のチェック
 try:
     original_query
 except NameError:
     missing_variables.append("original_query (セル17を実行してください)")
+    original_query = ""
 
+# optimized_result のチェック  
 try:
     optimized_result
 except NameError:
     missing_variables.append("optimized_result (セル18を実行してください)")
+    optimized_result = ""
 
+# extracted_metrics のチェック
 try:
     extracted_metrics
 except NameError:
     missing_variables.append("extracted_metrics (セル11を実行してください)")
+    # デフォルト値として最小限の構造を設定
+    extracted_metrics = {
+        'query_info': {'query_id': 'unknown'},
+        'overall_metrics': {},
+        'bottleneck_indicators': {}
+    }
 
 if missing_variables:
     print("❌ 必要な変数が定義されていません:")
@@ -2578,10 +2589,13 @@ if missing_variables:
         print(f"   • {var}")
     print("\n⚠️ 上記のセルを先に実行してから、このセルを再実行してください。")
     print("📋 正しい実行順序: セル10 → セル11 → ... → セル17 → セル18 → セル19")
-else:
-    if original_query.strip() and optimized_result:
-        print("📁 ファイル生成中...")
-        
+    print("\n🔄 デフォルト値を使用して処理を継続します。")
+
+# 変数が存在する（またはデフォルト値が設定された）場合の処理
+if original_query.strip() and optimized_result.strip():
+    print("📁 ファイル生成中...")
+    
+    try:
         saved_files = save_optimized_sql_files(
             original_query,
             optimized_result,
@@ -2608,9 +2622,14 @@ else:
             else:
                 print(f"   ⚠️ {filename}: ファイルが見つかりません")
         
-    else:
-        print("⚠️ クエリまたは最適化結果が不完全なため、ファイル保存をスキップしました")
+    except Exception as e:
+        print(f"❌ ファイル生成中にエラーが発生しました: {str(e)}")
+        print("⚠️ 空のファイルリストを設定します。")
         saved_files = {}
+        
+else:
+    print("⚠️ クエリまたは最適化結果が不完全なため、ファイル保存をスキップしました")
+    saved_files = {}
 
 # COMMAND ----------
 
