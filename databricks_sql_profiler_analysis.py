@@ -721,79 +721,54 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
     Databricks Claude 3.7 Sonnetエンドポイントを使用してボトルネック分析を行う
     """
     
-    # メトリクス要約の準備
+    # メトリクス要約の準備（簡潔版）
+    # 主要なメトリクスのみを抽出してリクエストサイズを削減
+    total_time_sec = metrics['overall_metrics'].get('total_time_ms', 0) / 1000
+    read_gb = metrics['overall_metrics'].get('read_bytes', 0) / 1024 / 1024 / 1024
+    cache_ratio = metrics['bottleneck_indicators'].get('cache_hit_ratio', 0) * 100
+    data_selectivity = metrics['bottleneck_indicators'].get('data_selectivity', 0) * 100
+    
+    # Liquid Clustering推奨テーブル（上位3テーブルのみ）
+    top_tables = list(metrics['liquid_clustering_analysis']['recommended_tables'].items())[:3]
+    table_recommendations = [f"- {table}: {', '.join(info['clustering_columns'])}" for table, info in top_tables]
+    
+    # 高インパクトカラム（上位5個のみ）
+    high_impact_cols = [(col, analysis) for col, analysis in metrics['liquid_clustering_analysis']['detailed_column_analysis'].items() 
+                       if analysis.get('performance_impact') == 'high'][:5]
+    high_impact_summary = [f"- {col}: スコア={analysis['total_usage']}, 使用箇所=[{', '.join(analysis['usage_contexts'])}]" 
+                          for col, analysis in high_impact_cols]
+    
     analysis_prompt = f"""
-あなたはDatabricksのSQLパフォーマンス分析の専門家です。以下のSQLプロファイラーメトリクスを分析し、ボトルネックを特定して改善案を提示してください。
+あなたはDatabricksのSQLパフォーマンス分析の専門家です。以下のメトリクスを分析し、ボトルネックを特定して改善案を提示してください。
 
-【分析対象のメトリクス】
-
-クエリ基本情報:
-- クエリID: {metrics['query_info'].get('query_id', 'N/A')}
-- ステータス: {metrics['query_info'].get('status', 'N/A')}
-- 実行ユーザー: {metrics['query_info'].get('user', 'N/A')}
-
-全体パフォーマンス:
-- 総実行時間: {metrics['overall_metrics'].get('total_time_ms', 0):,} ms ({metrics['overall_metrics'].get('total_time_ms', 0)/1000:.2f} sec)
-- コンパイル時間: {metrics['overall_metrics'].get('compilation_time_ms', 0):,} ms
-- 実行時間: {metrics['overall_metrics'].get('execution_time_ms', 0):,} ms
-- 読み込みデータ量: {metrics['overall_metrics'].get('read_bytes', 0):,} bytes ({metrics['overall_metrics'].get('read_bytes', 0)/1024/1024/1024:.2f} GB)
-- キャッシュヒット量: {metrics['overall_metrics'].get('read_cache_bytes', 0):,} bytes ({metrics['overall_metrics'].get('read_cache_bytes', 0)/1024/1024/1024:.2f} GB)
-- 読み込み行数: {metrics['overall_metrics'].get('rows_read_count', 0):,} 行
-- 出力行数: {metrics['overall_metrics'].get('rows_produced_count', 0):,} 行
-- スピルサイズ: {metrics['overall_metrics'].get('spill_to_disk_bytes', 0):,} bytes
-- Photon実行時間: {metrics['overall_metrics'].get('photon_total_time_ms', 0):,} ms
-
-ボトルネック指標:
-- コンパイル時間比率: {metrics['bottleneck_indicators'].get('compilation_ratio', 0):.3f} ({metrics['bottleneck_indicators'].get('compilation_ratio', 0)*100:.1f}%)
-- キャッシュヒット率: {metrics['bottleneck_indicators'].get('cache_hit_ratio', 0):.3f} ({metrics['bottleneck_indicators'].get('cache_hit_ratio', 0)*100:.1f}%)
-- データ選択性: {metrics['bottleneck_indicators'].get('data_selectivity', 0):.3f} ({metrics['bottleneck_indicators'].get('data_selectivity', 0)*100:.1f}%)
-- Photon使用率: {metrics['bottleneck_indicators'].get('photon_ratio', 0):.3f} ({metrics['bottleneck_indicators'].get('photon_ratio', 0)*100:.1f}%)
+【パフォーマンス概要】
+- 実行時間: {total_time_sec:.1f}秒
+- 読み込みデータ: {read_gb:.1f}GB
+- キャッシュ効率: {cache_ratio:.1f}%
+- データ選択性: {data_selectivity:.1f}%
 - スピル発生: {'あり' if metrics['bottleneck_indicators'].get('has_spill', False) else 'なし'}
-- 最も遅いステージID: {metrics['bottleneck_indicators'].get('slowest_stage_id', 'N/A')}
-- 最高メモリ使用ノード: {metrics['bottleneck_indicators'].get('highest_memory_node_name', 'N/A')}
-- 最高メモリ使用量: {metrics['bottleneck_indicators'].get('highest_memory_bytes', 0)/1024/1024:.2f} MB
 
-ステージ詳細:
-{chr(10).join([f"- ステージ{s['stage_id']}: {s['duration_ms']:,}ms, タスク数:{s['num_tasks']}, 完了:{s['num_complete_tasks']}, 失敗:{s['num_failed_tasks']}" for s in metrics['stage_metrics'][:10]])}
+【Liquid Clustering推奨】
+テーブル数: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
+推奨カラム:
+{chr(10).join(table_recommendations)}
 
-主要ノード詳細:
-{chr(10).join([f"- {n['name']} (ID:{n['node_id']}): 行数={n['key_metrics'].get('rowsNum', 0):,}, 時間={n['key_metrics'].get('durationMs', 0):,}ms, メモリ={n['key_metrics'].get('peakMemoryBytes', 0)/1024/1024:.2f}MB" for n in metrics['node_metrics'][:15]])}
+高インパクトカラム:
+{chr(10).join(high_impact_summary)}
 
-【Liquid Clustering推奨分析】
-対象テーブル数: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}
-高インパクトテーブル数: {metrics['liquid_clustering_analysis']['summary'].get('high_impact_tables', 0)}
+【重要指標】
+- 最遅ステージ: {metrics['bottleneck_indicators'].get('slowest_stage_id', 'N/A')}
+- 最高メモリ: {metrics['bottleneck_indicators'].get('highest_memory_bytes', 0)/1024/1024:.0f}MB
+- Photon使用率: {metrics['bottleneck_indicators'].get('photon_ratio', 0)*100:.0f}%
 
-テーブル別推奨クラスタリングカラム:
-{chr(10).join([f"- {table}: {', '.join(info['clustering_columns'])}" for table, info in metrics['liquid_clustering_analysis']['recommended_tables'].items()])}
+【求める分析】
+1. 主要ボトルネックと原因
+2. Liquid Clustering実装の優先順位と手順
+3. 各推奨カラムの選定理由と効果
+4. パフォーマンス改善見込み
+5. 実装時の注意点
 
-カラム使用パターン:
-- フィルターカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['filter_columns']))[:10])}
-- JOINカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['join_columns']))[:10])}
-- GROUP BYカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['groupby_columns']))[:10])}
-
-高インパクトカラム詳細:
-{chr(10).join([f"- {col}: スコア={analysis['total_usage']}, 使用箇所=[{', '.join(analysis['usage_contexts'])}], フィルター={analysis['filter_usage_count']}回, JOIN={analysis['join_usage_count']}回, GROUP BY={analysis['groupby_usage_count']}回" for col, analysis in metrics['liquid_clustering_analysis']['detailed_column_analysis'].items() if analysis.get('performance_impact') == 'high'][:10])}
-
-プッシュダウンフィルター詳細:
-{chr(10).join([f"- ノード: {filter_info['node_name'][:50]} | フィルター: {filter_info['filter_expression'][:80]}" for filter_info in metrics['liquid_clustering_analysis']['pushdown_filters'][:5]])}
-
-パフォーマンス向上見込み:
-- スキャン改善: {metrics['liquid_clustering_analysis']['performance_impact'].get('potential_scan_improvement', 'N/A')}
-- Shuffle削減: {metrics['liquid_clustering_analysis']['performance_impact'].get('potential_shuffle_reduction', 'N/A')}
-- 全体改善: {metrics['liquid_clustering_analysis']['performance_impact'].get('estimated_overall_improvement', 'N/A')}
-
-【分析して欲しい内容】
-1. 主要なボトルネックの特定と原因分析
-2. パフォーマンス改善の優先順位付け
-3. 具体的な最適化案の提示（SQL改善、設定変更、インフラ最適化など）
-4. **Liquid Clustering実装の具体的推奨事項と手順**
-5. **各テーブルのクラスタリングカラム選定理由と期待効果**
-6. **Liquid Clustering導入時の注意点と実装順序**
-7. 予想される改善効果
-8. Photon最適化の推奨事項
-9. 重要な注意点や推奨事項
-
-特に、Liquid Clusteringの実装については詳細な手順と期待効果を含めて、日本語で詳細な分析結果を提供してください。
+簡潔で実践的な改善提案を日本語で提供してください。
 """
     
     try:
@@ -826,27 +801,78 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
                     "content": analysis_prompt
                 }
             ],
-            "max_tokens": 4000,
+            "max_tokens": 2000,
             "temperature": 0.1
         }
         
         print("🤖 Databricks Claude 3.7 Sonnetエンドポイントに分析リクエストを送信中...")
-        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=60)
+        print("⏳ 大きなデータのため処理に時間がかかる場合があります...")
         
-        if response.status_code == 200:
-            result = response.json()
-            analysis_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-            print("✅ ボトルネック分析が完了しました")
-            return analysis_text
-        else:
-            error_msg = f"APIエラー: ステータスコード {response.status_code}\nレスポンス: {response.text}"
-            print(f"❌ {error_msg}")
-            return error_msg
+        # リトライ機能を追加（最大2回試行）
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"🔄 リトライ中... (試行 {attempt + 1}/{max_retries})")
+                
+                response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    analysis_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    print("✅ ボトルネック分析が完了しました")
+                    return analysis_text
+                else:
+                    error_msg = f"APIエラー: ステータスコード {response.status_code}"
+                    if attempt == max_retries - 1:  # 最後の試行
+                        print(f"❌ {error_msg}\nレスポンス: {response.text}")
+                        return error_msg
+                    else:
+                        print(f"⚠️ {error_msg} - リトライします...")
+                        continue
+                        
+            except requests.exceptions.Timeout:
+                if attempt == max_retries - 1:  # 最後の試行
+                    timeout_msg = "⏰ タイムアウトエラー: Claude 3.7 Sonnetの応答が180秒以内に完了しませんでした。\n\n【代替案】\n1. Model Servingエンドポイントの設定を確認\n2. より小さなデータセットで再試行\n3. エンドポイントの負荷状況を確認"
+                    print(f"❌ {timeout_msg}")
+                    return timeout_msg
+                else:
+                    print(f"⏰ タイムアウト発生 - リトライします... (試行 {attempt + 1}/{max_retries})")
+                    continue
             
     except Exception as e:
         error_msg = f"分析エラー: {str(e)}"
         print(f"❌ {error_msg}")
-        return error_msg
+        
+        # フォールバック: 基本的な分析結果を提供
+        fallback_analysis = f"""
+🔧 **基本的なボトルネック分析結果** (Claude 3.7 Sonnet利用不可のため簡易版)
+
+## 📊 パフォーマンス概要
+- **実行時間**: {total_time_sec:.1f}秒
+- **読み込みデータ量**: {read_gb:.1f}GB  
+- **キャッシュ効率**: {cache_ratio:.1f}%
+- **データ選択性**: {data_selectivity:.1f}%
+
+## 🗂️ Liquid Clustering推奨事項
+**対象テーブル数**: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
+
+**推奨実装**:
+{chr(10).join(table_recommendations) if table_recommendations else '- 推奨カラムが見つかりませんでした'}
+
+## ⚠️ 主要な問題点
+- {'メモリスピルが発生しています' if metrics['bottleneck_indicators'].get('has_spill', False) else 'メモリ使用は正常です'}
+- {'キャッシュ効率が低下しています' if cache_ratio < 50 else 'キャッシュ効率は良好です'}
+- {'データ選択性が低く、大量のデータを読み込んでいます' if data_selectivity < 10 else 'データ選択性は適切です'}
+
+## 🚀 推奨アクション
+1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング
+2. **クエリ最適化**: WHERE句の条件を適切に設定
+3. **キャッシュ活用**: よく使用されるテーブルのキャッシュを検討
+
+**注意**: Claude 3.7 Sonnetエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
+        """
+        return fallback_analysis
 
 print("✅ 関数定義完了: analyze_bottlenecks_with_claude")
 
@@ -1094,6 +1120,7 @@ print()
 # 🤖 Databricks Claude 3.7 Sonnetを使用してボトルネック分析
 print("🤖 Claude 3.7 Sonnetによるボトルネック分析を開始します...")
 print("⚠️  Model Servingエンドポイント 'databricks-claude-3-7-sonnet' が必要です")
+print("📝 分析プロンプトを簡潔化してタイムアウトリスクを軽減しています...")
 print()
 
 analysis_result = analyze_bottlenecks_with_claude(extracted_metrics)
