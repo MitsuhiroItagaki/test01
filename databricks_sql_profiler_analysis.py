@@ -41,7 +41,18 @@ from pyspark.sql.types import *
 # Databricks環境の確認
 spark = SparkSession.builder.getOrCreate()
 print(f"✅ Spark Version: {spark.version}")
-print(f"✅ Databricks Runtime: {spark.conf.get('spark.databricks.clusterUsageTags.sparkVersion', 'Unknown')}")
+
+# Databricks Runtime情報を安全に取得
+try:
+    runtime_version = spark.conf.get('spark.databricks.clusterUsageTags.sparkVersion')
+    print(f"✅ Databricks Runtime: {runtime_version}")
+except Exception:
+    try:
+        # 代替手段でDBR情報を取得
+        dbr_version = spark.conf.get('spark.databricks.clusterUsageTags.clusterName', 'Unknown')
+        print(f"✅ Databricks Cluster: {dbr_version}")
+    except Exception:
+        print("✅ Databricks Environment: 設定情報の取得をスキップしました")
 
 # COMMAND ----------
 
