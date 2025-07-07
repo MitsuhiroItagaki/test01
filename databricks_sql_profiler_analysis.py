@@ -2554,38 +2554,63 @@ else:
 print("\n💾 ステップ3: 最適化結果の保存")
 print("-" * 40)
 
-if original_query.strip() and optimized_result:
-    print("📁 ファイル生成中...")
-    
-    saved_files = save_optimized_sql_files(
-        original_query,
-        optimized_result,
-        extracted_metrics
-    )
-    
-    print("✅ 以下のファイルを生成しました:")
-    for file_type, filename in saved_files.items():
-        file_type_jp = {
-            'original_file': 'オリジナルSQLクエリ',
-            'optimized_file': '最適化SQLクエリ',
-            'report_file': '最適化レポート',
-            'test_script': 'テスト実行スクリプト'
-        }
-        print(f"   📄 {file_type_jp.get(file_type, file_type)}: {filename}")
-    
-    # ファイルサイズの確認
-    import os
-    print(f"\n📊 生成ファイルの詳細:")
-    for file_type, filename in saved_files.items():
-        if os.path.exists(filename):
-            file_size = os.path.getsize(filename)
-            print(f"   {filename}: {file_size:,} bytes")
-        else:
-            print(f"   ⚠️ {filename}: ファイルが見つかりません")
-    
+# 必要な変数が定義されているかチェック
+missing_variables = []
+
+try:
+    original_query
+except NameError:
+    missing_variables.append("original_query (セル17を実行してください)")
+
+try:
+    optimized_result
+except NameError:
+    missing_variables.append("optimized_result (セル18を実行してください)")
+
+try:
+    extracted_metrics
+except NameError:
+    missing_variables.append("extracted_metrics (セル11を実行してください)")
+
+if missing_variables:
+    print("❌ 必要な変数が定義されていません:")
+    for var in missing_variables:
+        print(f"   • {var}")
+    print("\n⚠️ 上記のセルを先に実行してから、このセルを再実行してください。")
+    print("📋 正しい実行順序: セル10 → セル11 → ... → セル17 → セル18 → セル19")
 else:
-    print("⚠️ クエリまたは最適化結果が不完全なため、ファイル保存をスキップしました")
-    saved_files = {}
+    if original_query.strip() and optimized_result:
+        print("📁 ファイル生成中...")
+        
+        saved_files = save_optimized_sql_files(
+            original_query,
+            optimized_result,
+            extracted_metrics
+        )
+        
+        print("✅ 以下のファイルを生成しました:")
+        for file_type, filename in saved_files.items():
+            file_type_jp = {
+                'original_file': 'オリジナルSQLクエリ',
+                'optimized_file': '最適化SQLクエリ',
+                'report_file': '最適化レポート',
+                'test_script': 'テスト実行スクリプト'
+            }
+            print(f"   📄 {file_type_jp.get(file_type, file_type)}: {filename}")
+        
+        # ファイルサイズの確認
+        import os
+        print(f"\n📊 生成ファイルの詳細:")
+        for file_type, filename in saved_files.items():
+            if os.path.exists(filename):
+                file_size = os.path.getsize(filename)
+                print(f"   {filename}: {file_size:,} bytes")
+            else:
+                print(f"   ⚠️ {filename}: ファイルが見つかりません")
+        
+    else:
+        print("⚠️ クエリまたは最適化結果が不完全なため、ファイル保存をスキップしました")
+        saved_files = {}
 
 # COMMAND ----------
 
@@ -2603,6 +2628,14 @@ else:
 # 🧪 ステップ4: テスト実行の準備
 print("\n🧪 ステップ4: テスト実行の準備")
 print("-" * 40)
+
+# saved_files変数が定義されているかチェック
+try:
+    saved_files
+except NameError:
+    print("❌ saved_files変数が定義されていません。")
+    print("⚠️ セル19 (最適化結果の保存) を先に実行してください。")
+    saved_files = {}
 
 if saved_files:
     test_script = saved_files.get('test_script', '')
@@ -2659,9 +2692,36 @@ print("✅ LLMによるSQL最適化完了")
 print("✅ 最適化結果ファイル生成完了")
 print("✅ テスト実行スクリプト生成完了")
 
+# 必要な変数が定義されているかチェック
+missing_summary_vars = []
+
+try:
+    output_path
+except NameError:
+    missing_summary_vars.append("output_path (セル13を実行してください)")
+
+try:
+    result_output_path
+except NameError:
+    missing_summary_vars.append("result_output_path (セル15を実行してください)")
+
+try:
+    saved_files
+except NameError:
+    missing_summary_vars.append("saved_files (セル19を実行してください)")
+    saved_files = {}
+
 print(f"\n📁 出力ファイル一覧:")
-print(f"   📄 パフォーマンス分析: {output_path}")
-print(f"   📄 ボトルネック分析レポート: {result_output_path}")
+
+if 'output_path' in globals():
+    print(f"   📄 パフォーマンス分析: {output_path}")
+else:
+    print("   📄 パフォーマンス分析: (セル13を実行してください)")
+
+if 'result_output_path' in globals():
+    print(f"   📄 ボトルネック分析レポート: {result_output_path}")
+else:
+    print("   📄 ボトルネック分析レポート: (セル15を実行してください)")
 
 if saved_files:
     for file_type, filename in saved_files.items():
