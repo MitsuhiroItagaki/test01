@@ -1177,7 +1177,9 @@ if pushdown_filters:
         node_name_display = filter_info.get('node_name', '')
         truncated_node_name = node_name_display[:100] + "..." if len(node_name_display) > 100 else node_name_display
         print(f"   {i+1}. ノード: {truncated_node_name}")
-        print(f"      📋 フィルター: {filter_info.get('filter_expression', '')[:60]}")
+        filter_expression = filter_info.get('filter_expression', '')
+        truncated_filter = filter_expression[:128] + "..." if len(filter_expression) > 128 else filter_expression
+        print(f"      📋 フィルター: {truncated_filter}")
         print(f"      🔧 メトリクス: {filter_info.get('metric_key', '')}")
 
 # SQL実装例
