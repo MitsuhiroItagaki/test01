@@ -156,7 +156,10 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                 "spill_to_disk_bytes": query_metrics.get('spillToDiskBytes', 0),
                 "read_files_count": query_metrics.get('readFilesCount', 0),
                 "task_total_time_ms": query_metrics.get('taskTotalTimeMs', 0),
-                "photon_total_time_ms": query_metrics.get('photonTotalTimeMs', 0)
+                "photon_total_time_ms": query_metrics.get('photonTotalTimeMs', 0),
+                # Photon利用状況の分析
+                "photon_enabled": query_metrics.get('photonTotalTimeMs', 0) > 0,
+                "photon_utilization_ratio": query_metrics.get('photonTotalTimeMs', 0) / max(query_metrics.get('totalTimeMs', 1), 1)
             }
     
     # グラフデータからステージとノードのメトリクスを抽出
@@ -270,6 +273,57 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
         indicators['highest_memory_node_id'] = highest_memory_node[0]
         indicators['highest_memory_node_name'] = highest_memory_node[1]
         indicators['highest_memory_bytes'] = highest_memory_node[2]
+    
+    # 並列度とシャッフル問題の検出
+    shuffle_nodes = []
+    low_parallelism_stages = []
+    
+    # シャッフルノードの特定
+    for node in metrics.get('node_metrics', []):
+        node_name = node.get('name', '').upper()
+        if any(keyword in node_name for keyword in ['SHUFFLE', 'EXCHANGE']):
+            shuffle_nodes.append({
+                'node_id': node['node_id'],
+                'name': node['name'],
+                'duration_ms': node.get('key_metrics', {}).get('durationMs', 0),
+                'rows': node.get('key_metrics', {}).get('rowsNum', 0)
+            })
+    
+    # 低並列度ステージの検出
+    for stage in metrics.get('stage_metrics', []):
+        num_tasks = stage.get('num_tasks', 0)
+        duration_ms = stage.get('duration_ms', 0)
+        
+        # 並列度が低い（タスク数が少ない）かつ実行時間が長いステージ
+        if num_tasks > 0 and num_tasks < 10 and duration_ms > 5000:  # 10タスク未満、5秒以上
+            low_parallelism_stages.append({
+                'stage_id': stage['stage_id'],
+                'num_tasks': num_tasks,
+                'duration_ms': duration_ms,
+                'avg_task_duration': duration_ms / max(num_tasks, 1)
+            })
+    
+    indicators['shuffle_operations_count'] = len(shuffle_nodes)
+    indicators['low_parallelism_stages_count'] = len(low_parallelism_stages)
+    indicators['has_shuffle_bottleneck'] = len(shuffle_nodes) > 0 and any(s['duration_ms'] > 10000 for s in shuffle_nodes)
+    indicators['has_low_parallelism'] = len(low_parallelism_stages) > 0
+    
+    # シャッフルの詳細情報
+    if shuffle_nodes:
+        total_shuffle_time = sum(s['duration_ms'] for s in shuffle_nodes)
+        indicators['total_shuffle_time_ms'] = total_shuffle_time
+        indicators['shuffle_time_ratio'] = total_shuffle_time / max(total_time, 1)
+        
+        # 最も時間のかかるシャッフル操作
+        slowest_shuffle = max(shuffle_nodes, key=lambda x: x['duration_ms'])
+        indicators['slowest_shuffle_duration_ms'] = slowest_shuffle['duration_ms']
+        indicators['slowest_shuffle_node'] = slowest_shuffle['name']
+    
+    # 低並列度の詳細情報
+    if low_parallelism_stages:
+        indicators['low_parallelism_details'] = low_parallelism_stages
+        avg_parallelism = sum(s['num_tasks'] for s in low_parallelism_stages) / len(low_parallelism_stages)
+        indicators['average_low_parallelism'] = avg_parallelism
     
     return indicators
 
@@ -597,6 +651,14 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
     high_impact_summary = [f"- {col}: スコア={analysis['total_usage']}, 使用箇所=[{', '.join(analysis['usage_contexts'])}]" 
                           for col, analysis in high_impact_cols]
     
+    # Photonと並列度の情報を追加
+    photon_enabled = metrics['overall_metrics'].get('photon_enabled', False)
+    photon_utilization = metrics['overall_metrics'].get('photon_utilization_ratio', 0) * 100
+    shuffle_count = metrics['bottleneck_indicators'].get('shuffle_operations_count', 0)
+    has_shuffle_bottleneck = metrics['bottleneck_indicators'].get('has_shuffle_bottleneck', False)
+    has_low_parallelism = metrics['bottleneck_indicators'].get('has_low_parallelism', False)
+    low_parallelism_count = metrics['bottleneck_indicators'].get('low_parallelism_stages_count', 0)
+    
     analysis_prompt = f"""
 あなたはDatabricksのSQLパフォーマンス分析の専門家です。以下のメトリクスを分析し、ボトルネックを特定して改善案を提示してください。
 
@@ -606,6 +668,17 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 - キャッシュ効率: {cache_ratio:.1f}%
 - データ選択性: {data_selectivity:.1f}%
 - スピル発生: {'あり' if metrics['bottleneck_indicators'].get('has_spill', False) else 'なし'}
+
+【Photonエンジン分析】
+- Photon有効: {'はい' if photon_enabled else 'いいえ'}
+- Photon利用率: {photon_utilization:.1f}%
+- Photon推奨: {'既に最適化済み' if photon_utilization > 80 else 'Photon有効化を推奨' if not photon_enabled else 'Photon利用率向上が必要'}
+
+【並列度・シャッフル分析】
+- シャッフル操作: {shuffle_count}回
+- シャッフルボトルネック: {'あり' if has_shuffle_bottleneck else 'なし'}
+- 低並列度ステージ: {low_parallelism_count}個
+- 並列度問題: {'あり' if has_low_parallelism else 'なし'}
 
 【Liquid Clustering推奨】
 テーブル数: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
@@ -621,12 +694,14 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 - Photon使用率: {metrics['bottleneck_indicators'].get('photon_ratio', 0)*100:.0f}%
 
 【求める分析】
-1. 主要ボトルネックと原因
-2. Liquid Clustering実装の優先順位と手順
+1. 主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
+2. Liquid Clustering実装の優先順位と手順（パーティショニング・ZORDER以外）
 3. 各推奨カラムの選定理由と効果
-4. パフォーマンス改善見込み
-5. 実装時の注意点
+4. Photonエンジンの最適化案
+5. 並列度・シャッフル最適化案
+6. パフォーマンス改善見込み
 
+**重要**: パーティショニングやZORDERは提案せず、Liquid Clusteringのみを推奨してください。
 簡潔で実践的な改善提案を日本語で提供してください。
 """
     
@@ -713,7 +788,18 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 - **キャッシュ効率**: {cache_ratio:.1f}%
 - **データ選択性**: {data_selectivity:.1f}%
 
-## 🗂️ Liquid Clustering推奨事項
+## ⚡ Photonエンジン分析
+- **Photon有効**: {'はい' if photon_enabled else 'いいえ'}
+- **Photon利用率**: {photon_utilization:.1f}%
+- **推奨**: {'Photon利用率向上が必要' if photon_utilization < 80 else '最適化済み'}
+
+## � 並列度・シャッフル分析
+- **シャッフル操作**: {shuffle_count}回
+- **シャッフルボトルネック**: {'あり' if has_shuffle_bottleneck else 'なし'}
+- **低並列度ステージ**: {low_parallelism_count}個
+- **並列度問題**: {'あり' if has_low_parallelism else 'なし'}
+
+## �️ Liquid Clustering推奨事項
 **対象テーブル数**: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
 
 **推奨実装**:
@@ -723,11 +809,19 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 - {'メモリスピルが発生しています' if metrics['bottleneck_indicators'].get('has_spill', False) else 'メモリ使用は正常です'}
 - {'キャッシュ効率が低下しています' if cache_ratio < 50 else 'キャッシュ効率は良好です'}
 - {'データ選択性が低く、大量のデータを読み込んでいます' if data_selectivity < 10 else 'データ選択性は適切です'}
+- {'Photonエンジンが無効または利用率が低い' if not photon_enabled or photon_utilization < 50 else 'Photon利用は良好'}
+- {'シャッフルボトルネックが発生' if has_shuffle_bottleneck else 'シャッフル処理は正常'}
+- {'並列度が低いステージが存在' if has_low_parallelism else '並列度は適切'}
 
 ## 🚀 推奨アクション
-1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング
-2. **クエリ最適化**: WHERE句の条件を適切に設定
-3. **キャッシュ活用**: よく使用されるテーブルのキャッシュを検討
+1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング（パーティショニング・ZORDER不使用）
+2. **Photon有効化**: {'Photonエンジンを有効にする' if not photon_enabled else 'Photon設定を最適化'}
+3. **並列度最適化**: {'クラスターサイズ・並列度設定を見直し' if has_low_parallelism else '現在の並列度は適切'}
+4. **シャッフル最適化**: {'JOIN順序・GROUP BY最適化でシャッフル削減' if has_shuffle_bottleneck else 'シャッフル処理は最適'}
+5. **クエリ最適化**: WHERE句の条件を適切に設定
+6. **キャッシュ活用**: よく使用されるテーブルのキャッシュを検討
+
+**重要**: パーティショニングやZORDERは使用せず、Liquid Clusteringのみで最適化してください。
 
 **注意**: Claude 3.7 Sonnetエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
         """
@@ -814,7 +908,35 @@ print("\n" + "=" * 50)
 print("🔍 ボトルネック指標詳細")
 print("=" * 50)
 
+# Photon関連指標
+photon_enabled = overall_metrics.get('photon_enabled', False)
+photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
+photon_emoji = "✅" if photon_enabled and photon_utilization > 80 else "⚠️" if photon_enabled else "❌"
+print(f"{photon_emoji} Photonエンジン: {'有効' if photon_enabled else '無効'} (利用率: {photon_utilization:.1f}%)")
+
+# 並列度・シャッフル関連指標
+shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
+has_shuffle_bottleneck = bottleneck_indicators.get('has_shuffle_bottleneck', False)
+has_low_parallelism = bottleneck_indicators.get('has_low_parallelism', False)
+low_parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
+
+shuffle_emoji = "🚨" if has_shuffle_bottleneck else "⚠️" if shuffle_count > 5 else "✅"
+print(f"{shuffle_emoji} シャッフル操作: {shuffle_count}回 ({'ボトルネックあり' if has_shuffle_bottleneck else '正常'})")
+
+parallelism_emoji = "🚨" if has_low_parallelism else "✅"
+print(f"{parallelism_emoji} 並列度: {'問題あり' if has_low_parallelism else '適切'} (低並列度ステージ: {low_parallelism_count}個)")
+
+print()
+print("📊 その他の指標:")
+
 for key, value in bottleneck_indicators.items():
+    # 新しく追加した指標は上記で表示済みなのでスキップ
+    if key in ['shuffle_operations_count', 'has_shuffle_bottleneck', 'has_low_parallelism', 
+               'low_parallelism_stages_count', 'total_shuffle_time_ms', 'shuffle_time_ratio',
+               'slowest_shuffle_duration_ms', 'slowest_shuffle_node', 'low_parallelism_details',
+               'average_low_parallelism']:
+        continue
+        
     if 'ratio' in key:
         emoji = "📊" if value < 0.1 else "⚠️" if value < 0.3 else "🚨"
         print(f"{emoji} {key}: {value:.3f} ({value*100:.1f}%)")
