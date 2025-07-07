@@ -276,55 +276,77 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
         "filter_columns": [],
         "join_columns": [],
         "groupby_columns": [],
+        "pushdown_filters": [],
         "data_skew_indicators": {},
         "performance_impact": {},
+        "detailed_column_analysis": {},
         "summary": {}
     }
     
-    # クエリテキストの解析
+    # クエリテキストの解析（強化版）
     query_text = metrics.get('query_info', {}).get('query_text', '').upper()
     
     if query_text:
-        # WHERE句からフィルターカラムを抽出
+        # 強化されたWHERE句パターン（完全なスキーマ.テーブル.カラム形式に対応）
         where_patterns = [
-            r'WHERE\s+(\w+\.\w+|\w+)\s*[=<>!]',
-            r'AND\s+(\w+\.\w+|\w+)\s*[=<>!]',
-            r'OR\s+(\w+\.\w+|\w+)\s*[=<>!]'
+            r'WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',  # schema.table.column
+            r'WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',  # table.column
+            r'WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',  # column
+            r'AND\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',
+            r'AND\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',
+            r'AND\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',
+            r'OR\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',
+            r'OR\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',
+            r'OR\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]'
         ]
         for pattern in where_patterns:
             matches = re.findall(pattern, query_text)
             clustering_analysis["filter_columns"].extend([col.strip() for col in matches])
         
-        # JOIN句からキーカラムを抽出
+        # 強化されたJOIN句パターン
         join_patterns = [
-            r'JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)',
-            r'LEFT\s+JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)',
-            r'INNER\s+JOIN\s+\w+\s+\w*\s*ON\s+(\w+\.\w+|\w+)\s*=\s*(\w+\.\w+|\w+)'
+            r'JOIN\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s+[a-zA-Z_][a-zA-Z0-9_]*\s*ON\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)',
+            r'LEFT\s+JOIN\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s+[a-zA-Z_][a-zA-Z0-9_]*\s*ON\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)',
+            r'INNER\s+JOIN\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*\s+[a-zA-Z_][a-zA-Z0-9_]*\s*ON\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)'
         ]
         for pattern in join_patterns:
             matches = re.findall(pattern, query_text)
             for match in matches:
                 clustering_analysis["join_columns"].extend([col.strip() for col in match])
         
-        # GROUP BY句からグルーピングカラムを抽出
-        groupby_pattern = r'GROUP\s+BY\s+((?:\w+\.\w+|\w+)(?:\s*,\s*(?:\w+\.\w+|\w+))*)'
+        # 強化されたGROUP BY句パターン
+        groupby_pattern = r'GROUP\s+BY\s+((?:[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*(?:\s*,\s*)?)+)'
         groupby_matches = re.findall(groupby_pattern, query_text)
         for match in groupby_matches:
-            cols = [col.strip() for col in match.split(',')]
+            cols = [col.strip() for col in re.split(r'\s*,\s*', match) if col.strip()]
             clustering_analysis["groupby_columns"].extend(cols)
     
-    # ノードメトリクスからデータスキューとパーティション情報を分析
+    # ノードメトリクスからデータスキューとパーティション情報を分析（強化版）
     node_metrics = metrics.get('node_metrics', [])
     table_scan_nodes = []
     join_nodes = []
     shuffle_nodes = []
+    filter_nodes = []
     
     for node in node_metrics:
         node_name = node.get('name', '').upper()
         node_tag = node.get('tag', '').upper()
+        detailed_metrics = node.get('detailed_metrics', {})
         
-        # テーブルスキャンノードの特定
-        if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN', 'PARQUET']):
+        # プッシュダウンフィルターの抽出
+        for metric_key, metric_info in detailed_metrics.items():
+            if any(filter_keyword in metric_key.upper() for filter_keyword in ['FILTER', 'PREDICATE', 'CONDITION']):
+                filter_value = metric_info.get('label', '') or str(metric_info.get('value', ''))
+                if filter_value:
+                    clustering_analysis["pushdown_filters"].append({
+                        "node_id": node.get('node_id', ''),
+                        "node_name": node_name,
+                        "filter_expression": filter_value,
+                        "metric_key": metric_key
+                    })
+        
+        # テーブルスキャンノードの特定（詳細分析）
+        if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN', 'PARQUET', 'DELTA']):
             table_scan_nodes.append(node)
             
             # データスキュー指標の計算
@@ -332,52 +354,166 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
             rows_num = key_metrics.get('rowsNum', 0)
             duration_ms = key_metrics.get('durationMs', 0)
             
-            # ノード名からテーブル名を抽出
-            table_match = re.search(r'(\w+\.\w+|\w+)', node_name)
-            table_name = table_match.group(1) if table_match else f"table_{node.get('node_id', 'unknown')}"
+            # 強化されたテーブル名抽出（完全スキーマ対応）
+            table_patterns = [
+                r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)',  # schema.table.subtable
+                r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)',  # schema.table
+                r'([a-zA-Z_][a-zA-Z0-9_]*)'  # table
+            ]
+            
+            table_name = None
+            for pattern in table_patterns:
+                table_match = re.search(pattern, node_name)
+                if table_match:
+                    table_name = table_match.group(1)
+                    break
+            
+            if not table_name:
+                table_name = f"table_{node.get('node_id', 'unknown')}"
+            
+            # 詳細メトリクスからフィルター条件情報を抽出
+            filter_info = []
+            column_references = []
+            
+            for metric_key, metric_info in detailed_metrics.items():
+                label = metric_info.get('label', '')
+                if label:
+                    # カラム参照の抽出
+                    column_matches = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)', label)
+                    column_references.extend(column_matches)
+                    
+                    # フィルター条件の抽出
+                    if any(op in label for op in ['=', '<', '>', '<=', '>=', '!=', 'IN', 'LIKE']):
+                        filter_info.append(label)
             
             clustering_analysis["data_skew_indicators"][table_name] = {
                 "rows_scanned": rows_num,
                 "scan_duration_ms": duration_ms,
                 "avg_rows_per_ms": rows_num / max(duration_ms, 1),
-                "node_name": node_name
+                "node_name": node_name,
+                "node_id": node.get('node_id', ''),
+                "filter_conditions": filter_info,
+                "column_references": list(set(column_references))
             }
+            
+            # カラム参照をフィルターカラムに追加
+            clustering_analysis["filter_columns"].extend(column_references)
+        
+        # フィルターノードの特定
+        elif any(keyword in node_name for keyword in ['FILTER']):
+            filter_nodes.append(node)
         
         # JOINノードの特定
         elif any(keyword in node_name for keyword in ['JOIN', 'HASH']):
             join_nodes.append(node)
+            
+            # JOIN条件の詳細抽出
+            for metric_key, metric_info in detailed_metrics.items():
+                label = metric_info.get('label', '')
+                if label and '=' in label:
+                    # JOIN条件からカラムを抽出
+                    join_cols = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)', label)
+                    clustering_analysis["join_columns"].extend(join_cols)
         
         # Shuffleノードの特定
         elif any(keyword in node_name for keyword in ['SHUFFLE', 'EXCHANGE']):
             shuffle_nodes.append(node)
     
-    # 各テーブルの推奨クラスタリングカラムを決定
+    # 詳細なカラム分析の実行
     all_columns = set()
     all_columns.update(clustering_analysis["filter_columns"])
     all_columns.update(clustering_analysis["join_columns"])
     all_columns.update(clustering_analysis["groupby_columns"])
     
-    # テーブル毎の推奨事項
-    for table_name, skew_info in clustering_analysis["data_skew_indicators"].items():
-        table_columns = [col for col in all_columns if '.' not in col or col.startswith(table_name.split('.')[0])]
+    # カラム別の詳細分析
+    for column in all_columns:
+        column_analysis = {
+            "filter_usage_count": clustering_analysis["filter_columns"].count(column),
+            "join_usage_count": clustering_analysis["join_columns"].count(column),
+            "groupby_usage_count": clustering_analysis["groupby_columns"].count(column),
+            "total_usage": 0,
+            "usage_contexts": [],
+            "associated_tables": set(),
+            "performance_impact": "low"
+        }
         
-        # カラムの重要度スコア計算
+        # 使用回数の合計計算
+        column_analysis["total_usage"] = (
+            column_analysis["filter_usage_count"] * 3 +
+            column_analysis["join_usage_count"] * 2 +
+            column_analysis["groupby_usage_count"] * 1
+        )
+        
+        # 使用コンテキストの記録
+        if column_analysis["filter_usage_count"] > 0:
+            column_analysis["usage_contexts"].append("WHERE/Filter条件")
+        if column_analysis["join_usage_count"] > 0:
+            column_analysis["usage_contexts"].append("JOIN条件")
+        if column_analysis["groupby_usage_count"] > 0:
+            column_analysis["usage_contexts"].append("GROUP BY")
+        
+        # 関連テーブルの特定
+        column_parts = column.split('.')
+        if len(column_parts) >= 2:
+            if len(column_parts) == 3:  # schema.table.column
+                table_name = f"{column_parts[0]}.{column_parts[1]}"
+                column_analysis["associated_tables"].add(table_name)
+            else:  # table.column
+                column_analysis["associated_tables"].add(column_parts[0])
+        
+        # パフォーマンス影響度の評価
+        if column_analysis["total_usage"] >= 6:
+            column_analysis["performance_impact"] = "high"
+        elif column_analysis["total_usage"] >= 3:
+            column_analysis["performance_impact"] = "medium"
+        
+        clustering_analysis["detailed_column_analysis"][column] = column_analysis
+    
+    # テーブル毎の推奨事項（強化版）
+    for table_name, skew_info in clustering_analysis["data_skew_indicators"].items():
+        # テーブルに関連するカラムの特定（より柔軟なマッチング）
+        table_columns = []
+        table_parts = table_name.split('.')
+        
+        for col in all_columns:
+            col_parts = col.split('.')
+            # 完全一致または部分一致でテーブル関連カラムを特定
+            if len(col_parts) >= 2:
+                if len(col_parts) == 3 and len(table_parts) >= 2:  # schema.table.column
+                    if f"{col_parts[0]}.{col_parts[1]}" == table_name:
+                        table_columns.append(col)
+                elif len(col_parts) == 2:  # table.column
+                    if col_parts[0] in table_name or table_name.endswith(col_parts[0]):
+                        table_columns.append(col)
+            else:
+                # カラム名のみの場合、ノードのカラム参照と照合
+                if col in skew_info.get("column_references", []):
+                    table_columns.append(col)
+        
+        # ノードから直接抽出されたカラム参照も追加
+        table_columns.extend(skew_info.get("column_references", []))
+        table_columns = list(set(table_columns))  # 重複除去
+        
+        # カラムの重要度スコア計算（詳細版）
         column_scores = {}
         for col in table_columns:
-            score = 0
             clean_col = col.split('.')[-1] if '.' in col else col
             
-            # フィルター条件での使用頻度
-            score += clustering_analysis["filter_columns"].count(col) * 3
-            
-            # JOIN条件での使用頻度
-            score += clustering_analysis["join_columns"].count(col) * 2
-            
-            # GROUP BY での使用頻度
-            score += clustering_analysis["groupby_columns"].count(col) * 1
+            # 詳細分析からスコアを取得
+            if col in clustering_analysis["detailed_column_analysis"]:
+                analysis = clustering_analysis["detailed_column_analysis"][col]
+                score = analysis["total_usage"]
+            else:
+                # フォールバック計算
+                score = (clustering_analysis["filter_columns"].count(col) * 3 +
+                        clustering_analysis["join_columns"].count(col) * 2 +
+                        clustering_analysis["groupby_columns"].count(col) * 1)
             
             if score > 0:
                 column_scores[clean_col] = score
+        
+        # フィルター条件情報も含める
+        filter_conditions = skew_info.get("filter_conditions", [])
         
         # 上位カラムを推奨
         if column_scores:
@@ -391,6 +527,12 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
                     "rows_scanned": skew_info["rows_scanned"],
                     "scan_duration_ms": skew_info["scan_duration_ms"],
                     "efficiency_score": skew_info["avg_rows_per_ms"]
+                },
+                "node_details": {
+                    "node_id": skew_info.get("node_id", ""),
+                    "node_name": skew_info.get("node_name", ""),
+                    "filter_conditions": filter_conditions,
+                    "column_references": skew_info.get("column_references", [])
                 }
             }
     
@@ -479,6 +621,12 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
 - フィルターカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['filter_columns']))[:10])}
 - JOINカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['join_columns']))[:10])}
 - GROUP BYカラム: {', '.join(list(set(metrics['liquid_clustering_analysis']['groupby_columns']))[:10])}
+
+高インパクトカラム詳細:
+{chr(10).join([f"- {col}: スコア={analysis['total_usage']}, 使用箇所=[{', '.join(analysis['usage_contexts'])}], フィルター={analysis['filter_usage_count']}回, JOIN={analysis['join_usage_count']}回, GROUP BY={analysis['groupby_usage_count']}回" for col, analysis in metrics['liquid_clustering_analysis']['detailed_column_analysis'].items() if analysis.get('performance_impact') == 'high'][:10])}
+
+プッシュダウンフィルター詳細:
+{chr(10).join([f"- ノード: {filter_info['node_name'][:50]} | フィルター: {filter_info['filter_expression'][:80]}" for filter_info in metrics['liquid_clustering_analysis']['pushdown_filters'][:5]])}
 
 パフォーマンス向上見込み:
 - スキャン改善: {metrics['liquid_clustering_analysis']['performance_impact'].get('potential_scan_improvement', 'N/A')}
@@ -735,10 +883,11 @@ print(f"   📈 スキャン改善: {performance_impact.get('potential_scan_impr
 print(f"   🔀 Shuffle削減: {performance_impact.get('potential_shuffle_reduction', 'N/A')}")
 print(f"   🏆 全体改善: {performance_impact.get('estimated_overall_improvement', 'N/A')}")
 
-# カラム使用統計
+# カラム使用統計（詳細版）
 filter_cols = set(liquid_analysis.get('filter_columns', []))
 join_cols = set(liquid_analysis.get('join_columns', []))
 groupby_cols = set(liquid_analysis.get('groupby_columns', []))
+detailed_column_analysis = liquid_analysis.get('detailed_column_analysis', {})
 
 if filter_cols or join_cols or groupby_cols:
     print(f"\n🔍 カラム使用パターン:")
@@ -748,6 +897,28 @@ if filter_cols or join_cols or groupby_cols:
         print(f"   🔗 JOINカラム ({len(join_cols)}個): {', '.join(list(join_cols)[:5])}")
     if groupby_cols:
         print(f"   📊 GROUP BYカラム ({len(groupby_cols)}個): {', '.join(list(groupby_cols)[:5])}")
+
+# 高インパクトカラムの詳細表示
+high_impact_columns = {col: analysis for col, analysis in detailed_column_analysis.items() 
+                      if analysis.get('performance_impact') == 'high'}
+
+if high_impact_columns:
+    print(f"\n⭐ 高インパクトカラム詳細:")
+    for col, analysis in list(high_impact_columns.items())[:5]:
+        usage_contexts = ', '.join(analysis.get('usage_contexts', []))
+        total_usage = analysis.get('total_usage', 0)
+        print(f"   🎯 {col}")
+        print(f"      📈 重要度スコア: {total_usage} | 使用箇所: {usage_contexts}")
+        print(f"      📊 フィルター:{analysis.get('filter_usage_count', 0)} | JOIN:{analysis.get('join_usage_count', 0)} | GROUP BY:{analysis.get('groupby_usage_count', 0)}")
+
+# プッシュダウンフィルター情報
+pushdown_filters = liquid_analysis.get('pushdown_filters', [])
+if pushdown_filters:
+    print(f"\n🔍 プッシュダウンフィルター ({len(pushdown_filters)}件):")
+    for i, filter_info in enumerate(pushdown_filters[:3]):
+        print(f"   {i+1}. ノード: {filter_info.get('node_name', '')[:30]}")
+        print(f"      📋 フィルター: {filter_info.get('filter_expression', '')[:60]}")
+        print(f"      🔧 メトリクス: {filter_info.get('metric_key', '')}")
 
 # SQL実装例
 if recommended_tables:
