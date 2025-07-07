@@ -35,8 +35,15 @@ import pandas as pd
 from typing import Dict, List, Any
 import requests
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import *
-from pyspark.sql.types import *
+
+# PySpark関数を安全にインポート
+try:
+    from pyspark.sql.functions import col, lit, when
+    from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
+    print("✅ PySpark関数のインポート完了")
+except ImportError as e:
+    print(f"⚠️ PySpark関数のインポートをスキップ: {e}")
+    # 基本的な分析には影響しないためスキップ
 
 # Databricks環境の確認
 spark = SparkSession.builder.getOrCreate()
@@ -310,8 +317,19 @@ def analyze_bottlenecks_with_claude(metrics: Dict[str, Any]) -> str:
     
     try:
         # Databricks Model Serving APIを使用
-        token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-        workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
+        try:
+            token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+        except Exception:
+            # 代替手段でトークンを取得
+            import os
+            token = os.environ.get('DATABRICKS_TOKEN')
+            if not token:
+                return "❌ Databricksトークンの取得に失敗しました。環境変数DATABRICKS_TOKENを設定するか、dbutils.secrets.get()を使用してください。"
+        
+        try:
+            workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
+        except Exception:
+            workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().get("browserHostName").get()
         
         endpoint_url = f"https://{workspace_url}/serving-endpoints/databricks-claude-3-7-sonnet/invocations"
         
@@ -392,7 +410,9 @@ print()
 profiler_data = load_profiler_json(JSON_FILE_PATH)
 if not profiler_data:
     print("❌ JSONファイルの読み込みに失敗しました。ファイルパスを確認してください。")
-    dbutils.notebook.exit("File loading failed")
+    print("⚠️ 処理を停止します。")
+    # dbutils.notebook.exit("File loading failed")  # 安全のためコメントアウト
+    raise RuntimeError("JSONファイルの読み込みに失敗しました。")
 
 print(f"✅ データ読み込み完了")
 print()
@@ -462,8 +482,15 @@ print(f"✅ 抽出メトリクスを保存しました: {output_path}")
 if extracted_metrics['stage_metrics']:
     print("\n🎭 ステージメトリクス (DataFrame)")
     print("=" * 40)
-    stage_df = spark.createDataFrame(extracted_metrics['stage_metrics'])
-    stage_df.show(truncate=False)
+    try:
+        stage_df = spark.createDataFrame(extracted_metrics['stage_metrics'])
+        stage_df.show(truncate=False)
+    except Exception as e:
+        print(f"⚠️ SparkDataFrame表示をスキップ: {e}")
+        # 代替としてPandasで表示
+        import pandas as pd
+        stage_pd_df = pd.DataFrame(extracted_metrics['stage_metrics'])
+        print(stage_pd_df.to_string(index=False))
 
 # ノードメトリクスの概要
 print(f"\n🏗️ ノードメトリクス概要（上位10件）")
