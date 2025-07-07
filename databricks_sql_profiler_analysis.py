@@ -1233,9 +1233,34 @@ if sorted_nodes:
         spill_bytes = 0
         spill_details = []
         
-        # デバッグ: 利用可能なメトリクス名を確認（TOP10表示の最初の3ノードのみ）
+        # 強化されたデバッグ情報（TOP3ノードのみ）
         if i < 3:
-            print(f"    🔍 デバッグ: ノード{i+1} ({node['node_id']}) のスピル関連メトリクス検査")
+            node_id = node.get('node_id', node.get('id', 'N/A'))
+            print(f"    🔍 デバッグ: ノード{i+1} ({node_id}) の詳細メトリクス検査")
+            print(f"        ノード名: {node_name}")
+            print(f"        メトリクス総数: {len(detailed_metrics)}")
+            print(f"        キーメトリクス: {list(node.get('key_metrics', {}).keys())}")
+            
+            # すべてのメトリクス名を確認（デバッグ用）
+            if detailed_metrics:
+                print(f"        利用可能なメトリクス（最初の10個）:")
+                for j, (metric_key, metric_info) in enumerate(list(detailed_metrics.items())[:10]):
+                    metric_value = metric_info.get('value', 0)
+                    print(f"          {j+1}. {metric_key}: {metric_value}")
+            else:
+                print(f"        ⚠️ detailed_metricsが空です")
+                
+                # 生のメトリクス情報を確認
+                raw_metrics = node.get('metrics', [])
+                if raw_metrics:
+                    print(f"        生メトリクス数: {len(raw_metrics)}")
+                    for j, metric in enumerate(raw_metrics[:5]):
+                        metric_key = metric.get('key', '')
+                        metric_value = metric.get('value', 0)
+                        print(f"          生{j+1}. {metric_key}: {metric_value}")
+                else:
+                    print(f"        ⚠️ 生メトリクスも空です")
+            
             spill_metrics_found = 0
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
@@ -1279,11 +1304,10 @@ if sorted_nodes:
             else:
                 print(f"        ✅ {spill_metrics_found}個のスピル関連メトリクスを検出")
         
-        # スピル検出ロジック（実際の検出処理）
-        for metric_key, metric_info in detailed_metrics.items():
-            metric_value = metric_info.get('value', 0)
-            metric_label = metric_info.get('label', '')
-            
+        # 強化されたスピル検出ロジック（detailed_metricsと生メトリクスの両方をチェック）
+        
+        def check_spill_metric(metric_key, metric_label, metric_value):
+            """スピルメトリクスかどうかを判定する共通関数"""
             # より具体的なスピル関連メトリクスの検出パターン（改良版）
             spill_patterns = ['SPILL', 'DISK', 'PRESSURE']
             
@@ -1314,17 +1338,45 @@ if sorted_nodes:
                     is_spill_metric = True
                     break
             
+            return is_spill_metric
+        
+        # 1. detailed_metricsからのスピル検出
+        for metric_key, metric_info in detailed_metrics.items():
+            metric_value = metric_info.get('value', 0)
+            metric_label = metric_info.get('label', '')
+            
             # スピルメトリクスが検出され、値が0より大きい場合
-            if is_spill_metric and metric_value > 0:
+            if check_spill_metric(metric_key, metric_label, metric_value) and metric_value > 0:
                 spill_detected = True
                 spill_bytes += metric_value
                 spill_details.append({
                     'metric_name': metric_key,
                     'value': metric_value,
-                    'label': metric_label
+                    'label': metric_label,
+                    'source': 'detailed_metrics'
                 })
         
-        # key_metricsからもスピル情報を確認
+        # 2. フォールバック: 生メトリクスからの直接検出（detailed_metricsが不完全な場合）
+        raw_metrics = node.get('metrics', [])
+        for metric in raw_metrics:
+            metric_key = metric.get('key', '')
+            metric_label = metric.get('label', '')
+            metric_value = metric.get('value', 0)
+            
+            # 既にdetailed_metricsで処理済みかチェック
+            already_processed = any(detail['metric_name'] == metric_key for detail in spill_details)
+            
+            if not already_processed and check_spill_metric(metric_key, metric_label, metric_value) and metric_value > 0:
+                spill_detected = True
+                spill_bytes += metric_value
+                spill_details.append({
+                    'metric_name': metric_key,
+                    'value': metric_value,
+                    'label': metric_label,
+                    'source': 'raw_metrics'
+                })
+        
+        # 3. key_metricsからもスピル情報を確認
         key_metrics = node.get('key_metrics', {})
         for key_metric_name, key_metric_value in key_metrics.items():
             if ('spill' in key_metric_name.lower() or 'disk' in key_metric_name.lower()) and key_metric_value > 0:
@@ -1333,7 +1385,8 @@ if sorted_nodes:
                 spill_details.append({
                     'metric_name': f"key_metrics.{key_metric_name}",
                     'value': key_metric_value,
-                    'label': f"Key metric: {key_metric_name}"
+                    'label': f"Key metric: {key_metric_name}",
+                    'source': 'key_metrics'
                 })
         
         # データスキューの検出（行数とメモリ使用量から推定）
@@ -1375,16 +1428,18 @@ if sorted_nodes:
             
             # スピルメトリクスの詳細表示（デバッグ用・最初の3ノードのみ）
             if i < 3 and spill_details:
-                print(f"    🔍 検出されたスピルメトリクス:")
-                for detail in spill_details[:3]:  # 最大3個まで表示
+                print(f"    🔍 検出されたスピルメトリクス ({len(spill_details)}個):")
+                for detail in spill_details[:5]:  # 最大5個まで表示
                     metric_name = detail['metric_name']
                     value = detail['value']
+                    source = detail.get('source', 'unknown')
                     # メトリクス名を短縮
                     short_name = metric_name[:60] + "..." if len(metric_name) > 60 else metric_name
+                    source_icon = "📊" if source == 'detailed_metrics' else "🔍" if source == 'raw_metrics' else "🔧"
                     if value > 0:
-                        print(f"        📊 {short_name}: {value:,} bytes ({value/1024/1024:.2f} MB)")
+                        print(f"        {source_icon} {short_name}: {value:,} bytes ({value/1024/1024:.2f} MB) [{source}]")
                     else:
-                        print(f"        📊 {short_name}: {value}")
+                        print(f"        {source_icon} {short_name}: {value} [{source}]")
         elif i < 3:
             # スピル関連メトリクスの存在確認
             spill_metrics_count = 0
@@ -1408,7 +1463,7 @@ if sorted_nodes:
                 print(f"    💿 スピル: 検出されませんでした（スピル関連メトリクスなし、メトリクス総数: {len(detailed_metrics)}）")
         
         # ノードIDも表示
-        print(f"    🆔 ノードID: {node.get('node_id', 'N/A')}")
+        print(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
         print()
         
 else:
