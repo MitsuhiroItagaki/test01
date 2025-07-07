@@ -2211,7 +2211,12 @@ original_query = extract_original_query_from_profiler_data(profiler_data)
 if original_query:
     print(f"✅ オリジナルクエリを抽出しました ({len(original_query)} 文字)")
     print(f"🔍 クエリプレビュー:")
-    preview = original_query[:200] + "..." if len(original_query) > 200 else original_query
+    # 64KB (65536文字) まで表示
+    max_display_chars = 65536
+    if len(original_query) > max_display_chars:
+        preview = original_query[:max_display_chars] + f"\n... (残り {len(original_query) - max_display_chars} 文字は省略)"
+    else:
+        preview = original_query
     print(f"   {preview}")
 else:
     print("⚠️ オリジナルクエリが見つかりませんでした")
@@ -2249,18 +2254,21 @@ if original_query.strip():
     
     if optimized_result and not optimized_result.startswith("⚠️"):
         print("✅ SQL最適化が完了しました")
-        print(f"📄 最適化結果の概要:")
+        print(f"📄 最適化結果の詳細:")
         
-        # 最適化結果の概要を表示
+        # 最適化結果の詳細を表示（1000行まで）
         lines = optimized_result.split('\n')
-        summary_lines = []
-        for line in lines[:10]:  # 最初の10行のみ
-            if line.strip():
-                summary_lines.append(f"   {line}")
+        max_display_lines = 1000
         
-        print('\n'.join(summary_lines))
-        if len(lines) > 10:
-            print(f"   ... (全{len(lines)}行、詳細は保存ファイルを確認)")
+        if len(lines) <= max_display_lines:
+            # 全行表示
+            for line in lines:
+                print(f"   {line}")
+        else:
+            # 1000行まで表示
+            for line in lines[:max_display_lines]:
+                print(f"   {line}")
+            print(f"   ... (残り {len(lines) - max_display_lines} 行は省略、詳細は保存ファイルを確認)")
         
     else:
         print(f"❌ SQL最適化に失敗しました")
