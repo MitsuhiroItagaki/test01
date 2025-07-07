@@ -1014,19 +1014,68 @@ if extracted_metrics['stage_metrics']:
         stage_pd_df = pd.DataFrame(extracted_metrics['stage_metrics'])
         print(stage_pd_df.to_string(index=False))
 
-# ノードメトリクスの概要
-print(f"\n🏗️ ノードメトリクス概要（上位10件）")
-print("=" * 50)
-for i, node in enumerate(extracted_metrics['node_metrics'][:10]):
-    rows_num = node['key_metrics'].get('rowsNum', 0)
-    duration_ms = node['key_metrics'].get('durationMs', 0)
-    memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
+# 🐌 最も時間がかかっている処理TOP10
+print(f"\n🐌 最も時間がかかっている処理TOP10")
+print("=" * 80)
+
+# ノードを実行時間でソート
+sorted_nodes = sorted(extracted_metrics['node_metrics'], 
+                     key=lambda x: x['key_metrics'].get('durationMs', 0), 
+                     reverse=True)
+
+if sorted_nodes:
+    # 全体の実行時間を計算
+    total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
     
-    # 時間とメモリに基づいてアイコンを選択
-    time_icon = "🟢" if duration_ms < 1000 else "🟡" if duration_ms < 10000 else "🔴"
-    memory_icon = "💚" if memory_mb < 100 else "💛" if memory_mb < 1000 else "❤️"
+    print(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
+    print(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes[:10]):,} ms")
+    print()
     
-    print(f"{i+1:2d}. {time_icon}{memory_icon} {node['name'][:40]:40} | 行数: {rows_num:>8,} | 時間: {duration_ms:>6,}ms | メモリ: {memory_mb:>6.1f}MB")
+    for i, node in enumerate(sorted_nodes[:10]):
+        rows_num = node['key_metrics'].get('rowsNum', 0)
+        duration_ms = node['key_metrics'].get('durationMs', 0)
+        memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
+        
+        # 全体に対する時間の割合を計算
+        time_percentage = (duration_ms / max(total_duration, 1)) * 100
+        
+        # 時間の重要度に基づいてアイコンを選択
+        if duration_ms >= 10000:  # 10秒以上
+            time_icon = "�"
+            severity = "CRITICAL"
+        elif duration_ms >= 5000:  # 5秒以上
+            time_icon = "🟠"
+            severity = "HIGH"
+        elif duration_ms >= 1000:  # 1秒以上
+            time_icon = "🟡"
+            severity = "MEDIUM"
+        else:
+            time_icon = "�"
+            severity = "LOW"
+        
+        # メモリ使用量のアイコン
+        memory_icon = "�" if memory_mb < 100 else "⚠️" if memory_mb < 1000 else "🚨"
+        
+        # ノード名を短縮（重要部分を抽出）
+        node_name = node['name']
+        short_name = node_name[:45] + "..." if len(node_name) > 45 else node_name
+        
+        print(f"{i+1:2d}. {time_icon}{memory_icon} [{severity:8}] {short_name:50}")
+        print(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
+        print(f"    📊 処理行数: {rows_num:>8,} 行")
+        print(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
+        
+        # 効率性指標（行/秒）を計算
+        if duration_ms > 0:
+            rows_per_sec = (rows_num * 1000) / duration_ms
+            print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
+        
+        # ノードIDも表示
+        print(f"    🆔 ノードID: {node.get('node_id', 'N/A')}")
+        print()
+        
+else:
+    print("⚠️ ノードメトリクスが見つかりませんでした")
 
 print()
 
