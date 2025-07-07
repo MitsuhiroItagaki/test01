@@ -396,67 +396,67 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
             if not table_name:
                 table_name = f"table_{node.get('node_id', 'unknown')}"
             
-                         # 詳細メトリクスからフィルター条件情報を抽出（フィルター強化）
-             filter_info = []
-             column_references = []
-             
-             # メトリクス名として除外するキーワード
-             excluded_metric_keywords = [
-                 'TIME', 'MEMORY', 'BYTES', 'DURATION', 'PEAK', 'OUTPUT', 'INPUT', 'ROWS', 'FILES',
-                 'TASK', 'STAGE', 'EXECUTION', 'CUMULATIVE', 'EXCLUSIVE', 'SPILLTODISK', 'REMOTE',
-                 'CACHE', 'PHOTON', 'COMPILATION', 'TOTAL', 'READ', 'WRITE', 'PRODUCED', 'COUNT',
-                 'SIZE', 'SPILL', 'DISK', 'NETWORK', 'CPU', 'WALL'
-             ]
-             
-             print(f"🔍 デバッグ: テーブル{table_name}のノード詳細メトリクス分析")
-             
-             for metric_key, metric_info in detailed_metrics.items():
-                 label = metric_info.get('label', '')
-                 metric_type = metric_info.get('type', '')
-                 
-                 print(f"   メトリクス: {metric_key} = {label} (タイプ: {metric_type})")
-                 
-                 if label and len(label) > 0:
-                     # SQLクエリやフィルター条件らしいラベルのみを対象にする
-                     if any(op in label for op in ['=', '<', '>', '<=', '>=', '!=', 'IN', 'LIKE', 'BETWEEN']):
-                         filter_info.append(label)
-                         print(f"     → フィルター条件として追加: {label}")
-                         
-                         # フィルター条件からカラム名を抽出
-                         # WHERE句的な条件からカラム名を抽出
-                         for pattern in [
-                             r'([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*){2})\s*[=<>!]',  # schema.table.column
-                             r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',  # table.column  
-                             r'([a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]'  # column
-                         ]:
-                             matches = re.findall(pattern, label, re.IGNORECASE)
-                             for match in matches:
-                                 # メトリクス名を除外
-                                 if not any(keyword in match.upper() for keyword in excluded_metric_keywords):
-                                     # カラム名らしい形式（_skで終わる、日付関連など）をより重視
-                                     if ('_sk' in match.lower() or 'date' in match.lower() or 
-                                         '_id' in match.lower() or '_key' in match.lower() or
-                                         len(match.split('.')) >= 2):  # テーブル修飾されている
-                                         column_references.append(match.lower())
-                                         print(f"       → カラム参照として追加: {match}")
-                     
-                     # 明示的にSQLカラム名パターンを抽出（フィルター条件以外でも）
-                     sql_column_patterns = [
-                         r'([a-zA-Z_][a-zA-Z0-9_]*_sk)',  # _skで終わるカラム（サロゲートキー）
-                         r'([a-zA-Z_][a-zA-Z0-9_]*_date)',  # _dateで終わるカラム
-                         r'([a-zA-Z_][a-zA-Z0-9_]*_id)',  # _idで終わるカラム
-                         r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*_sk)',  # 完全修飾_sk
-                         r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*_date)'  # 完全修飾_date
-                     ]
-                     
-                     for pattern in sql_column_patterns:
-                         matches = re.findall(pattern, label, re.IGNORECASE)
-                         for match in matches:
-                             column_references.append(match.lower())
-                             print(f"       → SQLカラムパターンとして追加: {match}")
-             
-             # 重複除去
-             column_references = list(set(column_references))
+            # 詳細メトリクスからフィルター条件情報を抽出（フィルター強化）
+            filter_info = []
+            column_references = []
+            
+            # メトリクス名として除外するキーワード
+            excluded_metric_keywords = [
+                'TIME', 'MEMORY', 'BYTES', 'DURATION', 'PEAK', 'OUTPUT', 'INPUT', 'ROWS', 'FILES',
+                'TASK', 'STAGE', 'EXECUTION', 'CUMULATIVE', 'EXCLUSIVE', 'SPILLTODISK', 'REMOTE',
+                'CACHE', 'PHOTON', 'COMPILATION', 'TOTAL', 'READ', 'WRITE', 'PRODUCED', 'COUNT',
+                'SIZE', 'SPILL', 'DISK', 'NETWORK', 'CPU', 'WALL'
+            ]
+            
+            print(f"🔍 デバッグ: テーブル{table_name}のノード詳細メトリクス分析")
+            
+            for metric_key, metric_info in detailed_metrics.items():
+                label = metric_info.get('label', '')
+                metric_type = metric_info.get('type', '')
+                
+                print(f"   メトリクス: {metric_key} = {label} (タイプ: {metric_type})")
+                
+                if label and len(label) > 0:
+                    # SQLクエリやフィルター条件らしいラベルのみを対象にする
+                    if any(op in label for op in ['=', '<', '>', '<=', '>=', '!=', 'IN', 'LIKE', 'BETWEEN']):
+                        filter_info.append(label)
+                        print(f"     → フィルター条件として追加: {label}")
+                        
+                        # フィルター条件からカラム名を抽出
+                        # WHERE句的な条件からカラム名を抽出
+                        for pattern in [
+                            r'([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*){2})\s*[=<>!]',  # schema.table.column
+                            r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]',  # table.column  
+                            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*[=<>!]'  # column
+                        ]:
+                            matches = re.findall(pattern, label, re.IGNORECASE)
+                            for match in matches:
+                                # メトリクス名を除外
+                                if not any(keyword in match.upper() for keyword in excluded_metric_keywords):
+                                    # カラム名らしい形式（_skで終わる、日付関連など）をより重視
+                                    if ('_sk' in match.lower() or 'date' in match.lower() or 
+                                        '_id' in match.lower() or '_key' in match.lower() or
+                                        len(match.split('.')) >= 2):  # テーブル修飾されている
+                                        column_references.append(match.lower())
+                                        print(f"       → カラム参照として追加: {match}")
+                    
+                    # 明示的にSQLカラム名パターンを抽出（フィルター条件以外でも）
+                    sql_column_patterns = [
+                        r'([a-zA-Z_][a-zA-Z0-9_]*_sk)',  # _skで終わるカラム（サロゲートキー）
+                        r'([a-zA-Z_][a-zA-Z0-9_]*_date)',  # _dateで終わるカラム
+                        r'([a-zA-Z_][a-zA-Z0-9_]*_id)',  # _idで終わるカラム
+                        r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*_sk)',  # 完全修飾_sk
+                        r'([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*_date)'  # 完全修飾_date
+                    ]
+                    
+                    for pattern in sql_column_patterns:
+                        matches = re.findall(pattern, label, re.IGNORECASE)
+                        for match in matches:
+                            column_references.append(match.lower())
+                            print(f"       → SQLカラムパターンとして追加: {match}")
+            
+            # 重複除去
+            column_references = list(set(column_references))
             
             clustering_analysis["data_skew_indicators"][table_name] = {
                 "rows_scanned": rows_num,
@@ -468,22 +468,22 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
                 "column_references": list(set(column_references))
             }
             
-                         # カラム参照をフィルターカラムに追加（メトリクス名を除外）
-             valid_column_references = []
-             for col_ref in column_references:
-                 # メトリクス名を除外
-                 if not any(keyword in col_ref.upper() for keyword in excluded_metric_keywords):
-                     # SQLカラム名らしい形式を優先
-                     if (col_ref.endswith('_sk') or col_ref.endswith('_date') or col_ref.endswith('_id') or 
-                         col_ref.endswith('_key') or '.' in col_ref or len(col_ref) > 10):
-                         valid_column_references.append(col_ref)
-                         print(f"     → 有効なカラム参照: {col_ref}")
-                     else:
-                         print(f"     → 除外（SQLカラム名ではない）: {col_ref}")
-                 else:
-                     print(f"     → 除外（メトリクス名）: {col_ref}")
-             
-             clustering_analysis["filter_columns"].extend(valid_column_references)
+            # カラム参照をフィルターカラムに追加（メトリクス名を除外）
+            valid_column_references = []
+            for col_ref in column_references:
+                # メトリクス名を除外
+                if not any(keyword in col_ref.upper() for keyword in excluded_metric_keywords):
+                    # SQLカラム名らしい形式を優先
+                    if (col_ref.endswith('_sk') or col_ref.endswith('_date') or col_ref.endswith('_id') or 
+                        col_ref.endswith('_key') or '.' in col_ref or len(col_ref) > 10):
+                        valid_column_references.append(col_ref)
+                        print(f"     → 有効なカラム参照: {col_ref}")
+                    else:
+                        print(f"     → 除外（SQLカラム名ではない）: {col_ref}")
+                else:
+                    print(f"     → 除外（メトリクス名）: {col_ref}")
+            
+            clustering_analysis["filter_columns"].extend(valid_column_references)
         
         # フィルターノードの特定
         elif any(keyword in node_name for keyword in ['FILTER']):
@@ -656,31 +656,31 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
         # フィルター条件情報も含める
         filter_conditions = skew_info.get("filter_conditions", [])
         
-                 # 上位カラムを推奨
-         if column_scores:
-             sorted_columns = sorted(column_scores.items(), key=lambda x: x[1], reverse=True)
-             recommended_cols = [col for col, score in sorted_columns[:4]]  # 最大4カラム
-             
-             print(f"   📊 カラムスコア: {dict(sorted_columns)}")
-             print(f"   🏆 推奨カラム: {recommended_cols}")
-             
-             clustering_analysis["recommended_tables"][table_name] = {
-                 "clustering_columns": recommended_cols,
-                 "column_scores": column_scores,
-                 "scan_performance": {
-                     "rows_scanned": skew_info["rows_scanned"],
-                     "scan_duration_ms": skew_info["scan_duration_ms"],
-                     "efficiency_score": skew_info["avg_rows_per_ms"]
-                 },
-                 "node_details": {
-                     "node_id": skew_info.get("node_id", ""),
-                     "node_name": skew_info.get("node_name", ""),
-                     "filter_conditions": filter_conditions,
-                     "column_references": valid_node_refs  # 有効な参照のみ保存
-                 }
-             }
-         else:
-             print(f"   ⚠️ 有効なカラムスコアが見つかりませんでした")
+        # 上位カラムを推奨
+        if column_scores:
+            sorted_columns = sorted(column_scores.items(), key=lambda x: x[1], reverse=True)
+            recommended_cols = [col for col, score in sorted_columns[:4]]  # 最大4カラム
+            
+            print(f"   📊 カラムスコア: {dict(sorted_columns)}")
+            print(f"   🏆 推奨カラム: {recommended_cols}")
+            
+            clustering_analysis["recommended_tables"][table_name] = {
+                "clustering_columns": recommended_cols,
+                "column_scores": column_scores,
+                "scan_performance": {
+                    "rows_scanned": skew_info["rows_scanned"],
+                    "scan_duration_ms": skew_info["scan_duration_ms"],
+                    "efficiency_score": skew_info["avg_rows_per_ms"]
+                },
+                "node_details": {
+                    "node_id": skew_info.get("node_id", ""),
+                    "node_name": skew_info.get("node_name", ""),
+                    "filter_conditions": filter_conditions,
+                    "column_references": valid_node_refs  # 有効な参照のみ保存
+                }
+            }
+        else:
+            print(f"   ⚠️ 有効なカラムスコアが見つかりませんでした")
     
     # パフォーマンス向上の見込み評価
     total_scan_time = sum(info["scan_duration_ms"] for info in clustering_analysis["data_skew_indicators"].values())
