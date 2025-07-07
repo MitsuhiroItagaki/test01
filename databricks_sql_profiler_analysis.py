@@ -249,19 +249,31 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                         "key_metrics": node.get('keyMetrics', {})
                     }
                     
-                    # 重要なメトリクスのみ詳細抽出（スピル関連キーワード追加）
+                    # 重要なメトリクスのみ詳細抽出（スピル関連キーワード追加・label対応）
                     detailed_metrics = {}
                     for metric in node.get('metrics', []):
                         metric_key = metric.get('key', '')
-                        # スピル関連のキーワードを追加
-                        if any(keyword in metric_key.upper() for keyword in 
-                               ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE', 
-                                'SPILL', 'DISK', 'PRESSURE', 'SINK']):
-                            detailed_metrics[metric_key] = {
+                        metric_label = metric.get('label', '')
+                        
+                        # キーワードをkeyとlabelの両方で確認
+                        key_keywords = ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE', 
+                                       'SPILL', 'DISK', 'PRESSURE', 'SINK']
+                        
+                        # metric_keyまたはmetric_labelに重要なキーワードが含まれる場合に抽出
+                        is_important_metric = (
+                            any(keyword in metric_key.upper() for keyword in key_keywords) or
+                            any(keyword in metric_label.upper() for keyword in key_keywords)
+                        )
+                        
+                        if is_important_metric:
+                            # メトリクス名として、labelが有効な場合はlabelを使用、そうでなければkeyを使用
+                            metric_name = metric_label if metric_label and metric_label != 'UNKNOWN_KEY' else metric_key
+                            detailed_metrics[metric_name] = {
                                 'value': metric.get('value', 0),
-                                'label': metric.get('label', ''),
+                                'label': metric_label,
                                 'type': metric.get('metricType', ''),
-                                'full_key': metric_key  # 完全なキー名を保存
+                                'original_key': metric_key,  # 元のキー名を保存
+                                'display_name': metric_name  # 表示用の名前
                             }
                     node_metric['detailed_metrics'] = detailed_metrics
                     metrics["node_metrics"].append(node_metric)
