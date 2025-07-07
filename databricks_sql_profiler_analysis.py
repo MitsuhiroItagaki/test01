@@ -981,19 +981,131 @@ except Exception as e:
     print(f"⚠️ メトリクス保存でエラーが発生しましたがスキップします: {e}")
     print("✅ 分析は正常に継続されます")
 
-# SparkDataFrameとしても表示
+# ステージメトリクスの詳細分析
 if extracted_metrics['stage_metrics']:
-    print("\n🎭 ステージメトリクス (DataFrame)")
-    print("=" * 40)
+    print("\n🎭 ステージ実行分析")
+    print("=" * 60)
+    
+    stage_metrics = extracted_metrics['stage_metrics']
+    total_stages = len(stage_metrics)
+    completed_stages = len([s for s in stage_metrics if s.get('status') == 'COMPLETE'])
+    failed_stages = len([s for s in stage_metrics if s.get('num_failed_tasks', 0) > 0])
+    
+    print(f"📊 ステージ概要: 全{total_stages}ステージ (完了:{completed_stages}, 失敗タスクあり:{failed_stages})")
+    print()
+    
+    # ステージを実行時間でソート
+    sorted_stages = sorted(stage_metrics, key=lambda x: x.get('duration_ms', 0), reverse=True)
+    
+    print("⏱️ ステージ実行時間ランキング:")
+    print("-" * 60)
+    
+    for i, stage in enumerate(sorted_stages[:5]):  # TOP5ステージのみ表示
+        stage_id = stage.get('stage_id', 'N/A')
+        status = stage.get('status', 'UNKNOWN')
+        duration_ms = stage.get('duration_ms', 0)
+        num_tasks = stage.get('num_tasks', 0)
+        failed_tasks = stage.get('num_failed_tasks', 0)
+        complete_tasks = stage.get('num_complete_tasks', 0)
+        
+        # ステータスに応じたアイコン
+        if status == 'COMPLETE' and failed_tasks == 0:
+            status_icon = "✅"
+        elif failed_tasks > 0:
+            status_icon = "⚠️"
+        else:
+            status_icon = "❓"
+        
+        # 並列度アイコン
+        parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
+        
+        # 実行時間の重要度
+        if duration_ms >= 10000:
+            time_icon = "🔴"
+            severity = "CRITICAL"
+        elif duration_ms >= 5000:
+            time_icon = "🟠"
+            severity = "HIGH"
+        elif duration_ms >= 1000:
+            time_icon = "🟡"
+            severity = "MEDIUM"
+        else:
+            time_icon = "🟢"
+            severity = "LOW"
+        
+        print(f"{i+1}. {status_icon}{parallelism_icon}{time_icon} ステージ {stage_id} [{severity:8}]")
+        print(f"   ⏱️ 実行時間: {duration_ms:,} ms ({duration_ms/1000:.1f} sec)")
+        print(f"   🔧 タスク: {complete_tasks}/{num_tasks} 完了 (失敗: {failed_tasks})")
+        
+        # タスクあたりの平均時間
+        if num_tasks > 0:
+            avg_task_time = duration_ms / num_tasks
+            print(f"   📊 平均タスク時間: {avg_task_time:.1f} ms")
+        
+        # 効率性評価
+        if num_tasks > 0:
+            task_efficiency = "高効率" if num_tasks >= 10 and failed_tasks == 0 else "要改善" if failed_tasks > 0 else "標準"
+            print(f"   🎯 効率性: {task_efficiency}")
+        
+        print()
+    
+    if len(sorted_stages) > 5:
+        print(f"... 他 {len(sorted_stages) - 5} ステージ")
+    
+    # 問題のあるステージのハイライト
+    problematic_stages = [s for s in stage_metrics if s.get('num_failed_tasks', 0) > 0 or s.get('duration_ms', 0) > 30000]
+    if problematic_stages:
+        print("\n🚨 注意が必要なステージ:")
+        print("-" * 40)
+        for stage in problematic_stages[:3]:
+            stage_id = stage.get('stage_id', 'N/A')
+            duration_sec = stage.get('duration_ms', 0) / 1000
+            failed_tasks = stage.get('num_failed_tasks', 0)
+            
+            issues = []
+            if failed_tasks > 0:
+                issues.append(f"失敗タスク{failed_tasks}個")
+            if duration_sec > 30:
+                issues.append(f"長時間実行({duration_sec:.1f}sec)")
+            
+            print(f"   ⚠️ ステージ {stage_id}: {', '.join(issues)}")
+    
+    # DataFrame形式での詳細データ（オプション）
+    print(f"\n📋 詳細データ (DataFrame形式):")
+    print("-" * 40)
     try:
-        stage_df = spark.createDataFrame(extracted_metrics['stage_metrics'])
-        stage_df.show(truncate=False)
-    except Exception as e:
-        print(f"⚠️ SparkDataFrame表示をスキップ: {e}")
-        # 代替としてPandasで表示
         import pandas as pd
-        stage_pd_df = pd.DataFrame(extracted_metrics['stage_metrics'])
-        print(stage_pd_df.to_string(index=False))
+        # データを整理してわかりやすく表示
+        display_data = []
+        for stage in stage_metrics:
+            display_data.append({
+                'ステージID': stage.get('stage_id', 'N/A'),
+                'ステータス': stage.get('status', 'UNKNOWN'),
+                '実行時間(秒)': round(stage.get('duration_ms', 0) / 1000, 1),
+                'タスク数': stage.get('num_tasks', 0),
+                '完了タスク': stage.get('num_complete_tasks', 0),
+                '失敗タスク': stage.get('num_failed_tasks', 0),
+                '平均タスク時間(ms)': round(stage.get('duration_ms', 0) / max(stage.get('num_tasks', 1), 1), 1)
+            })
+        
+        df = pd.DataFrame(display_data)
+        df = df.sort_values('実行時間(秒)', ascending=False)
+        print(df.to_string(index=False))
+        
+    except Exception as e:
+        print(f"⚠️ DataFrame表示をスキップ: {e}")
+        # シンプルな表形式で表示
+        print(f"{'ステージID':<10} {'実行時間':<10} {'タスク':<8} {'失敗':<6} {'ステータス'}")
+        print("-" * 50)
+        for stage in sorted_stages:
+            stage_id = str(stage.get('stage_id', 'N/A'))[:8]
+            duration_sec = stage.get('duration_ms', 0) / 1000
+            num_tasks = stage.get('num_tasks', 0)
+            failed = stage.get('num_failed_tasks', 0)
+            status = stage.get('status', 'UNKNOWN')[:8]
+            print(f"{stage_id:<10} {duration_sec:<10.1f} {num_tasks:<8} {failed:<6} {status}")
+    
+    print()
 
 # 🐌 最も時間がかかっている処理TOP10
 print(f"\n🐌 最も時間がかかっている処理TOP10")
