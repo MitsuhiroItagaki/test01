@@ -2104,7 +2104,11 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     # テスト実行用スクリプトの作成
     test_script_filename = f"test_optimized_query_{query_id}_{timestamp}.py"
     with open(test_script_filename, 'w', encoding='utf-8') as f:
-        f.write(f"""#!/usr/bin/env python3
+        # f-stringの中で三重引用符を含む場合のエスケープ処理
+        escaped_original_query = original_query.replace('"""', '\\"""')
+        escaped_optimized_sql = optimized_sql.replace('"""', '\\"""') if optimized_sql else '-- SQLコードが抽出できませんでした'
+        
+        test_script_content = f"""#!/usr/bin/env python3
 \"\"\"
 最適化されたSQLクエリのテスト実行スクリプト
 生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -2131,7 +2135,7 @@ def test_optimized_query():
     # オリジナルクエリの実行（オプション）
     print("\\n📊 オリジナルクエリの実行...")
     original_sql = \"\"\"
-{original_query.replace('"""', '"""')}
+{escaped_original_query}
     \"\"\"
     
     start_time = time.time()
@@ -2150,7 +2154,7 @@ def test_optimized_query():
     # 最適化されたクエリの実行
     print("\\n🚀 最適化されたクエリの実行...")
     optimized_sql = \"\"\"
-{optimized_sql.replace('"""', '"""') if optimized_sql else '-- SQLコードが抽出できませんでした'}
+{escaped_optimized_sql}
     \"\"\"
     
     start_time = time.time()
@@ -2179,7 +2183,8 @@ def test_optimized_query():
 
 if __name__ == "__main__":
     test_optimized_query()
-""")
+"""
+        f.write(test_script_content)
     
     return {
         'original_file': original_filename,
