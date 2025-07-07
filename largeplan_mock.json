@@ -1,0 +1,85 @@
+{
+  "query": {
+    "metrics": {
+      "spillToDiskBytes": 5000000000,
+      "totalTimeMs": 180000
+    }
+  },
+  "graphs": [
+    {
+      "nodes": [
+        {
+          "id": "large_shuffle_1",
+          "name": "Large Shuffle Exchange Sink",
+          "hidden": false,
+          "keyMetrics": {
+            "rowsNum": 10000000,
+            "durationMs": 45000,
+            "peakMemoryBytes": 8589934592
+          },
+          "metrics": [
+            {
+              "key": "Sink - Num bytes spilled to disk due to memory pressure",
+              "label": "Number of bytes spilled to disk due to memory pressure",
+              "value": 2147483648,
+              "metricType": "SIZE_METRIC_BYTES"
+            },
+            {
+              "key": "Sink - Num rows spilled to disk due to memory pressure",
+              "label": "Number of rows spilled to disk due to memory pressure",
+              "value": 500000,
+              "metricType": "UNKNOWN_TYPE"
+            },
+            {
+              "key": "Sink - Num spills to disk due to memory pressure",
+              "label": "Number of spills to disk due to memory pressure",
+              "value": 5,
+              "metricType": "UNKNOWN_TYPE"
+            }
+          ]
+        },
+        {
+          "id": "large_aggregate_1",
+          "name": "Large Grouping Aggregate",
+          "hidden": false,
+          "keyMetrics": {
+            "rowsNum": 5000000,
+            "durationMs": 60000,
+            "peakMemoryBytes": 4294967296
+          },
+          "metrics": [
+            {
+              "key": "Num bytes spilled to disk due to memory pressure",
+              "label": "Number of bytes spilled to disk due to memory pressure",
+              "value": 1073741824,
+              "metricType": "SIZE_METRIC_BYTES"
+            },
+            {
+              "key": "Num rows spilled to disk due to memory pressure",
+              "label": "Number of rows spilled to disk due to memory pressure",
+              "value": 250000,
+              "metricType": "UNKNOWN_TYPE"
+            }
+          ]
+        },
+        {
+          "id": "normal_scan_1",
+          "name": "Scan large_table",
+          "hidden": false,
+          "keyMetrics": {
+            "rowsNum": 100000000,
+            "durationMs": 30000
+          },
+          "metrics": [
+            {
+              "key": "Size of data read with io requests",
+              "label": "Size of data read with io requests",
+              "value": 10737418240,
+              "metricType": "SIZE_METRIC_BYTES"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

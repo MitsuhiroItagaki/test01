@@ -1,0 +1,54 @@
+{
+  "query": {
+    "metrics": {
+      "spillToDiskBytes": 1234567890,
+      "totalTimeMs": 60000
+    }
+  },
+  "graphs": [
+    {
+      "nodes": [
+        {
+          "id": "test_node_1",
+          "name": "Test Shuffle Exchange",
+          "hidden": false,
+          "keyMetrics": {
+            "rowsNum": 1000,
+            "durationMs": 5000
+          },
+          "metrics": [
+            {
+              "key": "Sink - Num bytes spilled to disk due to memory pressure",
+              "label": "Number of bytes spilled to disk due to memory pressure",
+              "value": 987654321,
+              "metricType": "SIZE_METRIC_BYTES"
+            },
+            {
+              "key": "Sink - Num rows spilled to disk due to memory pressure",
+              "label": "Number of rows spilled to disk due to memory pressure",
+              "value": 50000,
+              "metricType": "UNKNOWN_TYPE"
+            },
+            {
+              "key": "Other metric",
+              "label": "Some other metric",
+              "value": 100,
+              "metricType": "UNKNOWN_TYPE"
+            }
+          ]
+        },
+        {
+          "id": "test_node_2",
+          "name": "Test Aggregation",
+          "hidden": false,
+          "keyMetrics": {
+            "rowsNum": 500,
+            "durationMs": 3000,
+            "spillBytes": 123456
+          },
+          "metrics": []
+        }
+      ]
+    }
+  ]
+}
