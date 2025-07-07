@@ -29,6 +29,18 @@
 
 # COMMAND ----------
 
+# 🔧 設定: 分析対象のJSONファイルパスを指定
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
+
+# 以下から選択して変更してください:
+# JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler_log.json'
+# JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/your_username/profiler_log.json'
+# JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/your_username/profiler_log.json'
+
+print("🔧 設定完了")
+print(f"📁 分析対象ファイル: {JSON_FILE_PATH}")
+print()
+
 # 必要なライブラリのインポート
 import json
 import pandas as pd
@@ -714,29 +726,21 @@ print("✅ 関数定義完了: analyze_bottlenecks_with_claude")
 # MAGIC 
 # MAGIC 以下のセルを順番に実行して、SQLプロファイラー分析を実行します。
 # MAGIC 
-# MAGIC ### ファイルパスの設定例:
+# MAGIC ### 設定について
+# MAGIC 
+# MAGIC ファイルパスの設定は**セル2**で行います：
 # MAGIC 
 # MAGIC ```python
-# MAGIC # ローカルファイル（サンプル）
-# MAGIC JSON_FILE_PATH = 'simple0.json'
-# MAGIC 
-# MAGIC # FileStore アップロードファイル
-# MAGIC JSON_FILE_PATH = '/FileStore/shared_uploads/username/profiler.json'
-# MAGIC 
-# MAGIC # DBFS ファイル
-# MAGIC JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/username/profiler.json'
-# MAGIC JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/username/profiler.json'
+# MAGIC JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'
 # MAGIC ```
+# MAGIC 
+# MAGIC **対応するファイルパス形式:**
+# MAGIC - Unity Catalog Volumes: `/Volumes/catalog/schema/volume/file.json`
+# MAGIC - FileStore: `/FileStore/shared_uploads/username/profiler.json`
+# MAGIC - DBFS: `/dbfs/FileStore/shared_uploads/username/profiler.json`
+# MAGIC - DBFS URI: `dbfs:/FileStore/shared_uploads/username/profiler.json`
 
 # COMMAND ----------
-
-# 🔧 設定: 分析対象のJSONファイルパスを指定
-JSON_FILE_PATH = 'simple0.json'  # デフォルト: サンプルファイル
-
-# 以下から選択して変更してください:
-# JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler_log.json'
-# JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/your_username/profiler_log.json'
-# JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/your_username/profiler_log.json'
 
 print("=" * 80)
 print("🚀 Databricks SQLプロファイラー分析ツール")
@@ -1059,8 +1063,8 @@ print("🎉" * 20)
 # MAGIC ## 🎯 このNotebookの使用方法
 # MAGIC 
 # MAGIC 1. **エンドポイント設定**: Model Serving で `databricks-claude-3-7-sonnet` エンドポイントを作成
-# MAGIC 2. **ファイル準備**: SQLプロファイラーJSONファイルをFileStoreまたはDBFSにアップロード
-# MAGIC 3. **パス設定**: セル8で `JSON_FILE_PATH` を実際のファイルパスに変更
+# MAGIC 2. **ファイル準備**: SQLプロファイラーJSONファイルをVolumes、FileStore、またはDBFSにアップロード
+# MAGIC 3. **パス設定**: セル2で `JSON_FILE_PATH` を実際のファイルパスに変更
 # MAGIC 4. **実行**: 「Run All」をクリックまたは各セルを順番に実行
 # MAGIC 5. **結果確認**: 抽出されたメトリクスとAI分析結果を確認
 # MAGIC 
