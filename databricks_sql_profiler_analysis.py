@@ -1773,6 +1773,68 @@ print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
 # COMMAND ----------
 
 # 💾 抽出したメトリクスをJSONファイルとして保存
+def format_thinking_response(response) -> str:
+    """
+    thinking_enabled: Trueの場合のレスポンスを人間に読みやすい形式に変換
+    """
+    if not isinstance(response, list):
+        # リストでない場合はそのまま文字列として返す
+        return str(response).replace('\\n', '\n')
+    
+    formatted_parts = []
+    
+    for item in response:
+        if isinstance(item, dict):
+            # 辞書形式の場合、各キーの内容を適切に処理
+            if 'thinking' in item and item['thinking']:
+                thinking_content = str(item['thinking']).replace('\\n', '\n')
+                formatted_parts.append("## 🤔 思考過程\n")
+                formatted_parts.append(thinking_content)
+                formatted_parts.append("\n" + "="*60 + "\n")
+            
+            if 'summary_text' in item and item['summary_text']:
+                summary_content = str(item['summary_text']).replace('\\n', '\n')
+                formatted_parts.append("## 📋 要約\n")
+                formatted_parts.append(summary_content)
+                formatted_parts.append("\n" + "-"*40 + "\n")
+            
+            if 'text' in item and item['text']:
+                main_content = str(item['text']).replace('\\n', '\n')
+                formatted_parts.append("## 📄 回答内容\n")
+                formatted_parts.append(main_content)
+            
+            # その他のキーも処理
+            for key, value in item.items():
+                if key not in ['thinking', 'summary_text', 'text'] and value:
+                    content = str(value).replace('\\n', '\n')
+                    formatted_parts.append(f"## {key.title()}\n")
+                    formatted_parts.append(content)
+                    formatted_parts.append("\n")
+        else:
+            # 辞書でない場合はそのまま追加（改行コードを実際の改行に変換）
+            content = str(item).replace('\\n', '\n')
+            formatted_parts.append(content)
+    
+    return '\n'.join(formatted_parts)
+
+def extract_main_content_from_thinking_response(response) -> str:
+    """
+    thinking形式のレスポンスから主要コンテンツ（textまたはsummary_text）のみを抽出
+    """
+    if not isinstance(response, list):
+        return str(response).replace('\\n', '\n')
+    
+    for item in response:
+        if isinstance(item, dict):
+            # 優先順位: text > summary_text > その他
+            if 'text' in item and item['text']:
+                return str(item['text']).replace('\\n', '\n')
+            elif 'summary_text' in item and item['summary_text']:
+                return str(item['summary_text']).replace('\\n', '\n')
+    
+    # 主要コンテンツが見つからない場合は全体をフォーマット
+    return format_thinking_response(response)
+
 def convert_sets_to_lists(obj):
     """set型をlist型に変換してJSONシリアライズ可能にする"""
     if isinstance(obj, set):
@@ -2488,8 +2550,8 @@ with open(result_output_path, 'w', encoding='utf-8') as file:
     file.write("=" * 60 + "\n\n")
     # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
     if isinstance(analysis_result, list):
-        # リストの場合は要素を結合して文字列に変換
-        analysis_result_str = '\n'.join(str(item) for item in analysis_result)
+        # リストの場合は人間に読みやすい形式に変換
+        analysis_result_str = format_thinking_response(analysis_result)
     else:
         analysis_result_str = str(analysis_result)
     
@@ -2693,10 +2755,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
             return "⚠️ 設定されたLLMプロバイダーが認識できません"
         
         # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
-        if isinstance(optimized_result, list):
-            # リストの場合は要素を結合して文字列に変換
-            optimized_result = '\n'.join(str(item) for item in optimized_result)
-        
+        # ここでは元のレスポンス形式を保持して返す（後で用途に応じて変換）
         return optimized_result
         
     except Exception as e:
@@ -2847,9 +2906,14 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     from datetime import datetime
     
     # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
+    optimized_result_for_file = optimized_result
+    optimized_result_main_content = optimized_result
+    
     if isinstance(optimized_result, list):
-        # リストの場合は要素を結合して文字列に変換
-        optimized_result = '\n'.join(str(item) for item in optimized_result)
+        # ファイル保存用は人間に読みやすい形式に変換
+        optimized_result_for_file = format_thinking_response(optimized_result)
+        # SQL抽出用は主要コンテンツのみを使用
+        optimized_result_main_content = extract_main_content_from_thinking_response(optimized_result)
     
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
@@ -2866,9 +2930,9 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     # 最適化されたクエリの抽出と保存
     optimized_filename = f"output_optimized_query_{timestamp}.sql"
     
-    # 最適化結果からSQLコードを抽出
+    # 最適化結果からSQLコードを抽出（主要コンテンツから抽出）
     sql_pattern = r'```sql\s*(.*?)\s*```'
-    sql_matches = re.findall(sql_pattern, optimized_result, re.DOTALL | re.IGNORECASE)
+    sql_matches = re.findall(sql_pattern, optimized_result_main_content, re.DOTALL | re.IGNORECASE)
     
     optimized_sql = ""
     if sql_matches:
@@ -2876,7 +2940,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         optimized_sql = sql_matches[0].strip()
     else:
         # SQLブロックが見つからない場合は、SQL関連の行を抽出
-        lines = optimized_result.split('\n')
+        lines = optimized_result_main_content.split('\n')
         sql_lines = []
         in_sql_section = False
         
@@ -2905,7 +2969,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         else:
             f.write("-- ⚠️ SQLコードの自動抽出に失敗しました\n")
             f.write("-- 以下は最適化分析の全結果です:\n\n")
-            f.write(f"/*\n{optimized_result}\n*/")
+            f.write(f"/*\n{optimized_result_main_content}\n*/")
     
     # 分析レポートファイルの保存
     report_filename = f"output_optimization_report_{timestamp}.md"
@@ -2916,7 +2980,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"**オリジナルファイル**: {original_filename}\n")
         f.write(f"**最適化ファイル**: {optimized_filename}\n\n")
         f.write(f"## 最適化分析結果\n\n")
-        f.write(optimized_result)
+        f.write(optimized_result_for_file)
         f.write(f"\n\n## パフォーマンスメトリクス参考情報\n\n")
         
         # 主要メトリクスの追加
@@ -3014,8 +3078,8 @@ if original_query.strip():
     
     # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
     if isinstance(analysis_result, list):
-        # リストの場合は要素を結合して文字列に変換
-        analysis_result_str = '\n'.join(str(item) for item in analysis_result)
+        # リストの場合は主要コンテンツのみを抽出してLLMに渡す
+        analysis_result_str = extract_main_content_from_thinking_response(analysis_result)
     else:
         analysis_result_str = str(analysis_result)
     
@@ -3026,16 +3090,19 @@ if original_query.strip():
     )
     
     # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
+    optimized_result_display = optimized_result
     if isinstance(optimized_result, list):
-        # リストの場合は要素を結合して文字列に変換
-        optimized_result = '\n'.join(str(item) for item in optimized_result)
+        # 表示用は人間に読みやすい形式に変換
+        optimized_result_display = format_thinking_response(optimized_result)
+        # 主要コンテンツのみを抽出（後続処理用）
+        optimized_result = extract_main_content_from_thinking_response(optimized_result)
     
     if optimized_result and not str(optimized_result).startswith("⚠️"):
         print("✅ SQL最適化が完了しました")
         print(f"📄 最適化結果の詳細:")
         
         # 最適化結果の詳細を表示（1000行まで）
-        lines = optimized_result.split('\n')
+        lines = optimized_result_display.split('\n')
         max_display_lines = 1000
         
         if len(lines) <= max_display_lines:
