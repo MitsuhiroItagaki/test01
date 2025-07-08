@@ -1708,6 +1708,40 @@ print()
 # MAGIC - set型からlist型への変換処理
 # MAGIC - 最も時間がかかっている処理TOP10の詳細分析
 # MAGIC - スピル検出とデータスキュー分析
+# MAGIC 
+# MAGIC 💡 **デバッグモード**: スピル・スキューの判定根拠を詳細表示したい場合
+# MAGIC ```python
+# MAGIC import os
+# MAGIC os.environ['DEBUG_SPILL_ANALYSIS'] = 'true'   # スピル判定の詳細表示
+# MAGIC os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'    # スキュー判定の詳細表示
+# MAGIC ```
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🐛 デバッグモード設定（オプション）
+# MAGIC 
+# MAGIC **スピル・スキューの判定根拠を詳細表示したい場合のみ実行してください**
+# MAGIC 
+# MAGIC 📋 **設定内容:**
+# MAGIC - `DEBUG_SPILL_ANALYSIS=true`: スピル判定の詳細根拠を表示
+# MAGIC - `DEBUG_SKEW_ANALYSIS=true`: スキュー判定の詳細根拠を表示
+
+# COMMAND ----------
+
+# 🐛 デバッグモード設定（必要な場合のみ実行）
+import os
+
+# スピル分析のデバッグ表示を有効にする場合はコメントアウトを解除
+# os.environ['DEBUG_SPILL_ANALYSIS'] = 'true'
+
+# スキュー分析のデバッグ表示を有効にする場合はコメントアウトを解除  
+# os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'
+
+print("🐛 デバッグモード設定:")
+print(f"   スピル分析デバッグ: {os.environ.get('DEBUG_SPILL_ANALYSIS', 'false')}")
+print(f"   スキュー分析デバッグ: {os.environ.get('DEBUG_SKEW_ANALYSIS', 'false')}")
+print("   ※ 'true'に設定すると判定根拠の詳細情報が表示されます")
 
 # COMMAND ----------
 
@@ -1891,17 +1925,31 @@ if sorted_nodes:
         
         # データスキューの検出（行数とメモリ使用量から推定）
         skew_detected = False
+        skew_details = []
+        
         if rows_num > 0 and memory_mb > 0:
             # メモリ使用量が行数に比べて異常に高い場合はスキューの可能性
             memory_per_row = memory_mb * 1024 * 1024 / rows_num  # bytes per row
             if memory_per_row > 10000:  # 1行あたり10KB以上は高い
                 skew_detected = True
+                skew_details.append({
+                    'type': 'memory_per_row',
+                    'value': memory_per_row,
+                    'threshold': 10000,
+                    'description': f'1行あたりメモリ使用量 {memory_per_row:,.0f} bytes > 基準値 10,000 bytes'
+                })
         
         # または実行時間が行数に比べて異常に長い場合
         if rows_num > 0 and duration_ms > 0:
             ms_per_thousand_rows = (duration_ms * 1000) / rows_num
             if ms_per_thousand_rows > 1000:  # 1000行あたり1秒以上は遅い
                 skew_detected = True
+                skew_details.append({
+                    'type': 'processing_time_per_row',
+                    'value': ms_per_thousand_rows,
+                    'threshold': 1000,
+                    'description': f'1000行あたり処理時間 {ms_per_thousand_rows:,.1f} ms > 基準値 1,000 ms'
+                })
         
         # 並列度アイコン
         parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
@@ -1921,13 +1969,70 @@ if sorted_nodes:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
         
-        # スピル詳細情報（強化版）
+        # スピル詳細情報（デバッグ表示付き強化版）
         if spill_detected:
             if spill_bytes > 0:
                 print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
             
-
-
+            # スピル判定根拠の詳細表示
+            print(f"    🔍 スピル判定根拠:")
+            for detail in spill_details:
+                metric_name = detail['metric_name']
+                value = detail['value']
+                label = detail['label']
+                source = detail['source']
+                
+                if value >= 1024 * 1024 * 1024:  # GB単位
+                    value_display = f"{value/1024/1024/1024:.2f} GB"
+                elif value >= 1024 * 1024:  # MB単位
+                    value_display = f"{value/1024/1024:.1f} MB"
+                elif value >= 1024:  # KB単位
+                    value_display = f"{value/1024:.1f} KB"
+                else:
+                    value_display = f"{value} bytes"
+                
+                print(f"       📊 {metric_name}: {value_display} (from {source})")
+                if label and label != metric_name:
+                    print(f"           ラベル: {label}")
+        else:
+            # スピルが検出されなかった場合のデバッグ情報（詳細表示時のみ）
+            import os
+            if os.environ.get('DEBUG_SPILL_ANALYSIS', '').lower() in ['true', '1', 'yes']:
+                print(f"    🔍 スピル未検出:")
+                print(f"       ✅ スピル関連メトリクスが見つからないか、値が0でした")
+                
+                # チェックしたメトリクス数を表示
+                detailed_metrics = node.get('detailed_metrics', {})
+                raw_metrics = node.get('metrics', [])
+                key_metrics = node.get('key_metrics', {})
+                
+                checked_count = len(detailed_metrics) + len(raw_metrics) + len(key_metrics)
+                print(f"       📊 チェックしたメトリクス数: {checked_count}個")
+        
+        # スキュー詳細情報（デバッグ表示付き）
+        if skew_detected:
+            print(f"    🔍 スキュー判定根拠:")
+            for detail in skew_details:
+                description = detail['description']
+                print(f"       ⚖️ {description}")
+        else:
+            # スキューが検出されなかった場合のデバッグ情報（詳細表示時のみ）
+            debug_info = []
+            if rows_num > 0 and memory_mb > 0:
+                memory_per_row = memory_mb * 1024 * 1024 / rows_num
+                debug_info.append(f"1行あたりメモリ: {memory_per_row:,.0f} bytes ≤ 基準値: 10,000 bytes")
+            
+            if rows_num > 0 and duration_ms > 0:
+                ms_per_thousand_rows = (duration_ms * 1000) / rows_num
+                debug_info.append(f"1000行あたり処理時間: {ms_per_thousand_rows:,.1f} ms ≤ 基準値: 1,000 ms")
+            
+            # デバッグモード時のみ表示（環境変数でコントロール可能）
+            import os
+            if os.environ.get('DEBUG_SKEW_ANALYSIS', '').lower() in ['true', '1', 'yes']:
+                if debug_info:
+                    print(f"    🔍 スキュー未検出理由:")
+                    for info in debug_info:
+                        print(f"       ✅ {info}")
         
         # ノードIDも表示
         print(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
