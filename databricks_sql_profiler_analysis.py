@@ -134,7 +134,8 @@ LLM_CONFIG = {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
         "max_tokens": 2000,
         "temperature": 0.1,
-        "thinking_enabled": True  # 拡張思考モード（thinking: {"type": "enabled"}）
+        "thinking_enabled": True,  # 拡張思考モード（thinking: {"type": "enabled"}）
+        "thinking_budget_tokens": 3000  # 思考用トークン予算
     },
     
     # OpenAI設定
@@ -170,7 +171,8 @@ print(f"🤖 LLMプロバイダー: {LLM_CONFIG['provider']}")
 if LLM_CONFIG['provider'] == 'databricks':
     print(f"🔗 Databricksエンドポイント: {LLM_CONFIG['databricks']['endpoint_name']}")
     thinking_status = "有効" if LLM_CONFIG['databricks'].get('thinking_enabled', True) else "無効"
-    print(f"🧠 拡張思考モード: {thinking_status}")
+    thinking_budget = LLM_CONFIG['databricks'].get('thinking_budget_tokens', 3000)
+    print(f"🧠 拡張思考モード: {thinking_status} (予算: {thinking_budget} tokens)")
 elif LLM_CONFIG['provider'] == 'openai':
     print(f"🔗 OpenAIモデル: {LLM_CONFIG['openai']['model']}")
 elif LLM_CONFIG['provider'] == 'azure_openai':
@@ -187,6 +189,7 @@ print()
 print("🧠 Databricks拡張思考モード設定例:")
 print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効')
 print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効')
+print('   LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 5000  # 思考用トークン予算')
 print()
 
 # 必要なライブラリのインポート
@@ -1253,7 +1256,10 @@ def _call_databricks_llm(prompt: str) -> str:
         
         # 拡張思考モードが有効な場合は追加
         if config.get("thinking_enabled", True):
-            payload["thinking"] = {"type": "enabled"}
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": config.get("thinking_budget_tokens", 3000)
+            }
         
         # リトライ機能
         max_retries = 2
