@@ -1707,7 +1707,13 @@ print()
 # MAGIC - 抽出したメトリクスのJSON形式での保存
 # MAGIC - set型からlist型への変換処理
 # MAGIC - 最も時間がかかっている処理TOP10の詳細分析
-# MAGIC - スピル検出とデータスキュー分析
+# MAGIC - 高精度スピル検出とデータスキュー分析
+# MAGIC 
+# MAGIC 🎯 **スキュー検出ロジック**:
+# MAGIC - `taskDuration`: max/median比率 ≥ 3.0 でスキュー判定
+# MAGIC - `shuffleReadBytes`: max/median比率 ≥ 3.0 でスキュー判定  
+# MAGIC - 比率が5.0以上の場合は「高」重要度、3.0-5.0は「中」重要度
+# MAGIC - その他統計メトリクス（shuffleWriteBytes等）は基準値4.0で判定
 # MAGIC 
 # MAGIC 💡 **デバッグモード**: スピル・スキューの判定根拠を詳細表示したい場合
 # MAGIC ```python
@@ -1725,7 +1731,13 @@ print()
 # MAGIC 
 # MAGIC 📋 **設定内容:**
 # MAGIC - `DEBUG_SPILL_ANALYSIS=true`: スピル判定の詳細根拠を表示
-# MAGIC - `DEBUG_SKEW_ANALYSIS=true`: スキュー判定の詳細根拠を表示
+# MAGIC - `DEBUG_SKEW_ANALYSIS=true`: 統計ベーススキュー判定の詳細根拠を表示
+# MAGIC 
+# MAGIC 🎯 **スキューデバッグ表示内容:**
+# MAGIC - タスク実行時間・シャッフル読み込みの統計分布 (min/median/max)
+# MAGIC - max/median比率と基準値の比較
+# MAGIC - 最大/最小比率による分散度合い
+# MAGIC - 重要度レベル (高: ≥5倍, 中: 3-5倍)
 
 # COMMAND ----------
 
@@ -1735,13 +1747,18 @@ import os
 # スピル分析のデバッグ表示を有効にする場合はコメントアウトを解除
 # os.environ['DEBUG_SPILL_ANALYSIS'] = 'true'
 
-# スキュー分析のデバッグ表示を有効にする場合はコメントアウトを解除  
+# 統計ベーススキュー分析のデバッグ表示を有効にする場合はコメントアウトを解除  
 # os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'
 
 print("🐛 デバッグモード設定:")
 print(f"   スピル分析デバッグ: {os.environ.get('DEBUG_SPILL_ANALYSIS', 'false')}")
-print(f"   スキュー分析デバッグ: {os.environ.get('DEBUG_SKEW_ANALYSIS', 'false')}")
+print(f"   統計スキュー分析デバッグ: {os.environ.get('DEBUG_SKEW_ANALYSIS', 'false')}")
 print("   ※ 'true'に設定すると判定根拠の詳細情報が表示されます")
+print()
+print("🎯 統計ベーススキュー検出基準:")
+print("   📊 taskDuration max/median比率 ≥ 3.0")
+print("   📊 shuffleReadBytes max/median比率 ≥ 3.0")
+print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
 
 # COMMAND ----------
 
@@ -1774,6 +1791,7 @@ except Exception as e:
 print(f"\n🐌 最も時間がかかっている処理TOP10")
 print("=" * 80)
 print("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
+print("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
 
 # ノードを実行時間でソート
 sorted_nodes = sorted(extracted_metrics['node_metrics'], 
@@ -1923,33 +1941,81 @@ if sorted_nodes:
                     'source': 'key_metrics'
                 })
         
-        # データスキューの検出（行数とメモリ使用量から推定）
+        # データスキューの検出（統計的メトリクスに基づく精密判定）
         skew_detected = False
         skew_details = []
         
-        if rows_num > 0 and memory_mb > 0:
-            # メモリ使用量が行数に比べて異常に高い場合はスキューの可能性
-            memory_per_row = memory_mb * 1024 * 1024 / rows_num  # bytes per row
-            if memory_per_row > 10000:  # 1行あたり10KB以上は高い
-                skew_detected = True
-                skew_details.append({
-                    'type': 'memory_per_row',
-                    'value': memory_per_row,
-                    'threshold': 10000,
-                    'description': f'1行あたりメモリ使用量 {memory_per_row:,.0f} bytes > 基準値 10,000 bytes'
-                })
+        # ノードのmetricsから統計情報を取得
+        node_metrics = node.get('metrics', {})
         
-        # または実行時間が行数に比べて異常に長い場合
-        if rows_num > 0 and duration_ms > 0:
-            ms_per_thousand_rows = (duration_ms * 1000) / rows_num
-            if ms_per_thousand_rows > 1000:  # 1000行あたり1秒以上は遅い
-                skew_detected = True
-                skew_details.append({
-                    'type': 'processing_time_per_row',
-                    'value': ms_per_thousand_rows,
-                    'threshold': 1000,
-                    'description': f'1000行あたり処理時間 {ms_per_thousand_rows:,.1f} ms > 基準値 1,000 ms'
-                })
+        # 1. taskDurationによるスキュー検出
+        task_duration_stats = node_metrics.get('taskDuration', {})
+        if isinstance(task_duration_stats, dict):
+            max_duration = task_duration_stats.get('max', 0)
+            median_duration = task_duration_stats.get('median', 0)
+            min_duration = task_duration_stats.get('min', 0)
+            
+            if median_duration > 0 and max_duration > 0:
+                duration_ratio = max_duration / median_duration
+                if duration_ratio >= 3.0:  # 3倍以上の差がある場合
+                    skew_detected = True
+                    severity_level = "高" if duration_ratio >= 5.0 else "中"
+                    skew_details.append({
+                        'type': 'task_duration_skew',
+                        'ratio': duration_ratio,
+                        'threshold': 3.0,
+                        'max_value': max_duration,
+                        'median_value': median_duration,
+                        'min_value': min_duration,
+                        'severity': severity_level,
+                        'description': f'タスク実行時間スキュー: max({max_duration}ms)/median({median_duration}ms) = {duration_ratio:.1f} > 基準値 3.0 [重要度:{severity_level}]'
+                    })
+        
+        # 2. shuffleReadBytesによるスキュー検出
+        shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
+        if isinstance(shuffle_read_stats, dict):
+            max_shuffle = shuffle_read_stats.get('max', 0)
+            median_shuffle = shuffle_read_stats.get('median', 0)
+            min_shuffle = shuffle_read_stats.get('min', 0)
+            
+            if median_shuffle > 0 and max_shuffle > 0:
+                shuffle_ratio = max_shuffle / median_shuffle
+                if shuffle_ratio >= 3.0:  # 3倍以上の差がある場合
+                    skew_detected = True
+                    severity_level = "高" if shuffle_ratio >= 5.0 else "中"
+                    skew_details.append({
+                        'type': 'shuffle_read_skew',
+                        'ratio': shuffle_ratio,
+                        'threshold': 3.0,
+                        'max_value': max_shuffle,
+                        'median_value': median_shuffle,
+                        'min_value': min_shuffle,
+                        'severity': severity_level,
+                        'description': f'シャッフル読み込みスキュー: max({max_shuffle:,}bytes)/median({median_shuffle:,}bytes) = {shuffle_ratio:.1f} > 基準値 3.0 [重要度:{severity_level}]'
+                    })
+        
+        # 3. 他の統計メトリクスもチェック（拡張対応）
+        other_metrics_to_check = ['shuffleWriteBytes', 'inputBytes', 'outputBytes']
+        for metric_name in other_metrics_to_check:
+            metric_stats = node_metrics.get(metric_name, {})
+            if isinstance(metric_stats, dict):
+                max_val = metric_stats.get('max', 0)
+                median_val = metric_stats.get('median', 0)
+                
+                if median_val > 0 and max_val > 0:
+                    ratio = max_val / median_val
+                    if ratio >= 4.0:  # 他のメトリクスは基準を少し高めに設定
+                        skew_detected = True
+                        severity_level = "高" if ratio >= 6.0 else "中"
+                        skew_details.append({
+                            'type': f'{metric_name}_skew',
+                            'ratio': ratio,
+                            'threshold': 4.0,
+                            'max_value': max_val,
+                            'median_value': median_val,
+                            'severity': severity_level,
+                            'description': f'{metric_name}スキュー: max({max_val:,})/median({median_val:,}) = {ratio:.1f} > 基準値 4.0 [重要度:{severity_level}]'
+                        })
         
         # 並列度アイコン
         parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
@@ -2009,26 +2075,64 @@ if sorted_nodes:
                 checked_count = len(detailed_metrics) + len(raw_metrics) + len(key_metrics)
                 print(f"       📊 チェックしたメトリクス数: {checked_count}個")
         
-        # スキュー詳細情報（デバッグ表示付き）
+        # スキュー詳細情報（統計ベースのデバッグ表示付き）
         if skew_detected:
             print(f"    🔍 スキュー判定根拠:")
             for detail in skew_details:
                 description = detail['description']
                 print(f"       ⚖️ {description}")
+                
+                # より詳細な統計情報の表示
+                if detail['type'] in ['task_duration_skew', 'shuffle_read_skew']:
+                    max_val = detail['max_value']
+                    median_val = detail['median_value']
+                    min_val = detail.get('min_value', 0)
+                    
+                    if detail['type'] == 'task_duration_skew':
+                        print(f"           📊 実行時間分布: min={min_val}ms, median={median_val}ms, max={max_val}ms")
+                    else:  # shuffle_read_skew
+                        print(f"           📊 シャッフル分布: min={min_val:,}bytes, median={median_val:,}bytes, max={max_val:,}bytes")
+                    
+                    # 分散の度合いを表示
+                    if min_val > 0:
+                        max_min_ratio = max_val / min_val
+                        print(f"           📈 最大/最小比率: {max_min_ratio:.1f} (分散度合いの指標)")
+                    
+                    severity = detail.get('severity', '中')
+                    severity_emoji = "🚨" if severity == "高" else "⚠️"
+                    print(f"           {severity_emoji} 重要度: {severity} ({'5倍以上' if severity == '高' else '3-5倍'}の差)")
         else:
             # スキューが検出されなかった場合のデバッグ情報（詳細表示時のみ）
-            debug_info = []
-            if rows_num > 0 and memory_mb > 0:
-                memory_per_row = memory_mb * 1024 * 1024 / rows_num
-                debug_info.append(f"1行あたりメモリ: {memory_per_row:,.0f} bytes ≤ 基準値: 10,000 bytes")
-            
-            if rows_num > 0 and duration_ms > 0:
-                ms_per_thousand_rows = (duration_ms * 1000) / rows_num
-                debug_info.append(f"1000行あたり処理時間: {ms_per_thousand_rows:,.1f} ms ≤ 基準値: 1,000 ms")
-            
-            # デバッグモード時のみ表示（環境変数でコントロール可能）
             import os
             if os.environ.get('DEBUG_SKEW_ANALYSIS', '').lower() in ['true', '1', 'yes']:
+                debug_info = []
+                
+                # taskDurationの統計チェック
+                task_duration_stats = node_metrics.get('taskDuration', {})
+                if isinstance(task_duration_stats, dict):
+                    max_duration = task_duration_stats.get('max', 0)
+                    median_duration = task_duration_stats.get('median', 0)
+                    if median_duration > 0 and max_duration > 0:
+                        duration_ratio = max_duration / median_duration
+                        debug_info.append(f"タスク実行時間比率: {duration_ratio:.1f} ≤ 基準値: 3.0")
+                    else:
+                        debug_info.append("タスク実行時間統計: データなし")
+                
+                # shuffleReadBytesの統計チェック
+                shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
+                if isinstance(shuffle_read_stats, dict):
+                    max_shuffle = shuffle_read_stats.get('max', 0)
+                    median_shuffle = shuffle_read_stats.get('median', 0)
+                    if median_shuffle > 0 and max_shuffle > 0:
+                        shuffle_ratio = max_shuffle / median_shuffle
+                        debug_info.append(f"シャッフル読み込み比率: {shuffle_ratio:.1f} ≤ 基準値: 3.0")
+                    else:
+                        debug_info.append("シャッフル読み込み統計: データなし")
+                
+                # 利用可能なメトリクス一覧
+                available_metrics = list(node_metrics.keys())
+                debug_info.append(f"利用可能な統計メトリクス: {', '.join(available_metrics) if available_metrics else 'なし'}")
+                
                 if debug_info:
                     print(f"    🔍 スキュー未検出理由:")
                     for info in debug_info:
