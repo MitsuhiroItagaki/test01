@@ -2806,7 +2806,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
     
     # オリジナルクエリファイルの保存
-    original_filename = f"original_query_{timestamp}.sql"
+    original_filename = f"output_original_query_{timestamp}.sql"
     with open(original_filename, 'w', encoding='utf-8') as f:
         f.write(f"-- オリジナルSQLクエリ\n")
         f.write(f"-- クエリID: {query_id}\n")
@@ -2815,7 +2815,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(original_query)
     
     # 最適化されたクエリの抽出と保存
-    optimized_filename = f"optimized_query_{timestamp}.sql"
+    optimized_filename = f"output_optimized_query_{timestamp}.sql"
     
     # 最適化結果からSQLコードを抽出
     sql_pattern = r'```sql\s*(.*?)\s*```'
@@ -2859,7 +2859,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write(f"/*\n{optimized_result}\n*/")
     
     # 分析レポートファイルの保存
-    report_filename = f"optimization_report_{timestamp}.md"
+    report_filename = f"output_optimization_report_{timestamp}.md"
     with open(report_filename, 'w', encoding='utf-8') as f:
         f.write(f"# SQL最適化レポート\n\n")
         f.write(f"**クエリID**: {query_id}\n")
@@ -2884,97 +2884,10 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         except Exception as e:
             f.write(f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n")
     
-    # テスト実行用スクリプトの作成
-    test_script_filename = f"test_optimized_query_{timestamp}.py"
-    with open(test_script_filename, 'w', encoding='utf-8') as f:
-        # f-stringの中で三重引用符を含む場合のエスケープ処理
-        escaped_original_query = original_query.replace('"""', '\\"""')
-        escaped_optimized_sql = optimized_sql.replace('"""', '\\"""') if optimized_sql else '-- SQLコードが抽出できませんでした'
-        
-        test_script_content = f"""#!/usr/bin/env python3
-\"\"\"
-最適化されたSQLクエリのテスト実行スクリプト
-生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-クエリID: {query_id}
-タイムスタンプ: {timestamp}
-\"\"\"
-
-# Databricks環境での実行例
-def test_optimized_query():
-    
-    # 必要なライブラリのインポート
-    try:
-        from pyspark.sql import SparkSession
-        import time
-    except ImportError as e:
-        print(f"⚠️ 必要なライブラリがインストールされていません: {{e}}")
-        return
-    
-    # Sparkセッションの取得
-    spark = SparkSession.builder.appName("OptimizedQueryTest").getOrCreate()
-    
-    print("🚀 最適化されたSQLクエリのテスト実行")
-    print("=" * 60)
-    
-    # オリジナルクエリの実行（オプション）
-    print("\\n📊 オリジナルクエリの実行...")
-    original_sql = \"\"\"
-{escaped_original_query}
-    \"\"\"
-    
-    start_time = time.time()
-    try:
-        # original_result = spark.sql(original_sql)
-        # original_count = original_result.count()
-        print("⚠️ オリジナルクエリの実行はコメントアウトされています")
-        print("   必要に応じてコメントを解除してください")
-        original_execution_time = 0
-    except Exception as e:
-        print(f"❌ オリジナルクエリの実行エラー: {{e}}")
-        original_execution_time = 0
-    
-    original_execution_time = time.time() - start_time
-    
-    # 最適化されたクエリの実行
-    print("\\n🚀 最適化されたクエリの実行...")
-    optimized_sql = \"\"\"
-{escaped_optimized_sql}
-    \"\"\"
-    
-    start_time = time.time()
-    try:
-        # optimized_result = spark.sql(optimized_sql)
-        # optimized_count = optimized_result.count()
-        print("⚠️ 最適化クエリの実行はコメントアウトされています")
-        print("   動作確認後、コメントを解除してください")
-        optimized_execution_time = 0
-    except Exception as e:
-        print(f"❌ 最適化クエリの実行エラー: {{e}}")
-        optimized_execution_time = 0
-    
-    optimized_execution_time = time.time() - start_time
-    
-    # 結果の比較
-    print("\\n📊 実行結果の比較:")
-    print(f"   オリジナル実行時間: {{original_execution_time:.2f}} 秒")
-    print(f"   最適化実行時間: {{optimized_execution_time:.2f}} 秒")
-    
-    if original_execution_time > 0 and optimized_execution_time > 0:
-        improvement = ((original_execution_time - optimized_execution_time) / original_execution_time) * 100
-        print(f"   パフォーマンス改善: {{improvement:.1f}}%")
-    
-    print("\\n✅ テスト完了")
-
-if __name__ == "__main__":
-    test_optimized_query()
-"""
-        f.write(test_script_content)
-    
     return {
         'original_file': original_filename,
         'optimized_file': optimized_filename,
-        'report_file': report_filename,
-        'test_script': test_script_filename
+        'report_file': report_filename
     }
 
 print("✅ 関数定義完了: SQL最適化関連関数")
@@ -3088,8 +3001,8 @@ else:
 # MAGIC ## 💾 最適化結果の保存（ステップ3: ファイル生成）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
-# MAGIC - 最適化されたSQLクエリのファイル保存
-# MAGIC - オリジナルクエリ、最適化クエリ、レポート、テストスクリプトの生成
+# MAGIC - 最適化されたSQLクエリのファイル保存（接頭語: output_）
+# MAGIC - オリジナルクエリ、最適化クエリ、レポートの生成
 # MAGIC - 生成ファイルの詳細情報表示
 
 # COMMAND ----------
@@ -3151,8 +3064,7 @@ if original_query.strip() and optimized_result.strip():
             file_type_jp = {
                 'original_file': 'オリジナルSQLクエリ',
                 'optimized_file': '最適化SQLクエリ',
-                'report_file': '最適化レポート',
-                'test_script': 'テスト実行スクリプト'
+                'report_file': '最適化レポート'
             }
             print(f"   📄 {file_type_jp.get(file_type, file_type)}: {filename}")
         
@@ -3178,18 +3090,18 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🧪 テスト実行の準備（ステップ4: 実行ガイド）
+# MAGIC ## 🧪 Databricks Notebookでの実行ガイド（ステップ4: 実行方法）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 生成されたファイルの使用方法説明
-# MAGIC - テスト実行の手順ガイド
-# MAGIC - 自動テストスクリプトの実行方法
+# MAGIC - Databricks Notebookでの実行手順ガイド
+# MAGIC - SQLクエリの直接実行方法
 # MAGIC - 重要な注意事項の表示
 
 # COMMAND ----------
 
-# 🧪 ステップ4: テスト実行の準備
-print("\n🧪 ステップ4: テスト実行の準備")
+# 🧪 ステップ4: Databricks Notebookでの実行ガイド
+print("\n🧪 ステップ4: Databricks Notebookでの実行ガイド")
 print("-" * 40)
 
 # saved_files変数が定義されているかチェック
@@ -3201,32 +3113,49 @@ except NameError:
     saved_files = {}
 
 if saved_files:
-    test_script = saved_files.get('test_script', '')
+    original_file = saved_files.get('original_file', '')
     optimized_file = saved_files.get('optimized_file', '')
+    report_file = saved_files.get('report_file', '')
     
-    print("🚀 テスト実行の手順:")
+    print("🚀 Databricks Notebookでの実行手順:")
     print("1. 生成されたSQLファイルの内容を確認")
     print("2. 必要に応じてクエリを手動調整")
-    print("3. テストデータセットでの実行")
+    print("3. Notebook内で直接SQLクエリを実行")
     print("4. パフォーマンス測定と比較")
     
-    if test_script:
-        print(f"\n🔧 自動テストスクリプトの実行:")
-        print(f"   python {test_script}")
+    print(f"\n📝 生成ファイル一覧:")
+    if original_file:
+        print(f"   📄 オリジナルクエリ: {original_file}")
+    if optimized_file:
+        print(f"   🚀 最適化クエリ: {optimized_file}")
+    if report_file:
+        print(f"   📊 分析レポート: {report_file}")
     
     if optimized_file:
-        print(f"\n📝 最適化されたSQLの手動実行:")
-        print(f"   # Databricks SQLエディタで {optimized_file} を実行")
-        print(f"   # または以下のPythonコードを使用:")
-        print(f"   spark.sql(open('{optimized_file}').read()).show()")
+        print(f"\n🔧 Databrics Notebookでの実行方法:")
+        print(f"   # ファイルからSQLを読み込んで実行")
+        print(f"   optimized_sql = open('{optimized_file}').read()")
+        print(f"   df = spark.sql(optimized_sql)")
+        print(f"   df.show()")
+        print(f"   ")
+        print(f"   # または %sql マジックコマンドを使用")
+        print(f"   # %sql [ファイルの内容をコピー&ペースト]")
+        print(f"   ")
+        print(f"   # パフォーマンス測定例")
+        print(f"   import time")
+        print(f"   start_time = time.time()")
+        print(f"   result_count = df.count()")
+        print(f"   execution_time = time.time() - start_time")
+        print(f"   print(f'実行時間: {{execution_time:.2f}} 秒, 行数: {{result_count:,}}')")
     
     print(f"\n⚠️ 重要な注意事項:")
     print(f"   • 本番環境での実行前に、必ずテスト環境で検証してください")
     print(f"   • データベースの構造やサイズによって結果は変わる可能性があります")
     print(f"   • クエリプランの確認: EXPLAIN 文を使用してください")
+    print(f"   • Databricks SQLエディタでの実行も可能です")
 
 else:
-    print("⚠️ テスト実行用ファイルが生成されていません")
+    print("⚠️ 実行用ファイルが生成されていません")
 
 # COMMAND ----------
 
@@ -3252,8 +3181,7 @@ print("✅ Databricks Claude 3.7 Sonnetによるボトルネック分析完了")
 print("✅ 分析結果保存完了")
 print("✅ オリジナルクエリ抽出完了")
 print("✅ LLMによるSQL最適化完了")
-print("✅ 最適化結果ファイル生成完了")
-print("✅ テスト実行スクリプト生成完了")
+print("✅ 最適化結果ファイル生成完了（接頭語: output_）")
 
 # 必要な変数が定義されているかチェック
 missing_summary_vars = []
@@ -3291,8 +3219,7 @@ if saved_files:
         file_type_jp = {
             'original_file': '📄 オリジナルSQL',
             'optimized_file': '🚀 最適化SQL',
-            'report_file': '📊 最適化レポート',
-            'test_script': '🧪 テストスクリプト'
+            'report_file': '📊 最適化レポート'
         }
         icon_name = file_type_jp.get(file_type, f"📄 {file_type}")
         print(f"   {icon_name}: {filename}")
