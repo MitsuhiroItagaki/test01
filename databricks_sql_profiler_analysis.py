@@ -1626,13 +1626,12 @@ print(f"📊 高インパクトテーブル数: {liquid_summary.get('high_impact
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔍 ボトルネック指標詳細表示と時間消費TOP10
+# MAGIC ## 🔍 ボトルネック指標詳細
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - Photon エンジンの利用状況とパフォーマンス分析
 # MAGIC - シャッフル操作と並列度の問題検出
 # MAGIC - 各種パフォーマンス指標の詳細表示
-# MAGIC - 最も時間がかかっている処理TOP10の分析
 
 # COMMAND ----------
 
@@ -1770,6 +1769,18 @@ print("🎯 統計ベーススキュー検出基準:")
 print("   📊 taskDuration max/median比率 ≥ 3.0")
 print("   📊 shuffleReadBytes max/median比率 ≥ 3.0")
 print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🐌 最も時間がかかっている処理TOP10
+# MAGIC 
+# MAGIC このセルでは以下の処理を実行します：
+# MAGIC - 抽出したメトリクスのJSON形式での保存
+# MAGIC - set型からlist型への変換処理
+# MAGIC - 最も時間がかかっている処理TOP10の詳細分析
+# MAGIC - スピル検出とデータスキュー分析
+# MAGIC - Sparkステージ実行分析
 
 # COMMAND ----------
 
@@ -2314,6 +2325,18 @@ else:
     print()
 
 print()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🗂️ Liquid Clustering分析結果の詳細表示
+# MAGIC 
+# MAGIC このセルでは以下の処理を実行します：
+# MAGIC - テーブル別推奨クラスタリングカラムの詳細表示
+# MAGIC - パフォーマンス向上見込みの分析
+# MAGIC - カラム使用パターンの詳細分析
+# MAGIC - プッシュダウンフィルター情報の表示
+# MAGIC - SQL実装例の提示
 
 # COMMAND ----------
 
