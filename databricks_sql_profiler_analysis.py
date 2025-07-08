@@ -110,7 +110,6 @@ print("🚀 次のセルに進んでください")
 # MAGIC 
 # MAGIC ### 📚 リファレンスセル
 # MAGIC - **セル22**: 追加の使用方法とカスタマイズ
-# MAGIC - **セル23**: このNotebookの使用方法
 
 # COMMAND ----------
 
@@ -2895,17 +2894,3 @@ print("🎉" * 25)
 # MAGIC         # 分析処理...
 # MAGIC ```
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ---
-# MAGIC 
-# MAGIC ## 🎯 セル23: このNotebookの使用方法
-# MAGIC 
-# MAGIC 1. **LLM設定**: セル2で `LLM_CONFIG` のプロバイダーとAPIキーを設定
-# MAGIC 2. **ファイル準備**: SQLプロファイラーJSONファイルをVolumes、FileStore、またはDBFSにアップロード
-# MAGIC 3. **パス設定**: セル1で `JSON_FILE_PATH` を実際のファイルパスに変更
-# MAGIC 4. **実行**: 「Run All」をクリックまたは各セルを順番に実行
-# MAGIC 5. **結果確認**: 抽出されたメトリクスとAI分析結果を確認
-# MAGIC 
-# MAGIC **📧 サポート**: 問題が発生した場合は、エラーメッセージとDatabricks環境情報をお知らせください。
