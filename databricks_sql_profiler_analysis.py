@@ -2477,7 +2477,21 @@ print("🏁 【処理完了サマリー】")
 print("🎉" * 20)
 print("✅ SQLプロファイラーJSONファイル読み込み完了")
 print(f"✅ パフォーマンスメトリクス抽出完了 ({output_path})")
-print("✅ Databricks Claude 3.7 Sonnetによるボトルネック分析完了")
+
+# LLMプロバイダー情報の動的表示
+try:
+    current_provider = LLM_CONFIG.get('provider', 'unknown')
+    provider_display_names = {
+        'databricks': f"Databricks ({LLM_CONFIG.get('databricks', {}).get('endpoint_name', 'Model Serving')})",
+        'openai': f"OpenAI ({LLM_CONFIG.get('openai', {}).get('model', 'GPT-4')})",
+        'azure_openai': f"Azure OpenAI ({LLM_CONFIG.get('azure_openai', {}).get('deployment_name', 'GPT-4')})",
+        'anthropic': f"Anthropic ({LLM_CONFIG.get('anthropic', {}).get('model', 'Claude')})"
+    }
+    provider_display = provider_display_names.get(current_provider, f"{current_provider}（未知のプロバイダー）")
+    print(f"✅ {provider_display}によるボトルネック分析完了")
+except Exception as e:
+    print("✅ LLMによるボトルネック分析完了")
+
 print(f"✅ 分析結果保存完了 ({result_output_path})")
 print()
 print("📁 出力ファイル:")
@@ -3177,7 +3191,21 @@ print("🎉" * 25)
 
 print("✅ SQLプロファイラーJSONファイル読み込み完了")
 print("✅ パフォーマンスメトリクス抽出完了")
-print("✅ Databricks Claude 3.7 Sonnetによるボトルネック分析完了")
+
+# LLMプロバイダー情報の動的表示
+try:
+    current_provider = LLM_CONFIG.get('provider', 'unknown')
+    provider_display_names = {
+        'databricks': f"Databricks ({LLM_CONFIG.get('databricks', {}).get('endpoint_name', 'Model Serving')})",
+        'openai': f"OpenAI ({LLM_CONFIG.get('openai', {}).get('model', 'GPT-4')})",
+        'azure_openai': f"Azure OpenAI ({LLM_CONFIG.get('azure_openai', {}).get('deployment_name', 'GPT-4')})",
+        'anthropic': f"Anthropic ({LLM_CONFIG.get('anthropic', {}).get('model', 'Claude')})"
+    }
+    provider_display = provider_display_names.get(current_provider, f"{current_provider}（未知のプロバイダー）")
+    print(f"✅ {provider_display}によるボトルネック分析完了")
+except Exception as e:
+    print("✅ LLMによるボトルネック分析完了")
+
 print("✅ 分析結果保存完了")
 print("✅ オリジナルクエリ抽出完了")
 print("✅ LLMによるSQL最適化完了")
