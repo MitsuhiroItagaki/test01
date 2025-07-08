@@ -2692,6 +2692,11 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         else:
             return "⚠️ 設定されたLLMプロバイダーが認識できません"
         
+        # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
+        if isinstance(optimized_result, list):
+            # リストの場合は要素を結合して文字列に変換
+            optimized_result = '\n'.join(str(item) for item in optimized_result)
+        
         return optimized_result
         
     except Exception as e:
@@ -3020,7 +3025,12 @@ if original_query.strip():
         extracted_metrics
     )
     
-    if optimized_result and not optimized_result.startswith("⚠️"):
+    # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
+    if isinstance(optimized_result, list):
+        # リストの場合は要素を結合して文字列に変換
+        optimized_result = '\n'.join(str(item) for item in optimized_result)
+    
+    if optimized_result and not str(optimized_result).startswith("⚠️"):
         print("✅ SQL最適化が完了しました")
         print(f"📄 最適化結果の詳細:")
         
@@ -3100,7 +3110,7 @@ if missing_variables:
     print("\n🔄 デフォルト値を使用して処理を継続します。")
 
 # 変数が存在する（またはデフォルト値が設定された）場合の処理
-if original_query.strip() and optimized_result.strip():
+if original_query.strip() and str(optimized_result).strip():
     print("📁 ファイル生成中...")
     
     try:
