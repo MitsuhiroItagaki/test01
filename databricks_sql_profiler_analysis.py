@@ -1,5 +1,52 @@
 # Databricks notebook source
 # MAGIC %md
+# MAGIC ## 📁 セル1: 分析対象ファイル設定
+# MAGIC 
+# MAGIC **最初に、分析対象のSQLプロファイラーJSONファイルを指定してください。**
+# MAGIC 
+# MAGIC このセルでは以下の設定を行います：
+# MAGIC - 📂 SQLプロファイラーJSONファイルのパス設定
+# MAGIC - 📋 対応するファイルパス形式の例
+# MAGIC - ⚙️ 基本的な環境設定
+
+# COMMAND ----------
+
+# 📁 SQLプロファイラーJSONファイルのパス設定
+# 
+# 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
+
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
+
+# 📋 対応するファイルパス形式の例:
+# Unity Catalog Volumes:
+# JSON_FILE_PATH = '/Volumes/catalog/schema/volume/profiler.json'
+# 
+# FileStore (推奨):
+# JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler_log.json'
+# 
+# DBFS:
+# JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/your_username/profiler_log.json'
+# 
+# DBFS URI:
+# JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/your_username/profiler_log.json'
+
+print("📁 【分析対象ファイル設定完了】")
+print("=" * 50)
+print(f"📄 対象ファイル: {JSON_FILE_PATH}")
+print("=" * 50)
+
+# ⚙️ 基本的な環境設定
+import json
+import pandas as pd
+from typing import Dict, List, Any
+from datetime import datetime
+
+print("✅ 基本ライブラリインポート完了")
+print("🚀 次のセルに進んでください")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC # Databricks SQLプロファイラー分析ツール
 # MAGIC 
 # MAGIC このnotebookは、DatabricksのSQLプロファイラーJSONログファイルを読み込み、ボトルネック特定と改善案の提示に必要なメトリクスを抽出して分析を行います。
@@ -33,7 +80,8 @@
 # MAGIC ## 📋 セル目次
 # MAGIC 
 # MAGIC ### 🔧 設定・準備セル
-# MAGIC - **セル2**: LLMエンドポイント設定とファイルパス指定
+# MAGIC - **セル1**: 分析対象ファイル設定（実行前に必ず設定）
+# MAGIC - **セル2**: LLMエンドポイント設定
 # MAGIC - **セル3**: SQLプロファイラーJSONファイル読み込み関数
 # MAGIC 
 # MAGIC ### 📊 分析関数定義セル
@@ -67,12 +115,11 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📋 セル2: LLMエンドポイント設定とファイルパス指定
+# MAGIC ## 🤖 セル2: LLMエンドポイント設定
 # MAGIC 
 # MAGIC このセルでは以下の設定を行います：
 # MAGIC - LLMプロバイダーの選択（Databricks/OpenAI/Azure/Anthropic）
 # MAGIC - 各プロバイダーの接続設定
-# MAGIC - 分析対象のSQLプロファイラーJSONファイルパス
 # MAGIC - 必要なライブラリのインポート
 
 # COMMAND ----------
@@ -116,16 +163,7 @@ LLM_CONFIG = {
     }
 }
 
-# 📁 SQLプロファイラーJSONファイルのパス設定
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
-
-# 以下から選択して変更してください:
-# JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler_log.json'
-# JSON_FILE_PATH = '/dbfs/FileStore/shared_uploads/your_username/profiler_log.json'
-# JSON_FILE_PATH = 'dbfs:/FileStore/shared_uploads/your_username/profiler_log.json'
-
-print("🤖 LLM・ファイル設定完了")
-print(f"📁 分析対象ファイル: {JSON_FILE_PATH}")
+print("🤖 LLMエンドポイント設定完了")
 print(f"🤖 LLMプロバイダー: {LLM_CONFIG['provider']}")
 
 if LLM_CONFIG['provider'] == 'databricks':
@@ -145,9 +183,6 @@ print('   LLM_CONFIG["provider"] = "azure_openai" # Azure OpenAIに切り替え'
 print()
 
 # 必要なライブラリのインポート
-import json
-import pandas as pd
-from typing import Dict, List, Any
 import requests
 import os
 from pyspark.sql import SparkSession
@@ -1425,7 +1460,7 @@ except Exception as e:
 # MAGIC 
 # MAGIC ### 設定について
 # MAGIC 
-# MAGIC ファイルパスの設定は**セル2**で行います：
+# MAGIC ファイルパスの設定は**セル1**で行います：
 # MAGIC 
 # MAGIC ```python
 # MAGIC JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'
@@ -2849,7 +2884,7 @@ print("🎉" * 25)
 # MAGIC 
 # MAGIC 1. **LLM設定**: セル2で `LLM_CONFIG` のプロバイダーとAPIキーを設定
 # MAGIC 2. **ファイル準備**: SQLプロファイラーJSONファイルをVolumes、FileStore、またはDBFSにアップロード
-# MAGIC 3. **パス設定**: セル2で `JSON_FILE_PATH` を実際のファイルパスに変更
+# MAGIC 3. **パス設定**: セル1で `JSON_FILE_PATH` を実際のファイルパスに変更
 # MAGIC 4. **実行**: 「Run All」をクリックまたは各セルを順番に実行
 # MAGIC 5. **結果確認**: 抽出されたメトリクスとAI分析結果を確認
 # MAGIC 
