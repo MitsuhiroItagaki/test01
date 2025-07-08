@@ -480,11 +480,20 @@ def get_meaningful_node_name(node: Dict[str, Any], extracted_metrics: Dict[str, 
     # データベース・テーブル情報を追加（強化版）
     table_name = None
     
-    # 複数のメタデータキーからテーブル名を抽出
+    # 複数のメタデータキーからテーブル名を抽出（フルパス優先）
     for key_candidate in ['SCAN_TABLE', 'SCAN_IDENTIFIER', 'TABLE_NAME', 'RELATION', 'SCAN_RELATION']:
         if key_candidate in metadata_info:
-            table_name = metadata_info[key_candidate]
-            break
+            extracted_table = metadata_info[key_candidate]
+            # フルパス（catalog.schema.table）の場合はそのまま使用
+            if isinstance(extracted_table, str) and extracted_table.count('.') >= 2:
+                table_name = extracted_table
+                break
+            elif isinstance(extracted_table, str) and extracted_table.count('.') == 1:
+                # schema.table形式の場合もそのまま使用
+                table_name = extracted_table
+                break
+            elif not table_name:  # まだテーブル名が見つかっていない場合のみ設定
+                table_name = extracted_table
     
     # メタデータからテーブル名を抽出できない場合、ノード名から推測
     if not table_name and ('scan' in enhanced_name.lower() or 'data source' in enhanced_name.lower()):
@@ -502,8 +511,8 @@ def get_meaningful_node_name(node: Dict[str, Any], extracted_metrics: Dict[str, 
             match = re.search(pattern, original_name)
             if match:
                 if '.' in match.group(0):
-                    # フルテーブル名（schema.table）の場合は最後の部分を使用
-                    table_name = match.group(0).split('.')[-1]
+                    # フルテーブル名（catalog.schema.table）の場合はフルパスを使用
+                    table_name = match.group(0)
                 else:
                     table_name = match.group(1) if match.lastindex and match.lastindex >= 1 else match.group(0)
                 break
@@ -515,19 +524,28 @@ def get_meaningful_node_name(node: Dict[str, Any], extracted_metrics: Dict[str, 
             if values:
                 for value in values:
                     if isinstance(value, str) and '.' in value and len(value.split('.')) >= 2:
-                        # "schema.table" 形式の場合
+                        # "catalog.schema.table" 形式の場合
                         parts = value.split('.')
                         if len(parts) >= 2 and not any(part.isdigit() for part in parts[-2:]):
-                            table_name = parts[-1]  # テーブル名部分
+                            # フルパスを使用（catalog.schema.table）
+                            if len(parts) >= 3:
+                                table_name = '.'.join(parts)  # フルパス
+                            else:
+                                table_name = value  # そのまま使用
                             break
                 if table_name:
                     break
     
     # Data Source Scanの場合にテーブル名を表示
     if table_name and ('scan' in enhanced_name.lower() or 'data source' in enhanced_name.lower()):
-        # テーブル名を短縮（長すぎる場合）
-        if len(table_name) > 30:
-            table_name = table_name[:27] + "..."
+        # フルパス表示のために制限を緩和（60文字まで）
+        if len(table_name) > 60:
+            # カタログ.スキーマ.テーブル形式の場合は中間を省略
+            parts = table_name.split('.')
+            if len(parts) >= 3:
+                table_name = f"{parts[0]}.*.{parts[-1]}"
+            else:
+                table_name = table_name[:57] + "..."
         enhanced_name = f"Data Source Scan ({table_name})"
     elif 'scan' in enhanced_name.lower() and 'data source' in enhanced_name.lower():
         # テーブル名が見つからない場合でも、より明確な名前に
