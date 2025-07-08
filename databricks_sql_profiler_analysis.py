@@ -32,37 +32,29 @@
 # MAGIC 
 # MAGIC ## 📋 セル目次
 # MAGIC 
-# MAGIC ### 🔧 設定・準備セル
-# MAGIC - **セル2**: 分析対象ファイル設定（実行前に必ず設定）
-# MAGIC - **セル3**: LLMエンドポイント設定
-# MAGIC - **セル4**: SQLプロファイラーJSONファイル読み込み関数
-# MAGIC 
-# MAGIC ### 📊 分析関数定義セル
-# MAGIC - **セル5**: パフォーマンスメトリクス抽出関数
-# MAGIC - **セル6**: ノード名解析・改善関数
-# MAGIC - **セル7**: ボトルネック指標計算関数
-# MAGIC - **セル8**: Liquid Clustering分析関数
-# MAGIC - **セル9**: LLMによるボトルネック分析関数
-# MAGIC - **セル10**: 個別LLMプロバイダー接続関数
-# MAGIC 
-# MAGIC ### 🚀 メイン処理実行セル
-# MAGIC - **セル11**: SQLプロファイラーJSONファイル読み込み実行
-# MAGIC - **セル12**: パフォーマンスメトリクス抽出と概要表示
-# MAGIC - **セル13**: ボトルネック指標詳細表示と時間消費TOP10
-# MAGIC - **セル14**: LLMボトルネック分析実行の準備
-# MAGIC - **セル15**: LLMボトルネック分析結果の表示
-# MAGIC - **セル16**: 分析結果の保存と完了サマリー
-# MAGIC 
-# MAGIC ### 🔧 SQL最適化機能セル
-# MAGIC - **セル17**: SQL最適化関連関数定義
-# MAGIC - **セル18**: SQLクエリ最適化の実行（ステップ1: クエリ抽出）
-# MAGIC - **セル19**: LLMによるSQL最適化（ステップ2: 最適化実行）
-# MAGIC - **セル20**: 最適化結果の保存（ステップ3: ファイル生成）
-# MAGIC - **セル21**: テスト実行の準備（ステップ4: 実行ガイド）
-# MAGIC - **セル22**: 最終処理完了サマリー
-# MAGIC 
-# MAGIC ### 📚 リファレンスセル
-# MAGIC - **セル24**: 追加の使用方法とカスタマイズ
+# MAGIC - **📁 分析対象ファイル設定** - 最初に、分析対象のSQLプロファイラーJSONファイルを指定
+# MAGIC - **🤖 LLMエンドポイント設定** - LLMプロバイダーの選択と接続設定
+# MAGIC - **📂 SQLプロファイラーJSONファイル読み込み関数** - JSONファイル読み込み機能の定義
+# MAGIC - **📊 パフォーマンスメトリクス抽出関数** - メトリクス抽出とボトルネック指標の計算
+# MAGIC - **🏷️ ノード名解析・改善関数** - 汎用的なノード名の具体化と改善
+# MAGIC - **🎯 ボトルネック指標計算関数** - 実行時間とコンパイル時間の比率分析
+# MAGIC - **🧬 Liquid Clustering分析関数** - プロファイラーデータからのカラム情報抽出
+# MAGIC - **🤖 LLMによるボトルネック分析関数** - 抽出メトリクスのLLM分析用フォーマット
+# MAGIC - **🔌 個別LLMプロバイダー接続関数** - Databricks/OpenAI/Azure/Anthropic接続
+# MAGIC - **🚀 SQLプロファイラーJSONファイル読み込み実行** - 設定ファイルパスからの読み込み実行
+# MAGIC - **📊 パフォーマンスメトリクス抽出と概要表示** - プロファイラーデータからメトリクス抽出
+# MAGIC - **🔍 ボトルネック指標詳細表示と時間消費TOP10** - Photon利用状況とパフォーマンス分析
+# MAGIC - **💾 メトリクス保存と時間消費分析** - 抽出メトリクスのJSON保存と詳細分析
+# MAGIC - **📋 LLMボトルネック分析実行の準備** - 設定LLMプロバイダーの確認と表示
+# MAGIC - **🎯 LLMボトルネック分析結果の表示** - 設定LLMプロバイダーによる詳細分析結果
+# MAGIC - **💾 分析結果の保存と完了サマリー** - LLM分析結果のテキストファイル保存
+# MAGIC - **🔧 SQL最適化関連関数定義** - SQL最適化、クエリ抽出、ファイル生成機能
+# MAGIC - **🚀 SQLクエリ最適化の実行（ステップ1: クエリ抽出）** - プロファイラーデータからのクエリ抽出
+# MAGIC - **🤖 LLMによるSQL最適化（ステップ2: 最適化実行）** - LLMを使用した抽出クエリの最適化
+# MAGIC - **💾 最適化結果の保存（ステップ3: ファイル生成）** - 最適化SQLクエリのファイル保存
+# MAGIC - **🧪 テスト実行の準備（ステップ4: 実行ガイド）** - 生成ファイルの使用方法説明
+# MAGIC - **🏁 最終処理完了サマリー** - 全処理の完了状況確認と次ステップ提示
+# MAGIC - **📚 追加の使用方法とカスタマイズ** - ファイルアップロード方法とカスタマイズポイント
 
 # COMMAND ----------
 
@@ -1471,25 +1463,6 @@ except Exception as e:
     analysis_result = f"LLM分析エラー: {str(e)}"
 
 # COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 📋 メイン処理の実行
-# MAGIC 
-# MAGIC 以下のセルを順番に実行して、SQLプロファイラー分析を実行します。
-# MAGIC 
-# MAGIC ### 設定について
-# MAGIC 
-# MAGIC ファイルパスの設定は**セル2**で行います：
-# MAGIC 
-# MAGIC ```python
-# MAGIC JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'
-# MAGIC ```
-# MAGIC 
-# MAGIC **対応するファイルパス形式:**
-# MAGIC - Unity Catalog Volumes: `/Volumes/catalog/schema/volume/file.json`
-# MAGIC - FileStore: `/FileStore/shared_uploads/username/profiler.json`
-# MAGIC - DBFS: `/dbfs/FileStore/shared_uploads/username/profiler.json`
-# MAGIC - DBFS URI: `dbfs:/FileStore/shared_uploads/username/profiler.json`
 
 # COMMAND ----------
 
