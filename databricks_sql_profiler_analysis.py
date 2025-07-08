@@ -132,10 +132,10 @@ LLM_CONFIG = {
     # Databricks Model Serving設定
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
-        "max_tokens": 2000,
+        "max_tokens": 131072,  # 128K tokens
         "temperature": 0.1,
         "thinking_enabled": True,  # 拡張思考モード（thinking: {"type": "enabled"}）
-        "thinking_budget_tokens": 3000  # 思考用トークン予算
+        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens
     },
     
     # OpenAI設定
@@ -171,8 +171,10 @@ print(f"🤖 LLMプロバイダー: {LLM_CONFIG['provider']}")
 if LLM_CONFIG['provider'] == 'databricks':
     print(f"🔗 Databricksエンドポイント: {LLM_CONFIG['databricks']['endpoint_name']}")
     thinking_status = "有効" if LLM_CONFIG['databricks'].get('thinking_enabled', True) else "無効"
-    thinking_budget = LLM_CONFIG['databricks'].get('thinking_budget_tokens', 3000)
-    print(f"🧠 拡張思考モード: {thinking_status} (予算: {thinking_budget} tokens)")
+    thinking_budget = LLM_CONFIG['databricks'].get('thinking_budget_tokens', 65536)
+    max_tokens = LLM_CONFIG['databricks'].get('max_tokens', 131072)
+    print(f"🧠 拡張思考モード: {thinking_status} (予算: {thinking_budget:,} tokens)")
+    print(f"📊 最大トークン数: {max_tokens:,} tokens ({max_tokens//1024}K)")
 elif LLM_CONFIG['provider'] == 'openai':
     print(f"🔗 OpenAIモデル: {LLM_CONFIG['openai']['model']}")
 elif LLM_CONFIG['provider'] == 'azure_openai':
@@ -189,7 +191,8 @@ print()
 print("🧠 Databricks拡張思考モード設定例:")
 print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効')
 print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効')
-print('   LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 5000  # 思考用トークン予算')
+print('   LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 65536  # 思考用トークン予算(64K)')
+print('   LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 最大トークン数(128K)')
 print()
 
 # 必要なライブラリのインポート
