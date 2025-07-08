@@ -133,7 +133,8 @@ LLM_CONFIG = {
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
         "max_tokens": 2000,
-        "temperature": 0.1
+        "temperature": 0.1,
+        "thinking_enabled": True  # 拡張思考モード（thinking: {"type": "enabled"}）
     },
     
     # OpenAI設定
@@ -168,6 +169,8 @@ print(f"🤖 LLMプロバイダー: {LLM_CONFIG['provider']}")
 
 if LLM_CONFIG['provider'] == 'databricks':
     print(f"🔗 Databricksエンドポイント: {LLM_CONFIG['databricks']['endpoint_name']}")
+    thinking_status = "有効" if LLM_CONFIG['databricks'].get('thinking_enabled', True) else "無効"
+    print(f"🧠 拡張思考モード: {thinking_status}")
 elif LLM_CONFIG['provider'] == 'openai':
     print(f"🔗 OpenAIモデル: {LLM_CONFIG['openai']['model']}")
 elif LLM_CONFIG['provider'] == 'azure_openai':
@@ -180,6 +183,10 @@ print("💡 LLMプロバイダー切り替え例:")
 print('   LLM_CONFIG["provider"] = "openai"      # OpenAI GPT-4に切り替え')
 print('   LLM_CONFIG["provider"] = "anthropic"   # Anthropic Claudeに切り替え')
 print('   LLM_CONFIG["provider"] = "azure_openai" # Azure OpenAIに切り替え')
+print()
+print("🧠 Databricks拡張思考モード設定例:")
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効')
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効')
 print()
 
 # 必要なライブラリのインポート
@@ -1243,6 +1250,10 @@ def _call_databricks_llm(prompt: str) -> str:
             "max_tokens": config["max_tokens"],
             "temperature": config["temperature"]
         }
+        
+        # 拡張思考モードが有効な場合は追加
+        if config.get("thinking_enabled", True):
+            payload["thinking"] = {"type": "enabled"}
         
         # リトライ機能
         max_retries = 2
