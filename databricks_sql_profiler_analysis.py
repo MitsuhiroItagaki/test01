@@ -1194,13 +1194,17 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 
 【求める分析】
 1. 主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
-2. Liquid Clustering実装の優先順位と手順（パーティショニング・ZORDER以外）
+2. Liquid Clustering実装の優先順位と手順（パーティショニング・ZORDER以外をDatabricksSQLでサポートされる正しいSQL構文で提示）
 3. 各推奨カラムの選定理由と効果
 4. Photonエンジンの最適化案
 5. 並列度・シャッフル最適化案
 6. パフォーマンス改善見込み
 
 **重要**: パーティショニングやZORDERは提案せず、Liquid Clusteringのみを推奨してください。
+Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してください：
+- 新規テーブル作成時: CREATE TABLE ... CLUSTER BY (column1, column2, ...)
+- 既存テーブル変更時: ALTER TABLE table_name CLUSTER BY (column1, column2, ...)
+- Delta Liveテーブル: @dlt.table(cluster_by=["column1", "column2"])
 簡潔で実践的な改善提案を日本語で提供してください。
 """
     
@@ -1262,14 +1266,14 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 - {'並列度が低いステージが存在' if has_low_parallelism else '並列度は適切'}
 
 ## 🚀 推奨アクション
-1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング（パーティショニング・ZORDER不使用）
+1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング（正しいDatabricks SQL構文: ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
 2. **Photon有効化**: {'Photonエンジンを有効にする' if not photon_enabled else 'Photon設定を最適化'}
 3. **並列度最適化**: {'クラスターサイズ・並列度設定を見直し' if has_low_parallelism else '現在の並列度は適切'}
 4. **シャッフル最適化**: {'JOIN順序・GROUP BY最適化でシャッフル削減' if has_shuffle_bottleneck else 'シャッフル処理は最適'}
 5. **クエリ最適化**: WHERE句の条件を適切に設定
 6. **キャッシュ活用**: よく使用されるテーブルのキャッシュを検討
 
-**重要**: パーティショニングやZORDERは使用せず、Liquid Clusteringのみで最適化してください。
+**重要**: パーティショニングやZORDERは使用せず、正しいDatabricks SQL構文（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）を使用してLiquid Clusteringで最適化してください。
 
 **注意**: {provider} LLMエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
         """
@@ -2643,6 +2647,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 6. PHOTONエンジンの利用を優先してください
 7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
 8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
+9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
 
 【出力形式】
 ## 🚀 最適化されたSQLクエリ
