@@ -1768,7 +1768,7 @@ def convert_sets_to_lists(obj):
 
 from datetime import datetime
 metrics_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-output_path = f'extracted_metrics_{metrics_timestamp}.json'
+output_path = f'output_extracted_metrics_{metrics_timestamp}.json'
 try:
     # set型をlist型に変換してからJSONに保存
     serializable_metrics = convert_sets_to_lists(extracted_metrics)
@@ -2460,7 +2460,7 @@ print("=" * 80)
 # 💾 分析結果の保存と完了サマリー
 from datetime import datetime
 result_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-result_output_path = f'bottleneck_analysis_result_{result_timestamp}.txt'
+result_output_path = f'output_bottleneck_analysis_result_{result_timestamp}.txt'
 with open(result_output_path, 'w', encoding='utf-8') as file:
     file.write("Databricks SQLプロファイラー ボトルネック分析結果\n")
     file.write("=" * 60 + "\n\n")
