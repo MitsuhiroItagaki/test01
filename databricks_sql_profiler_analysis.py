@@ -2658,6 +2658,142 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     except Exception as e:
         return f"⚠️ SQL最適化の生成中にエラーが発生しました: {str(e)}"
 
+def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, Any]) -> str:
+    """
+    最も時間がかかっている処理TOP10のレポートを文字列として生成
+    """
+    report_lines = []
+    report_lines.append("## 🐌 最も時間がかかっている処理TOP10")
+    report_lines.append("=" * 80)
+    report_lines.append("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
+    report_lines.append('💿 スピル判定: "Sink - Num bytes spilled to disk due to memory pressure" > 0')
+    report_lines.append("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
+    report_lines.append("")
+
+    # ノードを実行時間でソート
+    sorted_nodes = sorted(extracted_metrics['node_metrics'], 
+                         key=lambda x: x['key_metrics'].get('durationMs', 0), 
+                         reverse=True)
+
+    if sorted_nodes:
+        # 全体の実行時間を計算
+        total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
+        
+        report_lines.append(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
+        report_lines.append(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes[:10]):,} ms")
+        report_lines.append("")
+        
+        for i, node in enumerate(sorted_nodes[:10]):
+            rows_num = node['key_metrics'].get('rowsNum', 0)
+            duration_ms = node['key_metrics'].get('durationMs', 0)
+            memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
+            
+            # 全体に対する時間の割合を計算
+            time_percentage = (duration_ms / max(total_duration, 1)) * 100
+            
+            # 時間の重要度に基づいてアイコンを選択
+            if duration_ms >= 10000:  # 10秒以上
+                time_icon = "🔴"
+                severity = "CRITICAL"
+            elif duration_ms >= 5000:  # 5秒以上
+                time_icon = "🟠"
+                severity = "HIGH"
+            elif duration_ms >= 1000:  # 1秒以上
+                time_icon = "🟡"
+                severity = "MEDIUM"
+            else:
+                time_icon = "🟢"
+                severity = "LOW"
+            
+            # メモリ使用量のアイコン
+            memory_icon = "💚" if memory_mb < 100 else "⚠️" if memory_mb < 1000 else "🚨"
+            
+            # より意味のあるノード名を取得
+            raw_node_name = node['name']
+            node_name = get_meaningful_node_name(node, extracted_metrics)
+            short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
+            
+            # 並列度情報の取得
+            num_tasks = 0
+            for stage in extracted_metrics.get('stage_metrics', []):
+                if duration_ms > 0:  # このノードに関連するステージを推定
+                    num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+            
+            # スピル検出
+            spill_detected = False
+            spill_bytes = 0
+            target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+            
+            # detailed_metricsから検索
+            detailed_metrics = node.get('detailed_metrics', {})
+            for metric_key, metric_info in detailed_metrics.items():
+                metric_value = metric_info.get('value', 0)
+                metric_label = metric_info.get('label', '')
+                
+                if (metric_key == target_spill_metric or 
+                    metric_label == target_spill_metric) and metric_value > 0:
+                    spill_detected = True
+                    spill_bytes = metric_value
+                    break
+            
+            # スキュー検出
+            skew_detected = False
+            node_metrics = node.get('metrics', {})
+            
+            # taskDurationによるスキュー検出
+            task_duration_stats = node_metrics.get('taskDuration', {})
+            if isinstance(task_duration_stats, dict):
+                max_duration = task_duration_stats.get('max', 0)
+                median_duration = task_duration_stats.get('median', 0)
+                
+                if median_duration > 0 and max_duration > 0:
+                    duration_ratio = max_duration / median_duration
+                    if duration_ratio >= 3.0:
+                        skew_detected = True
+            
+            # shuffleReadBytesによるスキュー検出
+            if not skew_detected:
+                shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
+                if isinstance(shuffle_read_stats, dict):
+                    max_shuffle = shuffle_read_stats.get('max', 0)
+                    median_shuffle = shuffle_read_stats.get('median', 0)
+                    
+                    if median_shuffle > 0 and max_shuffle > 0:
+                        shuffle_ratio = max_shuffle / median_shuffle
+                        if shuffle_ratio >= 3.0:
+                            skew_detected = True
+            
+            # 並列度アイコン
+            parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
+            # スピルアイコン
+            spill_icon = "💿" if spill_detected else "✅"
+            # スキューアイコン
+            skew_icon = "⚖️" if skew_detected else "✅"
+            
+            report_lines.append(f"{i+1:2d}. {time_icon}{memory_icon}{parallelism_icon}{spill_icon}{skew_icon} [{severity:8}] {short_name}")
+            report_lines.append(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
+            report_lines.append(f"    📊 処理行数: {rows_num:>8,} 行")
+            report_lines.append(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
+            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'あり' if skew_detected else 'なし'}")
+            
+            # 効率性指標（行/秒）を計算
+            if duration_ms > 0:
+                rows_per_sec = (rows_num * 1000) / duration_ms
+                report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
+            
+            # スピル詳細情報
+            if spill_detected and spill_bytes > 0:
+                report_lines.append(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
+            
+            # ノードIDも表示
+            report_lines.append(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
+            report_lines.append("")
+            
+    else:
+        report_lines.append("⚠️ ノードメトリクスが見つかりませんでした")
+    
+    return "\n".join(report_lines)
+
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any]) -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
@@ -2739,6 +2875,14 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
         f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
         f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+        
+        # 最も時間がかかっている処理TOP10の追加
+        f.write(f"\n\n")
+        try:
+            top10_report = generate_top10_time_consuming_processes_report(metrics)
+            f.write(top10_report)
+        except Exception as e:
+            f.write(f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n")
     
     # テスト実行用スクリプトの作成
     test_script_filename = f"test_optimized_query_{timestamp}.py"
