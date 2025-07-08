@@ -67,7 +67,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📁 セル2: 分析対象ファイル設定
+# MAGIC ## 📁 分析対象ファイル設定
 # MAGIC 
 # MAGIC **最初に、分析対象のSQLプロファイラーJSONファイルを指定してください。**
 # MAGIC 
@@ -114,7 +114,7 @@ print("🚀 次のセルに進んでください")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🤖 セル3: LLMエンドポイント設定
+# MAGIC ## 🤖 LLMエンドポイント設定
 # MAGIC 
 # MAGIC このセルでは以下の設定を行います：
 # MAGIC - LLMプロバイダーの選択（Databricks/OpenAI/Azure/Anthropic）
@@ -227,7 +227,7 @@ except Exception:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📂 セル4: SQLプロファイラーJSONファイル読み込み関数
+# MAGIC ## 📂 SQLプロファイラーJSONファイル読み込み関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - SQLプロファイラーJSONファイルの読み込み
@@ -278,7 +278,7 @@ print("✅ 関数定義完了: load_profiler_json")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📊 セル5: パフォーマンスメトリクス抽出関数
+# MAGIC ## 📊 パフォーマンスメトリクス抽出関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - SQLプロファイラーデータからのメトリクス抽出
@@ -406,7 +406,7 @@ print("✅ 関数定義完了: extract_performance_metrics")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🏷️ セル6: ノード名解析・改善関数
+# MAGIC ## 🏷️ ノード名解析・改善関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 汎用的なノード名（Whole Stage Codegen等）の具体化
@@ -618,7 +618,7 @@ print("✅ 関数定義完了: get_meaningful_node_name")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🎯 セル7: ボトルネック指標計算関数
+# MAGIC ## 🎯 ボトルネック指標計算関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 実行時間とコンパイル時間の比率分析
@@ -744,7 +744,7 @@ print("✅ 関数定義完了: calculate_bottleneck_indicators")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🧬 セル8: Liquid Clustering分析関数
+# MAGIC ## 🧬 Liquid Clustering分析関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - プロファイラーデータからのカラム情報抽出
@@ -1053,7 +1053,7 @@ print("✅ 関数定義完了: analyze_liquid_clustering_opportunities")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🤖 セル9: LLMによるボトルネック分析関数
+# MAGIC ## 🤖 LLMによるボトルネック分析関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 抽出されたメトリクスのLLM分析用フォーマット
@@ -1214,7 +1214,7 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔌 セル10: 個別LLMプロバイダー接続関数
+# MAGIC ## 🔌 個別LLMプロバイダー接続関数
 # MAGIC 
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - Databricks Model Serving エンドポイント接続
@@ -1409,7 +1409,7 @@ print("✅ 関数定義完了: analyze_bottlenecks_with_llm")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📋 セル15: LLMボトルネック分析実行の準備
+# MAGIC ## 📋 LLMボトルネック分析実行の準備
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたLLMプロバイダーの確認と表示
@@ -1494,7 +1494,7 @@ except Exception as e:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🚀 セル11: SQLプロファイラーJSONファイル読み込み実行
+# MAGIC ## 🚀 SQLプロファイラーJSONファイル読み込み実行
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたファイルパスからJSONファイルの読み込み
@@ -1523,7 +1523,7 @@ print()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📊 セル12: パフォーマンスメトリクス抽出と概要表示
+# MAGIC ## 📊 パフォーマンスメトリクス抽出と概要表示
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからメトリクスの抽出
@@ -1566,7 +1566,7 @@ print(f"📊 高インパクトテーブル数: {liquid_summary.get('high_impact
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔍 セル13: ボトルネック指標詳細表示と時間消費TOP10
+# MAGIC ## 🔍 ボトルネック指標詳細表示と時間消費TOP10
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - Photon エンジンの利用状況とパフォーマンス分析
@@ -1641,7 +1641,7 @@ print()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 💾 セル14: メトリクス保存と時間消費分析
+# MAGIC ## 💾 メトリクス保存と時間消費分析
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 抽出したメトリクスのJSON形式での保存
@@ -2129,7 +2129,7 @@ analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🎯 セル16: LLMボトルネック分析結果の表示
+# MAGIC ## 🎯 LLMボトルネック分析結果の表示
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたLLMプロバイダーによる詳細分析結果の表示
@@ -2150,7 +2150,7 @@ print("=" * 80)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 💾 セル17: 分析結果の保存と完了サマリー
+# MAGIC ## 💾 分析結果の保存と完了サマリー
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLM分析結果のテキストファイルへの保存
@@ -2193,7 +2193,7 @@ print("🎉" * 20)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔧 セル18: SQL最適化関連関数定義
+# MAGIC ## 🔧 SQL最適化関連関数定義
 # MAGIC 
 # MAGIC このセルでは以下の関数を定義します：
 # MAGIC - `extract_original_query_from_profiler_data`: プロファイラーデータからオリジナルクエリを抽出
@@ -2521,7 +2521,7 @@ print("✅ 関数定義完了: SQL最適化関連関数")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🚀 セル19: SQLクエリ最適化の実行（ステップ1: クエリ抽出）
+# MAGIC ## 🚀 SQLクエリ最適化の実行（ステップ1: クエリ抽出）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからオリジナルクエリの抽出
@@ -2573,7 +2573,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🤖 セル20: LLMによるSQL最適化（ステップ2: 最適化実行）
+# MAGIC ## 🤖 LLMによるSQL最適化（ステップ2: 最適化実行）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLMを使用した抽出クエリの最適化
@@ -2624,7 +2624,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 💾 セル21: 最適化結果の保存（ステップ3: ファイル生成）
+# MAGIC ## 💾 最適化結果の保存（ステップ3: ファイル生成）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 最適化されたSQLクエリのファイル保存
@@ -2717,7 +2717,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🧪 セル22: テスト実行の準備（ステップ4: 実行ガイド）
+# MAGIC ## 🧪 テスト実行の準備（ステップ4: 実行ガイド）
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 生成されたファイルの使用方法説明
@@ -2770,7 +2770,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🏁 セル23: 最終処理完了サマリー
+# MAGIC ## 🏁 最終処理完了サマリー
 # MAGIC 
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 全処理の完了状況確認
@@ -2847,7 +2847,7 @@ print("🎉" * 25)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📚 セル24: 追加の使用方法とカスタマイズ
+# MAGIC ## 📚 追加の使用方法とカスタマイズ
 # MAGIC 
 # MAGIC ### 🔧 ファイルアップロード方法
 # MAGIC 
