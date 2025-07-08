@@ -1537,7 +1537,6 @@ except Exception as e:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ---
 # MAGIC # 🚀 メイン処理実行セクション
 # MAGIC 
 # MAGIC **ここからメインの分析処理が開始されます**
@@ -1551,7 +1550,6 @@ except Exception as e:
 # MAGIC - 🔧設定・準備セクション → 🚀メイン処理セクション → 🔧SQL最適化セクション の順序で実行
 # MAGIC - ファイルパスの設定は必ず最初のセルで行ってください
 # MAGIC - LLMエンドポイントの設定を確認してください
-# MAGIC ---
 
 # COMMAND ----------
 
