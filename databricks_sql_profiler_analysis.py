@@ -121,7 +121,7 @@ LLM_CONFIG = {
     "openai": {
         "api_key": "",  # OpenAI APIキー (環境変数OPENAI_API_KEYでも可)
         "model": "gpt-4o",  # gpt-4o, gpt-4-turbo, gpt-3.5-turbo
-        "max_tokens": 2000,
+        "max_tokens": 16000,
         "temperature": 0.1
     },
     
@@ -131,7 +131,7 @@ LLM_CONFIG = {
         "endpoint": "",  # https://your-resource.openai.azure.com/
         "deployment_name": "",  # デプロイメント名
         "api_version": "2024-02-01",
-        "max_tokens": 2000,
+        "max_tokens": 16000,
         "temperature": 0.1
     },
     
@@ -139,7 +139,7 @@ LLM_CONFIG = {
     "anthropic": {
         "api_key": "",  # Anthropic APIキー (環境変数ANTHROPIC_API_KEYでも可)
         "model": "claude-3-5-sonnet-20241022",  # claude-3-5-sonnet-20241022, claude-3-opus-20240229
-        "max_tokens": 2000,
+        "max_tokens": 16000,
         "temperature": 0.1
     }
 }
