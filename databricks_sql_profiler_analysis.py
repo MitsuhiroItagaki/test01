@@ -1729,30 +1729,26 @@ print()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 🐛 デバッグモード設定（オプション）
-# MAGIC 
-# MAGIC **スピル・スキューの判定根拠を詳細表示したい場合のみ実行してください**
-# MAGIC 
-# MAGIC 📋 **設定内容:**
-# MAGIC - `DEBUG_SPILL_ANALYSIS=true`: 特定メトリクススピル判定の詳細根拠を表示
-# MAGIC - `DEBUG_SKEW_ANALYSIS=true`: 統計ベーススキュー判定の詳細根拠を表示
-# MAGIC 
-# MAGIC 💿 **スピルデバッグ表示内容:**
-# MAGIC - ターゲットメトリクス: "Sink - Num bytes spilled to disk due to memory pressure"
-# MAGIC - 各データソース（detailed_metrics, raw_metrics, key_metrics）での検索結果
-# MAGIC - メトリクス発見時の値と判定結果
-# MAGIC - その他のスピル関連メトリクス一覧（参考情報）
-# MAGIC 
-# MAGIC 🎯 **スキューデバッグ表示内容:**
-# MAGIC - タスク実行時間・シャッフル読み込みの統計分布 (min/median/max)
-# MAGIC - max/median比率と基準値の比較
-# MAGIC - 最大/最小比率による分散度合い
-# MAGIC - 重要度レベル (高: ≥5倍, 中: 3-5倍)
+# 🐛 デバッグモード設定（オプション）
+# 
+# **スピル・スキューの判定根拠を詳細表示したい場合のみ実行してください**
+# 
+# 📋 設定内容:
+# - DEBUG_SPILL_ANALYSIS=true: 特定メトリクススピル判定の詳細根拠を表示
+# - DEBUG_SKEW_ANALYSIS=true: 統計ベーススキュー判定の詳細根拠を表示
+# 
+# 💿 スピルデバッグ表示内容:
+# - ターゲットメトリクス: "Sink - Num bytes spilled to disk due to memory pressure"
+# - 各データソース（detailed_metrics, raw_metrics, key_metrics）での検索結果
+# - メトリクス発見時の値と判定結果
+# - その他のスピル関連メトリクス一覧（参考情報）
+# 
+# 🎯 スキューデバッグ表示内容:
+# - タスク実行時間・シャッフル読み込みの統計分布 (min/median/max)
+# - max/median比率と基準値の比較
+# - 最大/最小比率による分散度合い
+# - 重要度レベル (高: ≥5倍, 中: 3-5倍)
 
-# COMMAND ----------
-
-# 🐛 デバッグモード設定（必要な場合のみ実行）
 import os
 
 # 特定メトリクススピル分析のデバッグ表示を有効にする場合はコメントアウトを解除
