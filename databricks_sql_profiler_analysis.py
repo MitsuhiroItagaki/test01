@@ -2486,7 +2486,14 @@ with open(result_output_path, 'w', encoding='utf-8') as file:
     file.write(f"分析日時: {pd.Timestamp.now()}\n")
     file.write(f"実行時間: {extracted_metrics['overall_metrics']['total_time_ms']:,} ms\n")
     file.write("=" * 60 + "\n\n")
-    file.write(analysis_result)
+    # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
+    if isinstance(analysis_result, list):
+        # リストの場合は要素を結合して文字列に変換
+        analysis_result_str = '\n'.join(str(item) for item in analysis_result)
+    else:
+        analysis_result_str = str(analysis_result)
+    
+    file.write(analysis_result_str)
 print(f"✅ 分析結果を保存しました: {result_output_path}")
 
 # 最終的なサマリー
@@ -2834,6 +2841,11 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     import re
     from datetime import datetime
     
+    # thinking_enabled: Trueの場合にoptimized_resultがリストになることがあるため対応
+    if isinstance(optimized_result, list):
+        # リストの場合は要素を結合して文字列に変換
+        optimized_result = '\n'.join(str(item) for item in optimized_result)
+    
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
     
@@ -2995,9 +3007,16 @@ print("-" * 40)
 if original_query.strip():
     print(f"🔄 {provider.upper()} を使用してクエリを最適化中...")
     
+    # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
+    if isinstance(analysis_result, list):
+        # リストの場合は要素を結合して文字列に変換
+        analysis_result_str = '\n'.join(str(item) for item in analysis_result)
+    else:
+        analysis_result_str = str(analysis_result)
+    
     optimized_result = generate_optimized_query_with_llm(
         original_query, 
-        analysis_result, 
+        analysis_result_str, 
         extracted_metrics
     )
     
