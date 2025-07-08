@@ -489,11 +489,61 @@ def get_meaningful_node_name(node: Dict[str, Any], extracted_metrics: Dict[str, 
     
     # 3. メタデータから処理の詳細を追加
     
-    # データベース・テーブル情報を追加
-    if 'SCAN_TABLE' in metadata_info:
-        table_name = metadata_info['SCAN_TABLE']
-        if 'scan' in enhanced_name.lower():
-            enhanced_name = f"Scan {table_name}"
+    # データベース・テーブル情報を追加（強化版）
+    table_name = None
+    
+    # 複数のメタデータキーからテーブル名を抽出
+    for key_candidate in ['SCAN_TABLE', 'SCAN_IDENTIFIER', 'TABLE_NAME', 'RELATION', 'SCAN_RELATION']:
+        if key_candidate in metadata_info:
+            table_name = metadata_info[key_candidate]
+            break
+    
+    # メタデータからテーブル名を抽出できない場合、ノード名から推測
+    if not table_name and ('scan' in enhanced_name.lower() or 'data source' in enhanced_name.lower()):
+        # ノード名からテーブル名を推測
+        import re
+        
+        # "Scan tpcds.tpcds_sf1000_delta_lc.customer" のような形式
+        table_patterns = [
+            r'[Ss]can\s+([a-zA-Z_][a-zA-Z0-9_.]*[a-zA-Z0-9_])',
+            r'[Tt]able\s+([a-zA-Z_][a-zA-Z0-9_.]*[a-zA-Z0-9_])',
+            r'([a-zA-Z_][a-zA-Z0-9_]*\.)+([a-zA-Z_][a-zA-Z0-9_]*)',
+        ]
+        
+        for pattern in table_patterns:
+            match = re.search(pattern, original_name)
+            if match:
+                if '.' in match.group(0):
+                    # フルテーブル名（schema.table）の場合は最後の部分を使用
+                    table_name = match.group(0).split('.')[-1]
+                else:
+                    table_name = match.group(1) if match.lastindex and match.lastindex >= 1 else match.group(0)
+                break
+    
+    # メタデータのvaluesフィールドからもテーブル名を検索
+    if not table_name:
+        for meta in metadata:
+            values = meta.get('values', [])
+            if values:
+                for value in values:
+                    if isinstance(value, str) and '.' in value and len(value.split('.')) >= 2:
+                        # "schema.table" 形式の場合
+                        parts = value.split('.')
+                        if len(parts) >= 2 and not any(part.isdigit() for part in parts[-2:]):
+                            table_name = parts[-1]  # テーブル名部分
+                            break
+                if table_name:
+                    break
+    
+    # Data Source Scanの場合にテーブル名を表示
+    if table_name and ('scan' in enhanced_name.lower() or 'data source' in enhanced_name.lower()):
+        # テーブル名を短縮（長すぎる場合）
+        if len(table_name) > 30:
+            table_name = table_name[:27] + "..."
+        enhanced_name = f"Data Source Scan ({table_name})"
+    elif 'scan' in enhanced_name.lower() and 'data source' in enhanced_name.lower():
+        # テーブル名が見つからない場合でも、より明確な名前に
+        enhanced_name = "Data Source Scan"
     
     # Photon情報を追加
     if 'IS_PHOTON' in metadata_info and metadata_info['IS_PHOTON'] == 'true':
