@@ -64,6 +64,51 @@
 
 JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
 
+# 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
+OUTPUT_LANGUAGE = 'ja'  # デフォルト: 日本語
+
+# 💡 使用例:
+# OUTPUT_LANGUAGE = 'ja'  # 日本語でファイル出力
+# OUTPUT_LANGUAGE = 'en'  # 英語でファイル出力
+
+# 🌐 多言語メッセージ辞書
+MESSAGES = {
+    'ja': {
+        'bottleneck_title': 'Databricks SQLプロファイラー ボトルネック分析結果',
+        'query_id': 'クエリID',
+        'analysis_time': '分析日時',
+        'execution_time': '実行時間',
+        'sql_optimization_report': 'SQL最適化レポート',
+        'optimization_time': '最適化日時',
+        'original_file': 'オリジナルファイル',
+        'optimized_file': '最適化ファイル',
+        'optimization_analysis': '最適化分析結果',
+        'performance_metrics': 'パフォーマンスメトリクス参考情報',
+        'read_data': '読み込みデータ',
+        'spill': 'スピル',
+        'top10_processes': '最も時間がかかっている処理TOP10'
+    },
+    'en': {
+        'bottleneck_title': 'Databricks SQL Profiler Bottleneck Analysis Results',
+        'query_id': 'Query ID',
+        'analysis_time': 'Analysis Time',
+        'execution_time': 'Execution Time',
+        'sql_optimization_report': 'SQL Optimization Report',
+        'optimization_time': 'Optimization Time',
+        'original_file': 'Original File',
+        'optimized_file': 'Optimized File',
+        'optimization_analysis': 'Optimization Analysis Results',
+        'performance_metrics': 'Performance Metrics Reference',
+        'read_data': 'Data Read',
+        'spill': 'Spill',
+        'top10_processes': 'Top 10 Most Time-Consuming Processes'
+    }
+}
+
+def get_message(key: str) -> str:
+    """多言語メッセージを取得"""
+    return MESSAGES.get(OUTPUT_LANGUAGE, MESSAGES['ja']).get(key, key)
+
 # 📋 対応するファイルパス形式の例:
 # Unity Catalog Volumes:
 # JSON_FILE_PATH = '/Volumes/catalog/schema/volume/profiler.json'
@@ -2543,21 +2588,34 @@ from datetime import datetime
 result_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 result_output_path = f'output_bottleneck_analysis_result_{result_timestamp}.txt'
 with open(result_output_path, 'w', encoding='utf-8') as file:
-    file.write("Databricks SQLプロファイラー ボトルネック分析結果\n")
+    # 多言語対応タイトル
+    file.write(f"{get_message('bottleneck_title')}\n")
     file.write("=" * 60 + "\n\n")
-    file.write(f"クエリID: {extracted_metrics['query_info']['query_id']}\n")
-    file.write(f"分析日時: {pd.Timestamp.now()}\n")
-    file.write(f"実行時間: {extracted_metrics['overall_metrics']['total_time_ms']:,} ms\n")
+    file.write(f"{get_message('query_id')}: {extracted_metrics['query_info']['query_id']}\n")
+    file.write(f"{get_message('analysis_time')}: {pd.Timestamp.now()}\n")
+    file.write(f"{get_message('execution_time')}: {extracted_metrics['overall_metrics']['total_time_ms']:,} ms\n")
     file.write("=" * 60 + "\n\n")
+    
     # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
+    # signature等の不要な情報を確実に除外
     if isinstance(analysis_result, list):
-        # リストの場合は人間に読みやすい形式に変換
+        # リストの場合は人間に読みやすい形式に変換（signature等除外済み）
         analysis_result_str = format_thinking_response(analysis_result)
     else:
         analysis_result_str = str(analysis_result)
     
+    # 念のため、文字列からもsignature情報を除外
+    import re
+    # signatureパターンを除去（Base64のような長い文字列）
+    signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
+    analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
+    
     file.write(analysis_result_str)
-print(f"✅ 分析結果を保存しました: {result_output_path}")
+
+if OUTPUT_LANGUAGE == 'ja':
+    print(f"✅ 分析結果を保存しました: {result_output_path}")
+else:
+    print(f"✅ Analysis results saved: {result_output_path}")
 
 # 最終的なサマリー
 print("\n" + "🎉" * 20)
@@ -2972,31 +3030,37 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write("-- 以下は最適化分析の全結果です:\n\n")
             f.write(f"/*\n{optimized_result_main_content}\n*/")
     
-    # 分析レポートファイルの保存
+    # 分析レポートファイルの保存（多言語対応）
     report_filename = f"output_optimization_report_{timestamp}.md"
     with open(report_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# SQL最適化レポート\n\n")
-        f.write(f"**クエリID**: {query_id}\n")
-        f.write(f"**最適化日時**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"**オリジナルファイル**: {original_filename}\n")
-        f.write(f"**最適化ファイル**: {optimized_filename}\n\n")
-        f.write(f"## 最適化分析結果\n\n")
+        f.write(f"# {get_message('sql_optimization_report')}\n\n")
+        f.write(f"**{get_message('query_id')}**: {query_id}\n")
+        f.write(f"**{get_message('optimization_time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"**{get_message('original_file')}**: {original_filename}\n")
+        f.write(f"**{get_message('optimized_file')}**: {optimized_filename}\n\n")
+        f.write(f"## {get_message('optimization_analysis')}\n\n")
         f.write(optimized_result_for_file)
-        f.write(f"\n\n## パフォーマンスメトリクス参考情報\n\n")
+        f.write(f"\n\n## {get_message('performance_metrics')}\n\n")
         
-        # 主要メトリクスの追加
+        # 主要メトリクスの追加（多言語対応）
         overall_metrics = metrics.get('overall_metrics', {})
-        f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
-        f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
-        f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+        if OUTPUT_LANGUAGE == 'ja':
+            f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
+            f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+        else:
+            f.write(f"- **Execution Time**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
+            f.write(f"- **Data Read**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"- **Spill**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
         
-        # 最も時間がかかっている処理TOP10の追加
-        f.write(f"\n\n")
+        # 最も時間がかかっている処理TOP10の追加（多言語対応）
+        f.write(f"\n\n## {get_message('top10_processes')}\n")
         try:
             top10_report = generate_top10_time_consuming_processes_report(metrics)
             f.write(top10_report)
         except Exception as e:
-            f.write(f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n")
+            error_msg = f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
+            f.write(error_msg)
     
     return {
         'original_file': original_filename,
