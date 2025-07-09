@@ -1463,15 +1463,30 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     cache_ratio = metrics['bottleneck_indicators'].get('cache_hit_ratio', 0) * 100
     data_selectivity = metrics['bottleneck_indicators'].get('data_selectivity', 0) * 100
     
-    # Liquid Clustering推奨テーブル（上位3テーブルのみ）
-    top_tables = list(metrics['liquid_clustering_analysis']['recommended_tables'].items())[:3]
-    table_recommendations = [f"- {table}: {', '.join(info['clustering_columns'])}" for table, info in top_tables]
+    # Liquid Clustering分析情報の取得（LLMベース対応）
+    liquid_analysis = metrics.get('liquid_clustering_analysis', {})
+    extracted_data = liquid_analysis.get('extracted_data', {})
+    metadata_summary = extracted_data.get('metadata_summary', {})
     
-    # 高インパクトカラム（上位5個のみ）
-    high_impact_cols = [(col, analysis) for col, analysis in metrics['liquid_clustering_analysis']['detailed_column_analysis'].items() 
-                       if analysis.get('performance_impact') == 'high'][:5]
-    high_impact_summary = [f"- {col}: スコア={analysis['total_usage']}, 使用箇所=[{', '.join(analysis['usage_contexts'])}]" 
-                          for col, analysis in high_impact_cols]
+    # テーブル情報の簡潔版
+    table_info = extracted_data.get('table_info', {})
+    table_recommendations = []
+    if table_info:
+        for i, (table_name, table_details) in enumerate(list(table_info.items())[:3]):
+            table_recommendations.append(f"- {table_name}: LLM分析による推奨")
+    
+    # フィルター・JOIN・GROUP BYカラム情報
+    filter_columns = extracted_data.get('filter_columns', [])
+    join_columns = extracted_data.get('join_columns', [])
+    groupby_columns = extracted_data.get('groupby_columns', [])
+    
+    high_impact_summary = []
+    if filter_columns:
+        high_impact_summary.append(f"- フィルター条件: {len(filter_columns)}個のカラム抽出")
+    if join_columns:
+        high_impact_summary.append(f"- JOIN条件: {len(join_columns)}個のカラム抽出")
+    if groupby_columns:
+        high_impact_summary.append(f"- GROUP BY条件: {len(groupby_columns)}個のカラム抽出")
     
     # Photonと並列度の情報を追加
     photon_enabled = metrics['overall_metrics'].get('photon_enabled', False)
@@ -1504,12 +1519,12 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 - 並列度問題: {'あり' if has_low_parallelism else 'なし'}
 
 【Liquid Clustering推奨】
-テーブル数: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
+テーブル数: {metadata_summary.get('tables_identified', 0)}個
 推奨カラム:
-{chr(10).join(table_recommendations)}
+{chr(10).join(table_recommendations) if table_recommendations else "LLM分析結果を参照"}
 
-高インパクトカラム:
-{chr(10).join(high_impact_summary)}
+カラム抽出状況:
+{chr(10).join(high_impact_summary) if high_impact_summary else "分析データが不足しています"}
 
 【重要指標】
 - 最遅ステージ: {metrics['bottleneck_indicators'].get('slowest_stage_id', 'N/A')}
@@ -1575,8 +1590,8 @@ Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してく�
 - **低並列度ステージ**: {low_parallelism_count}個
 - **並列度問題**: {'あり' if has_low_parallelism else 'なし'}
 
-## �️ Liquid Clustering推奨事項
-**対象テーブル数**: {metrics['liquid_clustering_analysis']['summary'].get('tables_identified', 0)}個
+## 🗂️ Liquid Clustering推奨事項
+**対象テーブル数**: {metadata_summary.get('tables_identified', 0)}個
 
 **推奨実装**:
 {chr(10).join(table_recommendations) if table_recommendations else '- 推奨カラムが見つかりませんでした'}
