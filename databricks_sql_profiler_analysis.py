@@ -761,10 +761,91 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     else:
         indicators['photon_ratio'] = 0.0
     
-    # スピル検出
-    spill_bytes = overall.get('spill_to_disk_bytes', 0)
-    indicators['has_spill'] = spill_bytes > 0
-    indicators['spill_bytes'] = spill_bytes
+    # スピル検出（詳細版：Sink - Num bytes spilled to disk due to memory pressure ベース）
+    spill_detected = False
+    total_spill_bytes = 0
+    spill_details = []
+    
+    # ターゲットメトリクス名
+    target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+    
+    # 各ノードでスピル検出を実行
+    for node in metrics.get('node_metrics', []):
+        node_spill_found = False
+        
+        # 1. detailed_metricsから検索
+        detailed_metrics = node.get('detailed_metrics', {})
+        for metric_key, metric_info in detailed_metrics.items():
+            metric_value = metric_info.get('value', 0)
+            metric_label = metric_info.get('label', '')
+            
+            if (metric_key == target_spill_metric or 
+                metric_label == target_spill_metric) and metric_value > 0:
+                spill_detected = True
+                node_spill_found = True
+                total_spill_bytes += metric_value
+                spill_details.append({
+                    'node_id': node.get('node_id', ''),
+                    'node_name': node.get('name', ''),
+                    'spill_bytes': metric_value,
+                    'source': 'detailed_metrics'
+                })
+                break
+        
+        # 2. raw_metricsから検索（このノードでまだ見つからない場合）
+        if not node_spill_found:
+            raw_metrics = node.get('metrics', [])
+            for metric in raw_metrics:
+                metric_key = metric.get('key', '')
+                metric_label = metric.get('label', '')
+                metric_value = metric.get('value', 0)
+                
+                if (metric_key == target_spill_metric or 
+                    metric_label == target_spill_metric) and metric_value > 0:
+                    spill_detected = True
+                    node_spill_found = True
+                    total_spill_bytes += metric_value
+                    spill_details.append({
+                        'node_id': node.get('node_id', ''),
+                        'node_name': node.get('name', ''),
+                        'spill_bytes': metric_value,
+                        'source': 'raw_metrics'
+                    })
+                    break
+        
+        # 3. key_metricsから検索（最後のフォールバック）
+        if not node_spill_found:
+            key_metrics = node.get('key_metrics', {})
+            for key_metric_name, key_metric_value in key_metrics.items():
+                if key_metric_name == target_spill_metric and key_metric_value > 0:
+                    spill_detected = True
+                    node_spill_found = True
+                    total_spill_bytes += key_metric_value
+                    spill_details.append({
+                        'node_id': node.get('node_id', ''),
+                        'node_name': node.get('name', ''),
+                        'spill_bytes': key_metric_value,
+                        'source': 'key_metrics'
+                    })
+                    break
+    
+    # フォールバック: overall_metricsからの簡易検出
+    if not spill_detected:
+        fallback_spill_bytes = overall.get('spill_to_disk_bytes', 0)
+        if fallback_spill_bytes > 0:
+            spill_detected = True
+            total_spill_bytes = fallback_spill_bytes
+            spill_details.append({
+                'node_id': 'overall',
+                'node_name': 'Overall Metrics',
+                'spill_bytes': fallback_spill_bytes,
+                'source': 'overall_metrics'
+            })
+    
+    indicators['has_spill'] = spill_detected
+    indicators['spill_bytes'] = total_spill_bytes
+    indicators['spill_details'] = spill_details
+    indicators['spill_nodes_count'] = len(spill_details)
     
     # 最も時間のかかるステージ
     stage_durations = [(s['stage_id'], s['duration_ms']) for s in metrics.get('stage_metrics', []) if s['duration_ms'] > 0]
