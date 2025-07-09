@@ -1824,6 +1824,8 @@ def format_thinking_response(response) -> str:
     思考過程（thinking）とシグネチャ（signature）等の不要な情報は除外し、最終的な結論のみを表示
     JSON構造や不適切な文字列の露出を防止
     """
+    import re  # reモジュールのインポートを追加
+    
     if not isinstance(response, list):
         # リストでない場合は文字列として処理し、クリーンアップ
         cleaned_text = clean_response_text(str(response))
@@ -1890,6 +1892,8 @@ def looks_like_json_structure(text):
 
 def clean_response_text(text):
     """レスポンステキストのクリーンアップ"""
+    import re
+    
     if not text or not isinstance(text, str):
         return ""
     
@@ -1897,7 +1901,6 @@ def clean_response_text(text):
     text = text.replace('\\n', '\n').replace('\\t', '\t')
     
     # JSON構造の除去
-    import re
     
     # 典型的なJSON構造パターンを除去
     json_patterns = [
@@ -1930,6 +1933,8 @@ def clean_response_text(text):
 
 def is_valid_content(text):
     """コンテンツが有効かどうかをチェック"""
+    import re
+    
     if not text or len(text.strip()) < 10:
         return False
     
@@ -1950,6 +1955,8 @@ def is_valid_content(text):
 
 def final_quality_check(text):
     """最終的な品質チェックとクリーンアップ"""
+    import re  # reモジュールのインポートを追加
+    
     if not text:
         return "分析結果の抽出に失敗しました。"
     
