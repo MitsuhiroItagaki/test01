@@ -1776,6 +1776,7 @@ print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
 def format_thinking_response(response) -> str:
     """
     thinking_enabled: Trueの場合のレスポンスを人間に読みやすい形式に変換
+    思考過程は除外し、最終的な結論のみを表示
     """
     if not isinstance(response, list):
         # リストでない場合はそのまま文字列として返す
@@ -1785,31 +1786,21 @@ def format_thinking_response(response) -> str:
     
     for item in response:
         if isinstance(item, dict):
-            # 辞書形式の場合、各キーの内容を適切に処理
-            if 'thinking' in item and item['thinking']:
-                thinking_content = str(item['thinking']).replace('\\n', '\n')
-                formatted_parts.append("## 🤔 思考過程\n")
-                formatted_parts.append(thinking_content)
-                formatted_parts.append("\n" + "="*60 + "\n")
+            # 思考過程（thinking）は除外し、結論部分のみを表示
             
-            if 'summary_text' in item and item['summary_text']:
-                summary_content = str(item['summary_text']).replace('\\n', '\n')
-                formatted_parts.append("## 📋 要約\n")
-                formatted_parts.append(summary_content)
-                formatted_parts.append("\n" + "-"*40 + "\n")
-            
+            # 優先順位: text > summary_text > その他
             if 'text' in item and item['text']:
                 main_content = str(item['text']).replace('\\n', '\n')
-                formatted_parts.append("## 📄 回答内容\n")
                 formatted_parts.append(main_content)
-            
-            # その他のキーも処理
-            for key, value in item.items():
-                if key not in ['thinking', 'summary_text', 'text'] and value:
-                    content = str(value).replace('\\n', '\n')
-                    formatted_parts.append(f"## {key.title()}\n")
-                    formatted_parts.append(content)
-                    formatted_parts.append("\n")
+            elif 'summary_text' in item and item['summary_text']:
+                summary_content = str(item['summary_text']).replace('\\n', '\n')
+                formatted_parts.append(summary_content)
+            else:
+                # その他のキーも処理（thinking以外）
+                for key, value in item.items():
+                    if key not in ['thinking'] and value:
+                        content = str(value).replace('\\n', '\n')
+                        formatted_parts.append(content)
         else:
             # 辞書でない場合はそのまま追加（改行コードを実際の改行に変換）
             content = str(item).replace('\\n', '\n')
