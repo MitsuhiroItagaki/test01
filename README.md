@@ -546,17 +546,17 @@ TypeError: write() argument must be str, not list
 #### 1. thinking_enabled使用時
 
 ```python
-# 本格的な分析にはthinking_enabledを推奨
+# デフォルト設定（拡張思考モード有効）
 LLM_CONFIG = {
     "provider": "databricks",
-    "thinking_enabled": True,  # 詳細な分析プロセスを表示
+    "thinking_enabled": True,  # 詳細な分析プロセス（デフォルト: 有効）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
         "max_tokens": 131072  # 128K tokens（思考プロセス込み）
     }
 }
 
-# 高速実行が必要な場合
+# 高速実行が必要な場合のみ
 LLM_CONFIG = {
     "provider": "databricks", 
     "thinking_enabled": False,  # 結果のみ表示（高速）

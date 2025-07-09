@@ -158,7 +158,7 @@ LLM_CONFIG = {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
         "max_tokens": 131072,  # 128K tokens
         "temperature": 0.1,
-        "thinking_enabled": False,  # 拡張思考モード（デフォルト: 無効）
+        "thinking_enabled": True,  # 拡張思考モード（デフォルト: 有効）
         "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens
     },
     
@@ -213,8 +213,8 @@ print('   LLM_CONFIG["provider"] = "anthropic"   # Anthropic Claudeに切り替�
 print('   LLM_CONFIG["provider"] = "azure_openai" # Azure OpenAIに切り替え')
 print()
 print("🧠 Databricks拡張思考モード設定例:")
-print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効(デフォルト)')
-print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効')
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効(デフォルト)')
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効（高速処理）')
 print('   LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 65536  # 思考用トークン予算(64K)')
 print('   LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 最大トークン数(128K)')
 print()
