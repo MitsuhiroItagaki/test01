@@ -3232,53 +3232,17 @@ def extract_table_size_estimates_from_plan(profiler_data: Dict[str, Any]) -> Dic
     """
     実行プランからテーブルごとの推定サイズ情報を抽出
     
+    注意: Databricksクエリプロファイルには estimatedSizeInBytes が含まれていないため、
+    この機能は現在無効化されています。メトリクスベースの推定を使用してください。
+    
     Args:
         profiler_data: プロファイラーデータ
         
     Returns:
-        Dict: テーブル名をキーとした推定サイズ情報の辞書
+        Dict: 空の辞書（機能無効化）
     """
-    table_size_estimates = {}
-    
-    try:
-        physical_plan = profiler_data.get("executionPlan", {}).get("physicalPlan", {})
-        nodes = physical_plan.get("nodes", [])
-        
-        for node in nodes:
-            node_name = node.get("nodeName", "")
-            metrics = node.get("metrics", {})
-            
-            # Scan系ノード（テーブルスキャン）の情報を抽出
-            if any(scan_type in node_name.lower() for scan_type in ["scan", "filescan", "delta"]):
-                # estimatedSizeInBytesを取得
-                estimated_size_bytes = metrics.get("estimatedSizeInBytes")
-                
-                if estimated_size_bytes is not None:
-                    # テーブル名の抽出を試行
-                    table_name = extract_table_name_from_scan_node(node)
-                    
-                    if table_name:
-                        table_size_estimates[table_name] = {
-                            'estimated_size_bytes': estimated_size_bytes,
-                            'estimated_size_mb': estimated_size_bytes / (1024 * 1024),
-                            'node_name': node_name,
-                            'node_id': node.get("id", "unknown"),
-                            'source': 'execution_plan_estimate',
-                            'confidence': 'high'  # Sparkエンジンの推定なので高信頼度
-                        }
-                        
-                        # 追加のメトリクス情報があれば含める
-                        if "numFiles" in metrics:
-                            table_size_estimates[table_name]['num_files'] = metrics["numFiles"]
-                        if "numPartitions" in metrics:
-                            table_size_estimates[table_name]['num_partitions'] = metrics["numPartitions"]
-                        if "sizeInBytes" in metrics:
-                            table_size_estimates[table_name]['actual_size_bytes'] = metrics["sizeInBytes"]
-    
-    except Exception as e:
-        print(f"⚠️ テーブルサイズ推定の抽出でエラー: {str(e)}")
-    
-    return table_size_estimates
+    # DatabricksクエリプロファイルにestimatedSizeInBytesが含まれていないため無効化
+    return {}
 
 def extract_table_name_from_scan_node(node: Dict[str, Any]) -> str:
     """
@@ -3528,8 +3492,8 @@ def extract_execution_plan_info(profiler_data: Dict[str, Any]) -> Dict[str, Any]
         "tables_scanned": len(plan_info["table_scan_details"])
     }
     
-    # 実行プランからのテーブルサイズ推定情報を追加
-    plan_info["table_size_estimates"] = extract_table_size_estimates_from_plan(profiler_data)
+    # 実行プランからのテーブルサイズ推定情報を追加（estimatedSizeInBytes利用不可のため無効化）
+    plan_info["table_size_estimates"] = {}  # extract_table_size_estimates_from_plan(profiler_data)
     
     return plan_info
 
@@ -3548,21 +3512,15 @@ def get_spark_broadcast_threshold() -> float:
 
 def estimate_uncompressed_size(compressed_size_mb: float, file_format: str = "parquet") -> float:
     """
-    圧縮サイズから非圧縮サイズを推定
-    """
-    # ファイル形式別の一般的な圧縮率
-    compression_ratios = {
-        "parquet": 4.0,    # Parquetは通常3-5倍圧縮
-        "delta": 4.0,      # Delta Lakeも同様
-        "orc": 3.5,        # ORC
-        "json": 6.0,       # JSONは高圧縮率
-        "csv": 3.0,        # CSV
-        "avro": 3.5,       # Avro
-        "default": 4.0     # デフォルト
-    }
+    圧縮サイズから非圧縮サイズを推定（3.0倍固定）
     
-    ratio = compression_ratios.get(file_format.lower(), compression_ratios["default"])
-    return compressed_size_mb * ratio
+    注意: 実際のestimatedSizeInBytesが利用できないため、
+    保守的な3.0倍圧縮率で統一して推定します。
+    """
+    # 保守的な3.0倍圧縮率で統一（estimatedSizeInBytes利用不可のため）
+    compression_ratio = 3.0
+    
+    return compressed_size_mb * compression_ratio
 
 def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, plan_info: Dict[str, Any] = None) -> Dict[str, Any]:
     """
@@ -3679,27 +3637,12 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 elif "CSV" in node_name:
                     file_format = "csv"
             
-            # 実行プランからの推定サイズを優先使用（新機能）
-            plan_size_info = None
+            # メトリクスベース推定のみ使用（estimatedSizeInBytes利用不可のため）
             estimated_compressed_mb = 0
             estimated_uncompressed_mb = 0
             size_source = "metrics_estimation"
             
-            # 1. 実行プランからの正確なサイズ情報を確認
-            if plan_info and table_size_estimates:
-                for table_name, size_info in table_size_estimates.items():
-                    # テーブル名の照合（複数パターン）
-                    if (table_name_from_plan != "unknown" and table_name in table_name_from_plan) or \
-                       (table_name in node_name) or \
-                       any(part in node_name for part in table_name.split('.') if len(part) > 3):
-                        plan_size_info = size_info
-                        estimated_compressed_mb = size_info['estimated_size_mb']
-                        estimated_uncompressed_mb = estimate_uncompressed_size(estimated_compressed_mb, file_format)
-                        size_source = "execution_plan_estimate"
-                        break
-            
-            # 2. フォールバック: 従来のメトリクスベース推定
-            if plan_size_info is None:
+            # メトリクスベース推定
                 total_read_bytes = overall_metrics.get('read_bytes', 0)
                 total_rows = overall_metrics.get('rows_read_count', 0)
                 
@@ -3749,12 +3692,11 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 "estimated_compressed_mb": estimated_compressed_mb,
                 "estimated_uncompressed_mb": estimated_uncompressed_mb,
                 "file_format": file_format,
-                "compression_ratio": estimated_uncompressed_mb / max(estimated_compressed_mb, 0.1),
+                "compression_ratio": 3.0,  # 固定3.0倍圧縮率
                 "node_id": node.get('node_id', ''),
                 "is_already_broadcasted": is_already_broadcasted,
                 "size_estimation_source": size_source,
-                "plan_size_info": plan_size_info,
-                "size_confidence": "high" if size_source == "execution_plan_estimate" else "medium"
+                "size_confidence": "medium"  # メトリクスベース推定のため中程度信頼度
             }
             scan_nodes.append(scan_info)
             
@@ -3814,7 +3756,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 "broadcast_feasible": True,
                 "confidence": "confirmed",
                 "status": "already_applied",
-                "reasoning": f"実行プランで既にBROADCAST適用確認済み（推定サイズ: 非圧縮{uncompressed_size_mb:.1f}MB、{scan.get('size_estimation_source', 'unknown')}ベース）"
+                "reasoning": f"実行プランで既にBROADCAST適用確認済み（推定サイズ: 非圧縮{uncompressed_size_mb:.1f}MB、メトリクスベース推定）"
             })
         elif uncompressed_size_mb <= broadcast_safe_mb and scan["rows"] > 0:
             # 安全マージン内（24MB以下）- 強く推奨
@@ -3831,7 +3773,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 "broadcast_feasible": True,
                 "confidence": "high",
                 "status": "new_recommendation",
-                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（安全閾値 {broadcast_safe_mb:.1f}MB 以下）でBROADCAST強く推奨（{scan.get('size_estimation_source', 'unknown')}ベース、信頼度: {scan.get('size_confidence', 'medium')}）"
+                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（安全閾値 {broadcast_safe_mb:.1f}MB 以下）でBROADCAST強く推奨（メトリクスベース推定、3.0倍圧縮率）"
             })
         elif uncompressed_size_mb <= broadcast_threshold_mb and scan["rows"] > 0:
             # 閾値内だが安全マージンは超過（24-30MB）- 条件付き推奨
@@ -3848,7 +3790,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 "broadcast_feasible": True,
                 "confidence": "medium",
                 "status": "new_recommendation",
-                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（閾値 {broadcast_threshold_mb:.1f}MB 以下だが安全マージン {broadcast_safe_mb:.1f}MB 超過）で条件付きBROADCAST推奨（{scan.get('size_estimation_source', 'unknown')}ベース、信頼度: {scan.get('size_confidence', 'medium')}）"
+                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（閾値 {broadcast_threshold_mb:.1f}MB 以下だが安全マージン {broadcast_safe_mb:.1f}MB 超過）で条件付きBROADCAST推奨（メトリクスベース推定、3.0倍圧縮率）"
             })
         elif uncompressed_size_mb > broadcast_max_mb:
             # 明らかに大きすぎる（300MB超）
@@ -4451,15 +4393,15 @@ def generate_execution_plan_markdown_report_ja(plan_info: Dict[str, Any]) -> str
             lines.append(f"- **プッシュダウンフィルタ数**: {len(scan_detail.get('pushed_filters', []))}")
             lines.append(f"- **出力カラム数**: {len(scan_detail.get('output_columns', []))}")
             
-            # 実行プランからのサイズ推定情報を追加
-            size_info = table_size_estimates.get(table_name)
-            if size_info:
-                lines.append(f"- **推定サイズ（実行プラン）**: {size_info['estimated_size_mb']:.1f}MB")
-                lines.append(f"- **サイズ推定信頼度**: {size_info.get('confidence', 'medium')}")
-                if 'num_files' in size_info:
-                    lines.append(f"- **ファイル数**: {size_info['num_files']}")
-                if 'num_partitions' in size_info:
-                    lines.append(f"- **パーティション数**: {size_info['num_partitions']}")
+            # 実行プランからのサイズ推定情報（estimatedSizeInBytes利用不可のため無効化）
+            # size_info = table_size_estimates.get(table_name)
+            # if size_info:
+            #     lines.append(f"- **推定サイズ（実行プラン）**: {size_info['estimated_size_mb']:.1f}MB")
+            #     lines.append(f"- **サイズ推定信頼度**: {size_info.get('confidence', 'medium')}")
+            #     if 'num_files' in size_info:
+            #         lines.append(f"- **ファイル数**: {size_info['num_files']}")
+            #     if 'num_partitions' in size_info:
+            #         lines.append(f"- **パーティション数**: {size_info['num_partitions']}")
             
             pushed_filters = scan_detail.get('pushed_filters', [])
             if pushed_filters:
@@ -4502,28 +4444,28 @@ def generate_execution_plan_markdown_report_ja(plan_info: Dict[str, Any]) -> str
                 lines.append(f"- **集約関数**: {', '.join(agg_expressions[:5])}")
             lines.append("")
     
-    # テーブルサイズ推定情報サマリー
-    table_size_estimates = plan_info.get("table_size_estimates", {})
-    if table_size_estimates:
-        lines.append("## 📏 テーブルサイズ推定情報（実行プランベース）")
-        lines.append("")
-        total_estimated_size = sum(size_info['estimated_size_mb'] for size_info in table_size_estimates.values())
-        lines.append(f"- **推定対象テーブル数**: {len(table_size_estimates)}")
-        lines.append(f"- **総推定サイズ**: {total_estimated_size:.1f}MB")
-        lines.append("")
-        
-        for table_name, size_info in list(table_size_estimates.items())[:5]:  # 最大5テーブル表示
-            lines.append(f"### {table_name}")
-            lines.append(f"- **推定サイズ**: {size_info['estimated_size_mb']:.1f}MB")
-            lines.append(f"- **信頼度**: {size_info.get('confidence', 'medium')}")
-            lines.append(f"- **ノード**: {size_info.get('node_name', 'unknown')}")
-            if 'num_files' in size_info:
-                lines.append(f"- **ファイル数**: {size_info['num_files']}")
-            lines.append("")
-        
-        if len(table_size_estimates) > 5:
-            lines.append(f"...他 {len(table_size_estimates) - 5} テーブル（詳細は上記セクション参照）")
-            lines.append("")
+    # テーブルサイズ推定情報サマリー（estimatedSizeInBytes利用不可のため無効化）
+    # table_size_estimates = plan_info.get("table_size_estimates", {})
+    # if table_size_estimates:
+    #     lines.append("## 📏 テーブルサイズ推定情報（実行プランベース）")
+    #     lines.append("")
+    #     total_estimated_size = sum(size_info['estimated_size_mb'] for size_info in table_size_estimates.values())
+    #     lines.append(f"- **推定対象テーブル数**: {len(table_size_estimates)}")
+    #     lines.append(f"- **総推定サイズ**: {total_estimated_size:.1f}MB")
+    #     lines.append("")
+    #     
+    #     for table_name, size_info in list(table_size_estimates.items())[:5]:  # 最大5テーブル表示
+    #         lines.append(f"### {table_name}")
+    #         lines.append(f"- **推定サイズ**: {size_info['estimated_size_mb']:.1f}MB")
+    #         lines.append(f"- **信頼度**: {size_info.get('confidence', 'medium')}")
+    #         lines.append(f"- **ノード**: {size_info.get('node_name', 'unknown')}")
+    #         if 'num_files' in size_info:
+    #             lines.append(f"- **ファイル数**: {size_info['num_files']}")
+    #         lines.append("")
+    #     
+    #     if len(table_size_estimates) > 5:
+    #         lines.append(f"...他 {len(table_size_estimates) - 5} テーブル（詳細は上記セクション参照）")
+    #         lines.append("")
     
     # 最適化推奨事項
     lines.append("## 💡 プランベース最適化推奨事項")
@@ -4545,19 +4487,19 @@ def generate_execution_plan_markdown_report_ja(plan_info: Dict[str, Any]) -> str
         lines.append("- Liquid Clusteringの適用を検討")
     lines.append("")
     
-    # サイズ推定ベースの最適化提案
-    table_size_estimates = plan_info.get("table_size_estimates", {})
-    if table_size_estimates:
-        small_tables = [name for name, info in table_size_estimates.items() if info['estimated_size_mb'] <= 30]
-        if small_tables:
-            lines.append("💡 **実行プランベースBROADCAST推奨**")
-            lines.append(f"- 30MB以下の小テーブル: {len(small_tables)}個検出")
-            for table in small_tables[:3]:  # 最大3個表示
-                size_mb = table_size_estimates[table]['estimated_size_mb']
-                lines.append(f"  • {table}: {size_mb:.1f}MB（BROADCAST候補）")
-            if len(small_tables) > 3:
-                lines.append(f"  • ...他 {len(small_tables) - 3} テーブル")
-            lines.append("")
+    # サイズ推定ベースの最適化提案（estimatedSizeInBytes利用不可のため無効化）
+    # table_size_estimates = plan_info.get("table_size_estimates", {})
+    # if table_size_estimates:
+    #     small_tables = [name for name, info in table_size_estimates.items() if info['estimated_size_mb'] <= 30]
+    #     if small_tables:
+    #         lines.append("💡 **実行プランベースBROADCAST推奨**")
+    #         lines.append(f"- 30MB以下の小テーブル: {len(small_tables)}個検出")
+    #         for table in small_tables[:3]:  # 最大3個表示
+    #             size_mb = table_size_estimates[table]['estimated_size_mb']
+    #             lines.append(f"  • {table}: {size_mb:.1f}MB（BROADCAST候補）")
+    #         if len(small_tables) > 3:
+    #             lines.append(f"  • ...他 {len(small_tables) - 3} テーブル")
+    #         lines.append("")
     
     lines.append("---")
     lines.append("")
@@ -4654,15 +4596,15 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
             lines.append(f"- **Pushed Filters**: {len(scan_detail.get('pushed_filters', []))}")
             lines.append(f"- **Output Columns**: {len(scan_detail.get('output_columns', []))}")
             
-            # Add execution plan size estimation info
-            size_info = table_size_estimates.get(table_name)
-            if size_info:
-                lines.append(f"- **Estimated Size (Execution Plan)**: {size_info['estimated_size_mb']:.1f}MB")
-                lines.append(f"- **Size Estimation Confidence**: {size_info.get('confidence', 'medium')}")
-                if 'num_files' in size_info:
-                    lines.append(f"- **Number of Files**: {size_info['num_files']}")
-                if 'num_partitions' in size_info:
-                    lines.append(f"- **Number of Partitions**: {size_info['num_partitions']}")
+            # Add execution plan size estimation info (disabled - estimatedSizeInBytes not available)
+            # size_info = table_size_estimates.get(table_name)
+            # if size_info:
+            #     lines.append(f"- **Estimated Size (Execution Plan)**: {size_info['estimated_size_mb']:.1f}MB")
+            #     lines.append(f"- **Size Estimation Confidence**: {size_info.get('confidence', 'medium')}")
+            #     if 'num_files' in size_info:
+            #         lines.append(f"- **Number of Files**: {size_info['num_files']}")
+            #     if 'num_partitions' in size_info:
+            #         lines.append(f"- **Number of Partitions**: {size_info['num_partitions']}")
             
             pushed_filters = scan_detail.get('pushed_filters', [])
             if pushed_filters:
@@ -4705,28 +4647,28 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
                 lines.append(f"- **Aggregate Functions**: {', '.join(agg_expressions[:5])}")
             lines.append("")
     
-    # Table Size Estimation Summary
-    table_size_estimates = plan_info.get("table_size_estimates", {})
-    if table_size_estimates:
-        lines.append("## 📏 Table Size Estimation (Execution Plan Based)")
-        lines.append("")
-        total_estimated_size = sum(size_info['estimated_size_mb'] for size_info in table_size_estimates.values())
-        lines.append(f"- **Estimated Tables Count**: {len(table_size_estimates)}")
-        lines.append(f"- **Total Estimated Size**: {total_estimated_size:.1f}MB")
-        lines.append("")
-        
-        for table_name, size_info in list(table_size_estimates.items())[:5]:  # Show up to 5 tables
-            lines.append(f"### {table_name}")
-            lines.append(f"- **Estimated Size**: {size_info['estimated_size_mb']:.1f}MB")
-            lines.append(f"- **Confidence**: {size_info.get('confidence', 'medium')}")
-            lines.append(f"- **Node**: {size_info.get('node_name', 'unknown')}")
-            if 'num_files' in size_info:
-                lines.append(f"- **Number of Files**: {size_info['num_files']}")
-            lines.append("")
-        
-        if len(table_size_estimates) > 5:
-            lines.append(f"...and {len(table_size_estimates) - 5} more tables (see details in sections above)")
-            lines.append("")
+    # Table Size Estimation Summary (disabled - estimatedSizeInBytes not available)
+    # table_size_estimates = plan_info.get("table_size_estimates", {})
+    # if table_size_estimates:
+    #     lines.append("## 📏 Table Size Estimation (Execution Plan Based)")
+    #     lines.append("")
+    #     total_estimated_size = sum(size_info['estimated_size_mb'] for size_info in table_size_estimates.values())
+    #     lines.append(f"- **Estimated Tables Count**: {len(table_size_estimates)}")
+    #     lines.append(f"- **Total Estimated Size**: {total_estimated_size:.1f}MB")
+    #     lines.append("")
+    #     
+    #     for table_name, size_info in list(table_size_estimates.items())[:5]:  # Show up to 5 tables
+    #         lines.append(f"### {table_name}")
+    #         lines.append(f"- **Estimated Size**: {size_info['estimated_size_mb']:.1f}MB")
+    #         lines.append(f"- **Confidence**: {size_info.get('confidence', 'medium')}")
+    #         lines.append(f"- **Node**: {size_info.get('node_name', 'unknown')}")
+    #         if 'num_files' in size_info:
+    #             lines.append(f"- **Number of Files**: {size_info['num_files']}")
+    #         lines.append("")
+    #     
+    #     if len(table_size_estimates) > 5:
+    #         lines.append(f"...and {len(table_size_estimates) - 5} more tables (see details in sections above)")
+    #         lines.append("")
     
     # Plan-based Optimization Recommendations
     lines.append("## 💡 Plan-based Optimization Recommendations")
@@ -4748,19 +4690,19 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
         lines.append("- Consider applying Liquid Clustering")
     lines.append("")
     
-    # Size estimation based optimization suggestions
-    table_size_estimates = plan_info.get("table_size_estimates", {})
-    if table_size_estimates:
-        small_tables = [name for name, info in table_size_estimates.items() if info['estimated_size_mb'] <= 30]
-        if small_tables:
-            lines.append("💡 **Execution Plan Based BROADCAST Recommendations**")
-            lines.append(f"- Small tables ≤30MB detected: {len(small_tables)}")
-            for table in small_tables[:3]:  # Show up to 3 tables
-                size_mb = table_size_estimates[table]['estimated_size_mb']
-                lines.append(f"  • {table}: {size_mb:.1f}MB (BROADCAST candidate)")
-            if len(small_tables) > 3:
-                lines.append(f"  • ...and {len(small_tables) - 3} more tables")
-            lines.append("")
+    # Size estimation based optimization suggestions (disabled - estimatedSizeInBytes not available)
+    # table_size_estimates = plan_info.get("table_size_estimates", {})
+    # if table_size_estimates:
+    #     small_tables = [name for name, info in table_size_estimates.items() if info['estimated_size_mb'] <= 30]
+    #     if small_tables:
+    #         lines.append("💡 **Execution Plan Based BROADCAST Recommendations**")
+    #         lines.append(f"- Small tables ≤30MB detected: {len(small_tables)}")
+    #         for table in small_tables[:3]:  # Show up to 3 tables
+    #             size_mb = table_size_estimates[table]['estimated_size_mb']
+    #             lines.append(f"  • {table}: {size_mb:.1f}MB (BROADCAST candidate)")
+    #         if len(small_tables) > 3:
+    #             lines.append(f"  • ...and {len(small_tables) - 3} more tables")
+    #         lines.append("")
     
     lines.append("---")
     lines.append("")
@@ -5088,10 +5030,10 @@ def demonstrate_execution_plan_size_extraction():
     print("")
     print("🎯 従来の推定方法との比較:")
     print("  📈 従来: メトリクスベースの間接推定（推定精度: 中）")
-    print("  🎯 新機能: 実行プランの estimatedSizeInBytes 活用（推定精度: 高）")
-    print("  💪 利点: Sparkエンジンが実際に計算したサイズを直接使用")
+    print("  ❌ 新機能: 実行プランの estimatedSizeInBytes 活用（利用不可のため無効化）")
+    print("  ℹ️ 現在: 3.0倍圧縮率での保守的推定を採用")
     
-    return table_size_estimates
+    return {}
 
 print("✅ 関数定義完了: SQL最適化関連関数（実行プランサイズ推定対応）")
 
