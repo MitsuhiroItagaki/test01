@@ -4138,6 +4138,18 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 10. **BROADCAST分析結果を厳密に反映してください（30MB閾値）**：
     - Spark標準の30MB閾値（非圧縮）を厳格に適用
     - BROADCAST適用推奨（recommended/all_small）の場合のみBROADCASTヒント（/*+ BROADCAST(table_name) */）を適用
+    - **重要: BROADCASTヒント句は必ずSELECT文の直後に配置してください**
+      ```sql
+      SELECT /*+ BROADCAST(table_name) */
+        column1, column2, ...
+      FROM table1
+        JOIN table2 ON ...
+      ```
+    - **絶対に避けるべき誤った配置:**
+      ```sql
+      -- ❌ 間違い: JOIN句の中にヒントを配置
+      JOIN /*+ BROADCAST(table_name) */ table2 ON ...
+      ```
     - 非圧縮サイズが30MB以下の小テーブルのみBROADCAST対象
     - 30MB超過の大テーブルには絶対にBROADCASTヒントを適用しない
     - 条件付き推奨（24-30MB）の場合は要注意として明記
@@ -4152,6 +4164,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - オリジナルクエリのすべてのSELECT項目を保持してください
 - 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
 - 実際に実行できる完全なSQLクエリのみを出力してください
+- **BROADCASTヒントは必ずSELECT文の直後に配置し、JOIN句内には絶対に配置しないでください**
 
 【出力形式】（簡潔版）
 ## 最適化されたSQL
@@ -4178,6 +4191,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - 🔍 閾値適合性: [30MB以下で適合/30MB超過で非適合]
 - 💾 メモリ影響: [推定メモリ使用量]MB がワーカーノードにブロードキャスト
 - 🚀 期待効果: [ネットワーク転送量削減・JOIN処理高速化・シャッフル削減など]
+- ✅ **ヒント句配置**: SELECT文の直後に `/*+ BROADCAST(table_name) */` を正しく配置
 
 ## 期待効果  
 [実行時間・メモリ・スピル改善の見込み（BROADCAST効果を含む）]
