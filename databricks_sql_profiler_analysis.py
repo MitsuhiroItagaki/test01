@@ -153,13 +153,13 @@ LLM_CONFIG = {
     # エンドポイントタイプ: 'databricks', 'openai', 'azure_openai', 'anthropic'
     "provider": "databricks",
     
-    # Databricks Model Serving設定（完全なSQL生成用に最適化）
+    # Databricks Model Serving設定（高速実行優先）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnetの最大制限）
         "temperature": 0.0,    # 決定的な出力のため（0.1→0.0）
-        "thinking_enabled": True,  # 拡張思考モード（デフォルト: 有効）
-        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens（制限内最適化）
+        "thinking_enabled": False,  # 拡張思考モード（デフォルト: 無効 - 高速実行優先）
+        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens（有効時のみ使用）
     },
     
     # OpenAI設定（完全なSQL生成用に最適化）
@@ -199,6 +199,8 @@ if LLM_CONFIG['provider'] == 'databricks':
     max_tokens = LLM_CONFIG['databricks'].get('max_tokens', 131072)
     print(f"🧠 拡張思考モード: {thinking_status} (予算: {thinking_budget:,} tokens)")
     print(f"📊 最大トークン数: {max_tokens:,} tokens ({max_tokens//1024}K)")
+    if not LLM_CONFIG['databricks'].get('thinking_enabled', False):
+        print("⚡ 高速実行モード: 思考プロセスを省略して迅速な結果生成")
 elif LLM_CONFIG['provider'] == 'openai':
     print(f"🔗 OpenAIモデル: {LLM_CONFIG['openai']['model']}")
 elif LLM_CONFIG['provider'] == 'azure_openai':
@@ -213,8 +215,8 @@ print('   LLM_CONFIG["provider"] = "anthropic"   # Anthropic Claudeに切り替�
 print('   LLM_CONFIG["provider"] = "azure_openai" # Azure OpenAIに切り替え')
 print()
 print("🧠 Databricks拡張思考モード設定例:")
-print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効(デフォルト)')
-print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効（高速処理）')
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = False  # 拡張思考モード無効（デフォルト・高速実行）')
+print('   LLM_CONFIG["databricks"]["thinking_enabled"] = True   # 拡張思考モード有効（詳細分析時のみ）')
 print('   LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 65536  # 思考用トークン予算(64K)')
 print('   LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 最大トークン数(128K)')
 print()

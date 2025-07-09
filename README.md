@@ -78,12 +78,12 @@ OUTPUT_LANGUAGE = 'ja'  # 'ja' = 日本語, 'en' = 英語
 # 🤖 LLMエンドポイント設定（セル6）
 LLM_CONFIG = {
     "provider": "databricks",  # "databricks", "openai", "azure_openai", "anthropic"
-    "thinking_enabled": True,  # 思考プロセス表示（推奨）
+    "thinking_enabled": False,  # 思考プロセス表示（デフォルト: 無効・高速実行）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的な出力（0.1→0.0）
-        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
+        "thinking_budget_tokens": 65536  # 64K tokens（thinking有効時のみ使用）
     },
     "openai": {
         "api_key": "",  # OpenAI APIキー
@@ -179,7 +179,7 @@ databricks serving-endpoints create \
 # OpenAI設定例（16K tokens）
 LLM_CONFIG = {
     "provider": "openai",
-    "thinking_enabled": False,  # OpenAIでは標準的なレスポンス
+    "thinking_enabled": False,  # OpenAIでは標準的なレスポンス（デフォルト）
     "openai": {
         "api_key": "sk-...",  # または環境変数OPENAI_API_KEY
         "model": "gpt-4o",
@@ -205,7 +205,7 @@ LLM_CONFIG = {
 # Anthropic設定例（16K tokens）
 LLM_CONFIG = {
     "provider": "anthropic", 
-    "thinking_enabled": True,  # Anthropicでもthinking対応
+    "thinking_enabled": False,  # Anthropicでもデフォルト無効（高速実行）
     "anthropic": {
         "api_key": "sk-ant-...",  # または環境変数ANTHROPIC_API_KEY
         "model": "claude-3-5-sonnet-20241022",
@@ -218,10 +218,19 @@ LLM_CONFIG = {
 ### 2. 思考プロセス表示機能（thinking_enabled）
 
 ```python
-# thinking_enabled: True の場合
+# thinking_enabled: False の場合（デフォルト・高速実行）
 LLM_CONFIG = {
     "provider": "databricks",
-    "thinking_enabled": True,  # 拡張思考モード（結論のみ表示）
+    "thinking_enabled": False,  # 拡張思考モード無効（高速実行）
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet"
+    }
+}
+
+# thinking_enabled: True の場合（詳細分析時のみ）
+LLM_CONFIG = {
+    "provider": "databricks",
+    "thinking_enabled": True,  # 拡張思考モード有効（詳細分析）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet"
     }
@@ -460,15 +469,15 @@ LIMIT 100;
 **完全なクエリ生成用に最適化された設定:**
 
 ```python
-# 複雑なクエリ（37カラム等）に対応（制限内最適化）
+# 複雑なクエリ（37カラム等）に対応（高速実行優先）
 LLM_CONFIG = {
     "provider": "databricks",
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的出力（従来0.1→0.0）
-        "thinking_enabled": True,
-        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
+        "thinking_enabled": False,  # デフォルト: 無効（高速実行）
+        "thinking_budget_tokens": 65536  # 64K tokens（有効時のみ使用）
     }
 }
 ```
@@ -478,28 +487,28 @@ LLM_CONFIG = {
 | 項目 | 従来設定 | 最適化設定 | 効果 |
 |-----|---------|--------|------|
 | **max_tokens** | 128K | **128K** | Claude 3.7 Sonnet最大制限活用 |
-| **thinking_budget_tokens** | 64K | **64K** | 制限内最適化 |
+| **thinking_enabled** | True | **False** | 高速実行・トークン節約 |
 | **temperature** | 0.1 | **0.0** | 決定的出力・一貫性向上 |
 | **プロンプト最適化** | - | **簡潔化** | 出力容量最大確保 |
 
 **期待される改善:**
 - ✅ 37個のカラムを含む複雑なクエリでも完全生成
 - ✅ 省略・プレースホルダー使用の完全防止
-- ✅ 思考プロセスでの段階的構築
+- ✅ 高速実行・トークン消費削減
 - ✅ 一貫した結果の生成
 
 ### �📊 思考プロセス表示（thinking_enabled）
 
 ```python
-# thinking_enabled: True の詳細設定（完全なSQL生成用）
+# thinking_enabled: False の詳細設定（高速実行・デフォルト）
 LLM_CONFIG = {
     "provider": "databricks",
-    "thinking_enabled": True,  # 思考プロセス表示を有効化
+    "thinking_enabled": False,  # 思考プロセス無効化（高速実行）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的な出力
-        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
+        "thinking_budget_tokens": 65536  # 64K tokens（有効時のみ使用）
     }
 }
 
@@ -672,22 +681,23 @@ reasoning
 #### 1. thinking_enabled使用時
 
 ```python
-# デフォルト設定（拡張思考モード有効）
+# デフォルト設定（高速実行モード）
 LLM_CONFIG = {
     "provider": "databricks",
-    "thinking_enabled": True,  # 詳細な分析プロセス（デフォルト: 有効）
+    "thinking_enabled": False,  # 高速実行（デフォルト: 無効）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072  # 128K tokens（思考プロセス込み）
+        "max_tokens": 131072  # 128K tokens
     }
 }
 
-# 高速実行が必要な場合のみ
+# 詳細分析が必要な場合のみ
 LLM_CONFIG = {
     "provider": "databricks", 
-    "thinking_enabled": False,  # 結果のみ表示（高速）
+    "thinking_enabled": True,  # 詳細分析プロセス（特別な場合のみ）
     "databricks": {
-        "max_tokens": 131072
+        "max_tokens": 131072,
+        "thinking_budget_tokens": 65536  # 64K tokens（思考プロセス用）
     }
 }
 ```
@@ -748,6 +758,7 @@ LLM_CONFIG = {
 6. **LLM設定最適化**: 128K tokens（制限内最大活用）+ プロンプト簡潔化
 7. **決定的出力**: temperature 0.1→0.0（一貫性向上）
 8. **APIエラー対応**: 400エラー時の詳細解決策提供
+9. **thinking_enabled**: デフォルト無効化（高速実行・トークン節約）
 
 ## 📈 機能拡張・今後の展開
 
@@ -756,7 +767,7 @@ LLM_CONFIG = {
 - **多言語対応**: 日本語・英語でのファイル出力（OUTPUT_LANGUAGE設定）
 - **出力品質向上**: JSON構造混入防止・文字化け自動修正・言語一貫性確保
 - **不要情報除外**: signature等のメタデータ自動除去（読みやすさ向上）
-- **拡張思考モード**: 結論のみ表示で冗長な思考過程を除外（デフォルト有効）
+- **高速実行モード**: thinking無効化で高速実行・トークン節約（デフォルト）
 - **フルパス表示**: catalog.schema.table形式のテーブル名表示
 - **実行可能SQL**: 出力SQLファイルに自動セミコロン付与で即実行可能
 
