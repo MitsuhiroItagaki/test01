@@ -393,6 +393,7 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                             "name": node.get('name', ''),
                             "tag": node.get('tag', ''),
                             "key_metrics": node.get('keyMetrics', {}),
+                            "metrics": node.get('metrics', []),  # 元のmetrics配列を保持
                             "graph_index": graph_index  # どのグラフ由来かを記録
                         }
                         
@@ -4309,15 +4310,23 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 "Num bytes spilled to disk due to memory pressure"
             ]
             
-            # 1. detailed_metricsから検索
+            # 1. detailed_metricsから検索（強化版）
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
                 metric_label = metric_info.get('label', '')
                 
-                # 複数のスピルメトリクス名をチェック
-                if ((metric_key in target_spill_metrics or 
-                     metric_label in target_spill_metrics) and metric_value > 0):
+                # 複数のスピルメトリクス名をチェック（キーとラベル両方を詳細にチェック）
+                is_spill_metric = False
+                for target_metric in target_spill_metrics:
+                    if (metric_key == target_metric or 
+                        metric_label == target_metric or
+                        target_metric in metric_key or
+                        target_metric in metric_label):
+                        is_spill_metric = True
+                        break
+                
+                if is_spill_metric and metric_value > 0:
                     spill_detected = True
                     node_spill_found = True
                     spill_bytes = metric_value
