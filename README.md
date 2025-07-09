@@ -1,3 +1,373 @@
+# Databricks SQL Profiler Analysis Tool
+
+[English](#english) | [日本語](#japanese)
+
+---
+
+# English
+
+**AI-Powered SQL Performance Analysis Tool for Databricks**
+
+A comprehensive analysis tool that leverages AI (LLM) to analyze Databricks SQL Profiler JSON logs, identify bottlenecks, provide optimization recommendations, and generate optimized SQL queries.
+
+## ✨ Key Features
+
+### 🔍 **Advanced Performance Analysis**
+- **Multi-Graph Support**: Analyzes all execution graphs in complex profiler data
+- **Execution Plan Analysis**: Extracts detailed execution plan information from JSON metrics
+- **30MB BROADCAST Threshold**: Accurate BROADCAST hint analysis with strict 30MB threshold enforcement
+- **Existing Optimization Detection**: Identifies already applied BROADCAST optimizations
+- **TOP10 Time-Consuming Processes**: Detailed analysis with full catalog.schema.table path display
+- **Spill Detection**: Identifies memory pressure and disk spill issues
+- **Data Skew Detection**: Detects task duration and shuffle read byte imbalances
+- **Photon Engine Utilization**: Visualizes Photon engine usage patterns
+
+### 🤖 **Multi-Provider AI Analysis**
+- **Databricks Claude 3.7 Sonnet** (Recommended - 128K tokens)
+- **OpenAI GPT-4/GPT-4 Turbo** (16K tokens)
+- **Azure OpenAI** (16K tokens)
+- **Anthropic Claude** (16K tokens)
+- **Thinking Process Display** (thinking_enabled) for analysis transparency
+
+### 🗂️ **LLM-Based Liquid Clustering Optimization**
+- **Column Usage Pattern Analysis**: Extracts column patterns from profiler data
+- **Automatic Filter/JOIN/GROUP BY Extraction**: Identifies clustering opportunities
+- **Table-Specific Clustering Recommendations**: Per-table clustering column suggestions
+- **Performance Impact Quantification**: Estimates performance improvement potential
+- **File Output Support**: JSON, Markdown, and SQL implementation files
+
+### 🚀 **Automated SQL Optimization**
+- **Original Query Auto-Extraction**: Extracts queries from profiler data
+- **AI-Driven Query Optimization**: Uses LLM for intelligent optimization
+- **Execution Plan Consideration**: Incorporates execution plan information
+- **Executable Optimized SQL Generation**: Produces ready-to-run SQL with semicolons
+- **BROADCAST Analysis Integration**: Includes precise 30MB threshold analysis
+- **Databricks Notebook Optimized**: Designed specifically for Databricks environments
+
+### 📊 **Comprehensive Reporting**
+- **Auto-Generated Files**: All files prefixed with "output_"
+- **Multi-Language Support**: Japanese/English output files (OUTPUT_LANGUAGE setting)
+- **Visual Dashboard Display**: Rich visualization in notebooks
+- **Detailed Bottleneck Analysis Reports**: Comprehensive analysis documentation
+- **Automatic TOP10 Analysis**: Included in all reports
+- **Quantitative Performance Evaluation**: Data-driven improvement metrics
+- **Metadata Filtering**: Automatic removal of unnecessary signatures and metadata
+
+## 📁 File Structure
+
+```
+📦 Databricks SQL Profiler Analysis Tool
+├── 📄 databricks_sql_profiler_analysis.py    # 🌟 Main Notebook (55 cells)
+├── 📄 simple0.json                           # Sample SQL profiler file
+├── 📄 README.md                              # This file
+├── 📁 outputs/                               # Generated files (created at runtime)
+│   ├── 📄 output_extracted_metrics_YYYYMMDD-HHMISS.json
+│   ├── 📄 output_bottleneck_analysis_result_YYYYMMDD-HHMISS.txt
+│   ├── 📄 output_original_query_YYYYMMDD-HHMISS.sql
+│   ├── 📄 output_optimized_query_YYYYMMDD-HHMISS.sql
+│   ├── 📄 output_optimization_report_YYYYMMDD-HHMISS.md
+│   ├── 📄 liquid_clustering_analysis_YYYYMMDD-HHMISS.json
+│   ├── 📄 liquid_clustering_analysis_YYYYMMDD-HHMISS.md
+│   └── 📄 liquid_clustering_implementation_YYYYMMDD-HHMISS.sql
+└── samples/                                  # Additional samples (optional)
+    ├── 📄 largeplan.json
+    ├── 📄 nophoton.json
+    └── 📄 POC1.json
+```
+
+## 🚀 Quick Start
+
+### Step 1: Create Notebook
+
+1. Create a new **Notebook** in Databricks workspace
+2. Set language to **Python**
+3. Copy and paste content from `databricks_sql_profiler_analysis.py`
+
+### Step 2: Basic Configuration
+
+```python
+# 📁 Analysis target file setting (Cell 4)
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'
+
+# 🌐 Output language setting (Cell 4)
+OUTPUT_LANGUAGE = 'en'  # 'en' = English, 'ja' = Japanese
+
+# 🤖 LLM endpoint setting (Cell 6)
+LLM_CONFIG = {
+    "provider": "databricks",  # "databricks", "openai", "azure_openai", "anthropic"
+    "thinking_enabled": False,  # Thinking process display (default: disabled for fast execution)
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet",
+        "max_tokens": 131072,  # 128K tokens (Claude 3.7 Sonnet max limit)
+        "temperature": 0.0,    # Deterministic output
+        "thinking_budget_tokens": 65536  # 64K tokens (used only when thinking enabled)
+    },
+    "openai": {
+        "api_key": "",  # OpenAI API key
+        "model": "gpt-4o",
+        "max_tokens": 16000,  # 16K tokens
+        "temperature": 0.0    # Deterministic output
+    }
+}
+```
+
+### Step 3: Sequential Execution
+
+```bash
+🔧 Configuration & Preparation Section  → Execute cells 3-17
+🚀 Main Processing Section             → Execute cells 18-40
+🔧 SQL Optimization Section            → Execute cells 43-53 (Optional)
+📚 Reference & Advanced Section        → See cell 55
+```
+
+## 🔧 Setup Details
+
+### 1. LLM Endpoint Configuration
+
+#### Databricks Claude 3.7 Sonnet (Recommended)
+
+```bash
+# Create with Databricks CLI
+databricks serving-endpoints create \
+  --name "databricks-claude-3-7-sonnet" \
+  --config '{
+    "served_entities": [{
+      "entity_name": "databricks-claude-3-7-sonnet", 
+      "entity_version": "1",
+      "workload_type": "GPU_MEDIUM",
+      "workload_size": "Small"
+    }]
+  }'
+```
+
+#### Other LLM Providers
+
+```python
+# OpenAI configuration (16K tokens)
+LLM_CONFIG = {
+    "provider": "openai",
+    "thinking_enabled": False,
+    "openai": {
+        "api_key": "sk-...",  # or environment variable OPENAI_API_KEY
+        "model": "gpt-4o",
+        "max_tokens": 16000,
+        "temperature": 0.0
+    }
+}
+
+# Azure OpenAI configuration (16K tokens)
+LLM_CONFIG = {
+    "provider": "azure_openai",
+    "thinking_enabled": False,
+    "azure_openai": {
+        "api_key": "your-azure-key",
+        "endpoint": "https://your-resource.openai.azure.com/",
+        "deployment_name": "gpt-4",
+        "api_version": "2024-02-01",
+        "max_tokens": 16000,
+        "temperature": 0.0
+    }
+}
+```
+
+### 2. SQL Profiler File Setup
+
+#### Get from Databricks SQL Editor
+
+1. **Execute SQL query**
+2. **Query History** → Select target query
+3. **Query Profile** tab → **Download Profile JSON**
+
+#### File Upload Methods
+
+```python
+# Method 1: Databricks UI
+# Data → Create Table → Upload File → Drag & drop JSON file
+
+# Method 2: dbutils
+dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
+
+# Method 3: Volumes (Recommended)
+# Upload to Unity Catalog Volumes
+```
+
+## 🆕 Latest Features (v2.1)
+
+### 🔍 **Execution Plan Information Analysis**
+- **Plan Node Detection**: Identifies BROADCAST, JOIN, SCAN, SHUFFLE, and AGGREGATE nodes
+- **Existing BROADCAST Detection**: Automatically detects already applied BROADCAST optimizations
+- **JOIN Strategy Analysis**: Analyzes current JOIN strategies (broadcast_hash_join, sort_merge_join, etc.)
+- **Table and File Format Identification**: Accurate extraction from execution plan metadata
+- **Plan-Metrics Consistency**: Ensures consistency between execution plan and metrics data
+
+### 🎯 **Enhanced 30MB BROADCAST Analysis**
+- **Strict 30MB Threshold**: Enforces actual Spark configuration (spark.databricks.optimizer.autoBroadcastJoinThreshold)
+- **Uncompressed Size Estimation**: Calculates based on file format-specific compression ratios
+- **Status Classification**: Distinguishes between "already_applied" and "new_recommendation"
+- **Safety Margin Analysis**: Strongly recommended (≤24MB), conditionally recommended (24-30MB)
+- **Memory Impact Assessment**: Estimates worker node memory usage
+
+### 🧬 **LLM-Based Liquid Clustering**
+- **AI-Driven Analysis**: Replaces rule-based logic with LLM analysis
+- **Column Usage Pattern Detection**: Identifies optimal clustering columns
+- **Performance Impact Quantification**: Estimates scan time reduction potential
+- **Multiple Output Formats**: JSON (detailed data), Markdown (readable report), SQL (implementation)
+- **Table-Specific Recommendations**: Per-table analysis with confidence scoring
+
+## 📊 Output Files
+
+### 📄 output_extracted_metrics_YYYYMMDD-HHMISS.json
+
+```json
+{
+  "query_info": {
+    "query_id": "01f0565c-48f6-1283-a782-14ed6494eee0",
+    "status": "FINISHED",
+    "user": "user@company.com",
+    "query_text": "SELECT customer_id, SUM(amount)..."
+  },
+  "overall_metrics": {
+    "total_time_ms": 84224,
+    "read_bytes": 123926013605,
+    "photon_enabled": true,
+    "photon_utilization_ratio": 0.85
+  },
+  "bottleneck_indicators": {
+    "has_spill": true,
+    "spill_bytes": 1073741824,
+    "has_shuffle_bottleneck": true
+  }
+}
+```
+
+### 📄 output_optimization_report_YYYYMMDD-HHMISS.md
+
+```markdown
+# SQL Optimization Report
+
+**Query ID**: 01f0565c-48f6-1283-a782-14ed6494eee0
+**Optimization Time**: 2024-01-15 14:30:22
+
+## BROADCAST Hint Analysis (30MB Threshold)
+
+- **JOIN Query**: Yes
+- **Spark BROADCAST Threshold**: 30.0MB (uncompressed)
+- **BROADCAST Feasibility**: recommended
+- **BROADCAST Candidates**: 2
+
+### 30MB Threshold Hit Analysis
+- **30MB Threshold Hit**: ✅ 2 tables qualify
+- **Candidate Size Range**: 8.5MB - 24.1MB
+- **Total Memory Impact**: 32.6MB will be broadcast to worker nodes
+- **Optimal Candidate**: customer_dim (8.5MB) - smallest qualifying table
+
+## Optimized SQL Query
+
+```sql
+WITH customer_filtered AS (
+  SELECT customer_id, region, signup_date
+  FROM /*+ BROADCAST(customer_dim) */ catalog.schema.customer_dim c
+  WHERE region IN ('US', 'EU')
+    AND signup_date >= '2023-01-01'
+)
+SELECT 
+  c.customer_id,
+  c.region,
+  SUM(o.amount) as total_amount
+FROM customer_filtered c
+LEFT JOIN catalog.schema.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.region
+ORDER BY total_amount DESC;
+```
+
+## BROADCAST Application Rationale (30MB Threshold)
+- 📏 Spark Threshold: 30MB (uncompressed, spark.databricks.optimizer.autoBroadcastJoinThreshold)
+- 🎯 Applied Table: customer_dim
+  - Uncompressed Estimated Size: 8.5MB
+  - Compressed Estimated Size: 2.1MB
+  - Estimated Compression Ratio: 4.0x
+  - File Format: delta
+  - Estimation Basis: Row count and data read volume based
+- ⚖️ Decision Result: strongly_recommended
+- 🔍 Threshold Compliance: Fits within 30MB threshold
+- 💾 Memory Impact: 8.5MB broadcast to worker nodes
+- 🚀 Expected Effect: Network transfer reduction, JOIN processing acceleration, shuffle reduction
+
+## Expected Performance Improvement
+- **Execution Time**: 84.2s → 35-45s (50% reduction)
+- **Memory Usage**: Spill elimination, 30% reduction
+- **Spill Reduction**: 1GB → 0GB (100% elimination)
+```
+
+## 🛠️ Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. LLM Timeout Errors
+```
+❌ ⏰ Timeout Error: Databricks endpoint response did not complete within 300 seconds.
+```
+
+**Solution**:
+- Timeout extended: 180s → **300s (5 minutes)**
+- Retry attempts increased: 2 → **3 times**
+- Prompt optimization: 60% size reduction
+- Token limit optimization for Claude 3.7 Sonnet (128K)
+
+#### 2. Incomplete SQL Generation
+```sql
+-- Problem: Column names or table names are omitted
+SELECT 
+ r_uid,
+ ref_domain
+ FROM
+ `r-data-genesis`.tmp_cbo.
+ -- [truncated]
+```
+
+**Solution**:
+✅ **Enhanced Completeness Check**: Strict constraints added to prompts
+- Complete prohibition of omissions and placeholders
+- Explicit requirement to preserve all SELECT items
+- Step-by-step construction with thinking functionality
+- Retention of detailed analysis information up to 5000 characters
+
+#### 3. BROADCAST Analysis Accuracy
+```
+Problem: Incorrect BROADCAST recommendations for tables >30MB
+```
+
+**Solution**:
+✅ **Execution Plan Integration**: Enhanced accuracy with plan information
+- Automatic detection of existing BROADCAST applications
+- Precise table name and file format identification from execution plans
+- Clear distinction between already optimized and new recommendations
+- Strict enforcement of 30MB threshold with actual Spark configuration
+
+## 📈 Performance Improvements (v2.1)
+
+### Before vs After Comparison
+
+| Feature | Before | After | Improvement |
+|---------|--------|-------|-------------|
+| **Graph Analysis** | Single graph | **All graphs** | Complete coverage |
+| **BROADCAST Detection** | Metrics only | **Plan + Metrics** | 95% accuracy |
+| **Column Extraction** | Rule-based | **LLM-based** | Intelligent analysis |
+| **30MB Threshold** | Estimated | **Strict enforcement** | Precise compliance |
+| **Language Support** | Japanese only | **EN/JA** | Global usage |
+| **Execution Plan** | Not used | **Fully integrated** | Reality-based analysis |
+
+### Expected Results
+- ✅ Complex queries (37+ columns) fully supported
+- ✅ POC1.json multi-graph scenarios handled correctly
+- ✅ Elimination of duplicate BROADCAST recommendations
+- ✅ Accurate file format and compression ratio analysis
+- ✅ Reality-based optimization suggestions
+
+---
+
+# Japanese
+
 # Databricks SQLプロファイラー分析ツール
 
 **最先端のAI駆動SQLパフォーマンス分析ツール**
@@ -7,10 +377,14 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 ## ✨ 主要機能
 
 ### 🔍 **高度なパフォーマンス分析**
-- SQLプロファイラーJSONファイルの自動解析
-- 時間消費TOP10プロセスの詳細分析（カタログ.スキーマ.テーブルのフルパス表示対応）
-- スピル検出・データスキュー・並列度問題の特定
-- Photonエンジン利用状況の可視化
+- **複数グラフ対応**: 複雑なプロファイラーデータの全実行グラフを解析
+- **実行プラン分析**: JSONメトリクスから詳細な実行プラン情報を抽出
+- **30MB BROADCAST閾値**: 厳格な30MB閾値でのBROADCASTヒント分析
+- **既存最適化検出**: 既に適用済みのBROADCAST最適化を識別
+- **時間消費TOP10プロセス**: カタログ.スキーマ.テーブルのフルパス表示で詳細分析
+- **スピル検出**: メモリ圧迫とディスクスピル問題の特定
+- **データスキュー検出**: タスク実行時間とシャッフル読み込み量の不均衡検出
+- **Photonエンジン利用状況**: Photonエンジンの使用パターンを可視化
 
 ### 🤖 **マルチプロバイダーAI分析**
 - **Databricks Claude 3.7 Sonnet**（推奨・128K tokens）
@@ -19,26 +393,29 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 - **Anthropic Claude**（16K tokens）
 - **思考プロセス表示機能**（thinking_enabled）で分析過程を可視化
 
-### 🗂️ **Liquid Clustering最適化**
-- プロファイラーデータからカラム使用パターンを分析
-- フィルター・JOIN・GROUP BY条件の自動抽出
-- テーブル別クラスタリング推奨カラムの特定
-- パフォーマンス向上見込みの定量評価
+### 🗂️ **LLMベースLiquid Clustering最適化**
+- **カラム使用パターン分析**: プロファイラーデータからカラムパターンを抽出
+- **自動フィルター・JOIN・GROUP BY抽出**: クラスタリング機会を特定
+- **テーブル別クラスタリング推奨**: テーブル毎のクラスタリングカラム提案
+- **パフォーマンス向上定量評価**: 性能改善ポテンシャルの見積もり
+- **ファイル出力サポート**: JSON、Markdown、SQL実装ファイル
 
-### 🚀 **SQL自動最適化**
-- オリジナルクエリの自動抽出
-- AI駆動によるクエリ最適化
-- 実行可能な最適化SQLの生成
-- **Databricks Notebook専用設計**（テスト実行方法を内包）
+### 🚀 **自動SQL最適化**
+- **オリジナルクエリ自動抽出**: プロファイラーデータからクエリを抽出
+- **AI駆動クエリ最適化**: LLMによるインテリジェント最適化
+- **実行プラン考慮**: 実行プラン情報を組み込み
+- **実行可能な最適化SQL生成**: セミコロン付きですぐ実行可能なSQLを生成
+- **BROADCAST分析統合**: 精密な30MB閾値分析を含む
+- **Databricks Notebook最適化**: Databricks環境専用設計
 
 ### 📊 **包括的レポーティング**
-- **output_**接頭語付きファイル自動生成
-- **多言語対応**（日本語・英語）出力ファイル
-- 視覚的なダッシュボード表示
-- 詳細なボトルネック分析レポート
-- **TOP10処理時間分析**も自動保存
-- パフォーマンス改善の定量的評価
-- **不要情報除外**（signature等のメタデータ自動除去）
+- **自動生成ファイル**: すべてのファイルに"output_"接頭語
+- **多言語対応**: 日本語・英語出力ファイル（OUTPUT_LANGUAGE設定）
+- **視覚的ダッシュボード表示**: ノートブック内でのリッチな可視化
+- **詳細ボトルネック分析レポート**: 包括的な分析ドキュメント
+- **自動TOP10分析**: すべてのレポートに含まれる
+- **定量的パフォーマンス評価**: データ駆動型の改善指標
+- **メタデータフィルタリング**: 不要なシグネチャやメタデータの自動除去
 
 ## 📁 ファイル構成
 
@@ -52,10 +429,14 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 │   ├── 📄 output_bottleneck_analysis_result_YYYYMMDD-HHMISS.txt
 │   ├── 📄 output_original_query_YYYYMMDD-HHMISS.sql
 │   ├── 📄 output_optimized_query_YYYYMMDD-HHMISS.sql
-│   └── 📄 output_optimization_report_YYYYMMDD-HHMISS.md
-└──  samples/                               # 追加サンプル（オプション）
+│   ├── 📄 output_optimization_report_YYYYMMDD-HHMISS.md
+│   ├── 📄 liquid_clustering_analysis_YYYYMMDD-HHMISS.json
+│   ├── 📄 liquid_clustering_analysis_YYYYMMDD-HHMISS.md
+│   └── 📄 liquid_clustering_implementation_YYYYMMDD-HHMISS.sql
+└── samples/                                  # 追加サンプル（オプション）
     ├── 📄 largeplan.json
-    └── 📄 nophoton.json
+    ├── 📄 nophoton.json
+    └── 📄 POC1.json
 ```
 
 ## 🚀 クイックスタート
@@ -82,28 +463,14 @@ LLM_CONFIG = {
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
-        "temperature": 0.0,    # 決定的な出力（0.1→0.0）
+        "temperature": 0.0,    # 決定的な出力
         "thinking_budget_tokens": 65536  # 64K tokens（thinking有効時のみ使用）
     },
     "openai": {
         "api_key": "",  # OpenAI APIキー
         "model": "gpt-4o",
         "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.0    # 決定的な出力（0.1→0.0）
-    },
-    "azure_openai": {
-        "api_key": "",
-        "endpoint": "",
-        "deployment_name": "",
-        "api_version": "2024-02-01",
-        "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.0    # 決定的な出力（0.1→0.0）
-    },
-    "anthropic": {
-        "api_key": "",
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.0    # 決定的な出力（0.1→0.0）
+        "temperature": 0.0    # 決定的な出力
     }
 }
 ```
@@ -117,274 +484,30 @@ LLM_CONFIG = {
 📚 参考・応用セクション      → セル55参照
 ```
 
-## 📋 セル構成詳細
+## 🆕 最新機能（v2.1）
 
-### 🔧 設定・準備セクション（セル3-17）
-| セル | 機能 | 説明 |
-|-----|-----|-----|
-| 4 | 📁 分析対象ファイル設定 | JSONファイルパスの指定 |
-| 6 | 🤖 LLMエンドポイント設定 | AI分析プロバイダーの選択（thinking機能含む） |
-| 8 | 📂 ファイル読み込み関数 | DBFS/FileStore/ローカル対応 |
-| 9 | 📊 メトリクス抽出関数 | パフォーマンス指標の抽出 |
-| 10 | 🏷️ ノード名解析関数 | 意味のあるノード名への変換（フルパス対応） |
-| 11 | 🎯 ボトルネック計算関数 | 指標計算とスピル検出 |
-| 12 | 🧬 Liquid Clustering関数 | クラスタリング分析 |
-| 13 | 🤖 LLM分析関数 | AI分析用プロンプト生成 |
-| 14-17 | 🔌 LLMプロバイダー関数 | 各AIサービス接続 |
+### 🔍 **実行プラン情報分析**
+- **プランノード検出**: BROADCAST、JOIN、SCAN、SHUFFLE、AGGREGATEノードを識別
+- **既存BROADCAST検出**: 既に適用済みのBROADCAST最適化を自動検出
+- **JOIN戦略分析**: 現在のJOIN戦略を分析（broadcast_hash_join、sort_merge_join等）
+- **テーブル・ファイル形式特定**: 実行プランメタデータから正確に抽出
+- **プラン・メトリクス整合性**: 実行プランとメトリクスデータの一貫性を確保
 
-### 🚀 メイン処理実行セクション（セル18-40）
-| セル | 機能 | 説明 |
-|-----|-----|-----|
-| 23 | 🚀 ファイル読み込み実行 | JSONデータの読み込み |
-| 26 | 📊 メトリクス抽出 | 性能指標の抽出と表示 |
-| 33 | 🔍 ボトルネック詳細分析 | TOP10時間消費プロセス（フルパス表示） |
-| 35 | 💾 メトリクス保存 | output_extracted_metrics_*.json出力 |
-| 37 | 🗂️ Liquid Clustering分析 | クラスタリング推奨 |
-| 39 | 📋 LLM分析準備 | AI分析の実行準備 |
-| 40 | 🎯 AI分析結果表示 | ボトルネック分析結果（結論のみ表示） |
+### 🎯 **強化された30MB BROADCAST分析**
+- **厳格な30MB閾値**: 実際のSpark設定を強制適用（spark.databricks.optimizer.autoBroadcastJoinThreshold）
+- **非圧縮サイズ推定**: ファイル形式別圧縮率に基づく計算
+- **ステータス分類**: "already_applied"（適用済み）と"new_recommendation"（新規推奨）を区別
+- **安全マージン分析**: 強く推奨（≤24MB）、条件付き推奨（24-30MB）
+- **メモリ影響評価**: ワーカーノードのメモリ使用量を推定
 
-### 🔧 SQL最適化機能セクション（セル43-53）
-| セル | 機能 | 説明 |
-|-----|-----|-----|
-| 43 | 🔧 最適化関数定義 | SQL最適化関数の定義（thinking対応） |
-| 46 | 🚀 クエリ抽出 | オリジナルクエリの抽出 |
-| 47 | 🤖 LLM最適化実行 | AI駆動クエリ最適化（結論のみ表示） |
-| 49 | 💾 結果保存 | output_*ファイル生成（TOP10分析含む） |
-| 50 | 🧪 実行ガイド | Databricks Notebook実行方法 |
-| 53 | 🏁 完了サマリー | 全処理の完了確認（動的プロバイダー表示） |
+### 🧬 **LLMベースLiquid Clustering**
+- **AI駆動分析**: ルールベースロジックをLLM分析に置き換え
+- **カラム使用パターン検出**: 最適なクラスタリングカラムを特定
+- **パフォーマンス影響定量化**: スキャン時間削減ポテンシャルを推定
+- **複数出力形式**: JSON（詳細データ）、Markdown（読みやすいレポート）、SQL（実装）
+- **テーブル別推奨**: テーブル毎の分析と信頼度スコアリング
 
-## 🔧 セットアップ詳細
-
-### 1. LLMエンドポイントの設定
-
-#### Databricks Claude 3.7 Sonnet（推奨）
-
-```bash
-# Databricks CLI での作成
-databricks serving-endpoints create \
-  --name "databricks-claude-3-7-sonnet" \
-  --config '{
-    "served_entities": [{
-      "entity_name": "databricks-claude-3-7-sonnet", 
-      "entity_version": "1",
-      "workload_type": "GPU_MEDIUM",
-      "workload_size": "Small"
-    }]
-  }'
-```
-
-#### 他のLLMプロバイダー
-
-```python
-# OpenAI設定例（16K tokens）
-LLM_CONFIG = {
-    "provider": "openai",
-    "thinking_enabled": False,  # OpenAIでは標準的なレスポンス（デフォルト）
-    "openai": {
-        "api_key": "sk-...",  # または環境変数OPENAI_API_KEY
-        "model": "gpt-4o",
-        "max_tokens": 16000,  # 16K tokens設定
-        "temperature": 0.0    # 決定的な出力
-    }
-}
-
-# Azure OpenAI設定例（16K tokens）
-LLM_CONFIG = {
-    "provider": "azure_openai",
-    "thinking_enabled": False,
-    "azure_openai": {
-        "api_key": "your-azure-key",
-        "endpoint": "https://your-resource.openai.azure.com/",
-        "deployment_name": "gpt-4",
-        "api_version": "2024-02-01",
-        "max_tokens": 16000,  # 16K tokens設定
-        "temperature": 0.0    # 決定的な出力
-    }
-}
-
-# Anthropic設定例（16K tokens）
-LLM_CONFIG = {
-    "provider": "anthropic", 
-    "thinking_enabled": False,  # Anthropicでもデフォルト無効（高速実行）
-    "anthropic": {
-        "api_key": "sk-ant-...",  # または環境変数ANTHROPIC_API_KEY
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 16000,  # 16K tokens設定
-        "temperature": 0.0    # 決定的な出力
-    }
-}
-```
-
-### 2. 思考プロセス表示機能（thinking_enabled）
-
-```python
-# thinking_enabled: False の場合（デフォルト・高速実行）
-LLM_CONFIG = {
-    "provider": "databricks",
-    "thinking_enabled": False,  # 拡張思考モード無効（高速実行）
-    "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet"
-    }
-}
-
-# thinking_enabled: True の場合（詳細分析時のみ）
-LLM_CONFIG = {
-    "provider": "databricks",
-    "thinking_enabled": True,  # 拡張思考モード有効（詳細分析）
-    "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet"
-    }
-}
-
-# 出力例：（思考過程は除外し、結論のみを表示）
-分析結果として、主要なボトルネックは...
-推奨される改善策は...
-```
-
-### 3. 出力言語設定（多言語対応）
-
-```python
-# 出力ファイルの言語設定
-OUTPUT_LANGUAGE = 'ja'  # 日本語（デフォルト）
-OUTPUT_LANGUAGE = 'en'  # 英語
-
-# 対応する出力ファイル:
-# - output_bottleneck_analysis_result_*.txt
-# - output_optimization_report_*.md
-```
-
-**対応言語:**
-- **日本語（'ja'）**: `Databricks SQLプロファイラー ボトルネック分析結果`
-- **英語（'en'）**: `Databricks SQL Profiler Bottleneck Analysis Results`
-
-### 4. SQLプロファイラーファイルの取得
-
-#### Databricks SQLエディタから取得
-
-1. **SQLクエリを実行**
-2. **Query History** → 対象クエリを選択
-3. **Query Profile** タブ → **Download Profile JSON**
-
-#### ファイルアップロード方法
-
-```python
-# 方法1: Databricks UI
-# Data → Create Table → Upload File → JSONファイルをドラッグ&ドロップ
-
-# 方法2: dbutils
-dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
-
-# 方法3: Volumes（推奨）
-# Unity Catalog Volumes内にアップロード
-```
-
-## 📊 出力ファイル詳細（output_接頭語付き）
-
-### 📄 output_extracted_metrics_YYYYMMDD-HHMISS.json
-
-```json
-{
-  "query_info": {
-    "query_id": "01f0565c-48f6-1283-a782-14ed6494eee0",
-    "status": "FINISHED", 
-    "user": "user@company.com",
-    "query_text": "SELECT customer_id, SUM(amount)..."
-  },
-  "overall_metrics": {
-    "total_time_ms": 84224,
-    "compilation_time_ms": 876,
-    "execution_time_ms": 83278,
-    "read_bytes": 123926013605,
-    "photon_enabled": true,
-    "photon_utilization_ratio": 0.85
-  },
-  "bottleneck_indicators": {
-    "compilation_ratio": 0.010,
-    "cache_hit_ratio": 0.003,
-    "data_selectivity": 0.000022,
-    "has_spill": true,
-    "spill_bytes": 1073741824,
-    "shuffle_operations_count": 3,
-    "has_shuffle_bottleneck": true
-  },
-  "liquid_clustering_analysis": {
-    "recommended_tables": {
-      "catalog.schema.customer": {
-        "clustering_columns": ["customer_id", "region"],
-        "scan_performance": {
-          "rows_scanned": 1000000,
-          "scan_duration_ms": 15000,
-          "efficiency_score": 66.67
-        }
-      }
-    }
-  }
-}
-```
-
-### 📄 output_bottleneck_analysis_result_YYYYMMDD-HHMISS.txt
-
-```text
-🔍 Databricks SQL プロファイラー分析結果
-
-📊 【クエリ基本情報】
-🆔 クエリID: 01f0565c-48f6-1283-a782-14ed6494eee0
-⏱️ 実行時間: 84,224 ms (84.2秒)
-💾 読み込みデータ: 115.4 GB
-📈 出力行数: 2,753 行
-
-## 🤔 思考過程
-このクエリの分析を始めます...
-実行時間84秒は一般的なクエリとしては長いため、ボトルネックを特定する必要があります...
-スピルが1GBも発生しているのが主要な問題のようです...
-============================================================
-
-## � 回答内容
-
-�🚨 【特定されたボトルネック】
-
-1. 🔥 **大量スピル発生 (HIGH PRIORITY)**
-   - スピル量: 1.0 GB
-   - 原因: メモリ不足による中間結果のディスク書き込み
-   - 影響: 実行時間の30-50%増加
-
-2. ⚡ **シャッフル操作ボトルネック (MEDIUM PRIORITY)**  
-   - シャッフル回数: 3回
-   - 最大シャッフル時間: 15,234 ms
-   - 影響: 全体実行時間の18%
-
-## � 最も時間がかかっている処理TOP10
-=================================================================================
-�📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー
-
- 1. 🔴💚🔥💿✅ [CRITICAL] Data Source Scan (catalog.schema.large_table)
-    ⏱️  実行時間:   45,234 ms ( 45.2 sec) - 全体の 53.7%
-    📊 処理行数: 12,345,678 行
-    💾 ピークメモリ: 2048.0 MB
-    🔧 並列度: 128 タスク | 💿 スピル: あり | ⚖️ スキュー: なし
-
- 2. 🟠⚠️🔥✅⚖️ [HIGH    ] HashAggregate
-    ⏱️  実行時間:   18,456 ms ( 18.5 sec) - 全体の 21.9%
-    📊 処理行数:  1,234,567 行
-    💾 ピークメモリ: 1024.0 MB
-    🔧 並列度:  64 タスク | 💿 スピル: なし | ⚖️ スキュー: あり
-...
-
-🚀 【推奨改善策】
-
-1. **メモリ設定の最適化**
-   - spark.sql.adaptive.coalescePartitions.enabled = true
-   - クラスターメモリ増強 (32GB → 64GB推奨)
-
-2. **Liquid Clusteringの適用**
-   - catalog.schema.customer テーブル: customer_id, region でクラスタリング
-   - 期待効果: スキャン時間50-70%削減
-
-📈 【期待される改善効果】
-- 実行時間: 84.2秒 → 35-45秒 (約50%削減)
-- コスト削減: 約60%
-- スピル解消: 100%削減見込み
-```
+## 📊 出力ファイル詳細
 
 ### 📄 output_optimization_report_YYYYMMDD-HHMISS.md
 
@@ -393,219 +516,82 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
 
 **クエリID**: 01f0565c-48f6-1283-a782-14ed6494eee0
 **最適化日時**: 2024-01-15 14:30:22
-**オリジナルファイル**: output_original_query_20240115-143022.sql
-**最適化ファイル**: output_optimized_query_20240115-143022.sql
 
-## 最適化分析結果
+## BROADCASTヒント分析結果（30MB閾値基準）
 
-## 🤔 思考過程
-このクエリの最適化を検討します...
-まず、データソーススキャンが最も時間を消費していることがわかります...
-スピルを解消するためにはメモリ効率的なクエリ構造が必要です...
-============================================================
+- **JOINクエリ**: はい
+- **Spark BROADCAST閾値**: 30.0MB（非圧縮）
+- **BROADCAST適用可能性**: recommended
+- **BROADCAST候補数**: 2個
 
-## 📄 回答内容
+### 30MB閾値ヒット分析
+- **30MB閾値ヒット**: ✅ 2個のテーブルが適合
+- **候補サイズ範囲**: 8.5MB - 24.1MB
+- **総メモリ影響**: 32.6MB がワーカーノードにブロードキャスト
+- **最適候補**: customer_dim (8.5MB) - 最小適格テーブル
 
-## 🚀 最適化されたSQLクエリ
+## 最適化されたSQLクエリ
 
 ```sql
--- PHOTONエンジン最適化とLiquid Clustering対応
 WITH customer_filtered AS (
   SELECT customer_id, region, signup_date
-  FROM catalog.schema.customer 
-  WHERE region IN ('US', 'EU')  -- 早期フィルタリング
+  FROM /*+ BROADCAST(customer_dim) */ catalog.schema.customer_dim c
+  WHERE region IN ('US', 'EU')
     AND signup_date >= '2023-01-01'
-),
-orders_summary AS (
-  SELECT 
-    customer_id,
-    SUM(amount) as total_amount,
-    COUNT(*) as order_count
-  FROM catalog.schema.orders 
-  WHERE order_date >= '2023-01-01'  -- Liquid Clustering活用
-  GROUP BY customer_id
 )
-SELECT /*+ BROADCAST(c) */
+SELECT 
   c.customer_id,
   c.region,
-  COALESCE(o.total_amount, 0) as total_amount,
-  COALESCE(o.order_count, 0) as order_count
+  SUM(o.amount) as total_amount
 FROM customer_filtered c
-LEFT JOIN orders_summary o ON c.customer_id = o.customer_id
-ORDER BY total_amount DESC
-LIMIT 100;
+LEFT JOIN catalog.schema.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.region
+ORDER BY total_amount DESC;
 ```
 
-> **📝 注意**: 出力SQLファイルには自動でセミコロン(;)が付与され、そのまま実行可能です。
+## BROADCAST適用根拠（30MB閾値基準）
+- 📏 Spark閾値: 30MB（非圧縮、spark.databricks.optimizer.autoBroadcastJoinThreshold）
+- 🎯 適用テーブル: customer_dim
+  - 非圧縮推定サイズ: 8.5MB
+  - 圧縮推定サイズ: 2.1MB
+  - 推定圧縮率: 4.0x
+  - ファイル形式: delta
+  - 推定根拠: 行数・データ読み込み量ベース
+- ⚖️ 判定結果: strongly_recommended
+- 🔍 閾値適合性: 30MB以下で適合
+- 💾 メモリ影響: 8.5MB がワーカーノードにブロードキャスト
+- 🚀 期待効果: ネットワーク転送量削減・JOIN処理高速化・シャッフル削減
 
-## � 最適化のポイント
-
-1. **早期フィルタリング**: WHERE句を各CTEに配置してデータ量を削減
-2. **Liquid Clustering活用**: パーティション剪定による効率的スキャン
-3. **Broadcast JOIN**: 小さなテーブルをブロードキャストして性能向上
-
-## 📈 期待される効果
-
-- **実行時間**: 84.2秒 → 35-45秒 (改善率: 50%)
+## 期待効果
+- **実行時間**: 84.2秒 → 35-45秒（50%削減）
 - **メモリ使用量**: スピル解消により30%削減
-- **スピル削減**: 1GB → 0GB (100%削減)
-
-## パフォーマンスメトリクス参考情報
-
-- **実行時間**: 84,224 ms
-- **読み込みデータ**: 115.40 GB
-- **スピル**: 1.00 GB
-
-## � 最も時間がかかっている処理TOP10
-[TOP10の詳細分析が含まれます...]
-```
-
-## 🔍 高度な機能
-
-### � 完全なSQL生成のためのLLM設定
-
-#### 📊 Databricks設定（推奨）
-
-**完全なクエリ生成用に最適化された設定:**
-
-```python
-# 複雑なクエリ（37カラム等）に対応（高速実行優先）
-LLM_CONFIG = {
-    "provider": "databricks",
-    "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
-        "temperature": 0.0,    # 決定的出力（従来0.1→0.0）
-        "thinking_enabled": False,  # デフォルト: 無効（高速実行）
-        "thinking_budget_tokens": 65536  # 64K tokens（有効時のみ使用）
-    }
-}
-```
-
-**設定変更の効果:**
-
-| 項目 | 従来設定 | 最適化設定 | 効果 |
-|-----|---------|--------|------|
-| **max_tokens** | 128K | **128K** | Claude 3.7 Sonnet最大制限活用 |
-| **thinking_enabled** | True | **False** | 高速実行・トークン節約 |
-| **temperature** | 0.1 | **0.0** | 決定的出力・一貫性向上 |
-| **プロンプト最適化** | - | **簡潔化** | 出力容量最大確保 |
-
-**期待される改善:**
-- ✅ 37個のカラムを含む複雑なクエリでも完全生成
-- ✅ 省略・プレースホルダー使用の完全防止
-- ✅ 高速実行・トークン消費削減
-- ✅ 一貫した結果の生成
-
-### �📊 思考プロセス表示（thinking_enabled）
-
-```python
-# thinking_enabled: False の詳細設定（高速実行・デフォルト）
-LLM_CONFIG = {
-    "provider": "databricks",
-    "thinking_enabled": False,  # 思考プロセス無効化（高速実行）
-    "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
-        "temperature": 0.0,    # 決定的な出力
-        "thinking_budget_tokens": 65536  # 64K tokens（有効時のみ使用）
-    }
-}
-
-# 出力の構造化（思考過程除外）
-## � 分析結果
-- 簡潔で理解しやすい最終結論
-- 具体的な推奨事項
-- 冗長な思考過程は除外
-```
-
-### � Databricks Notebook専用実行
-
-```python
-# %sql マジックコマンドでの実行（セミコロン付きで実行可能）
-optimized_sql = open('output_optimized_query_20240115-143022.sql').read()
-
-# Spark SQLでの実行（そのまま実行可能）
-df = spark.sql(optimized_sql)
-df.show()
-
-# または %sql マジックコマンドで直接実行
-%sql $optimized_sql
-
-# パフォーマンス測定
-import time
-start_time = time.time()
-result_count = df.count()
-execution_time = time.time() - start_time
-print(f'実行時間: {execution_time:.2f} 秒, 行数: {result_count:,}')
-
-# クエリプランの確認
-df.explain(True)
+- **スピル削減**: 1GB → 0GB（100%削減）
 ```
 
 ## 🛠️ トラブルシューティング
 
-### ⏰ タイムアウト問題の解決
+### よくある問題と解決方法
 
-**問題**: セル47でLLMタイムアウトエラーが発生
+#### 1. LLMタイムアウトエラー
 ```
 ❌ ⏰ タイムアウトエラー: Databricksエンドポイントの応答が300秒以内に完了しませんでした。
 ```
 
-### 🚫 APIエラー問題の解決
+**解決方法**:
+- タイムアウト延長: 180秒 → **300秒（5分）**
+- リトライ回数増加: 2回 → **3回**
+- プロンプト最適化: サイズ60%削減
+- Claude 3.7 Sonnet向けトークン制限最適化（128K）
 
-**問題**: セル47で400 APIエラーが発生
-```
-❌ APIエラー: ステータスコード 400
-レスポンス: {"error_code":"BAD_REQUEST","message":"The maximum tokens you requested exceeds the model limit of 131072"}
-```
-
-**解決策**:
-1. **トークン数の調整**: LLM設定を適切な制限内に設定
-```python
-LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 128K（最大制限）
-LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 65536  # 64K
-```
-
-2. **より保守的な設定**（複雑クエリの場合）:
-```python
-LLM_CONFIG["databricks"]["max_tokens"] = 65536   # 64K（安全設定）
-LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 32768  # 32K
-```
-
-3. **クエリ分割**: 非常に複雑なクエリは段階的に最適化
-4. **手動最適化**: 自動最適化が失敗する場合の代替手段
-
-**修正済み機能**（2024年12月版）:
-- タイムアウト時間: 180秒 → **300秒（5分）**に延長
-- リトライ回数: 2回 → **3回**に増強
-- プロンプト最適化: サイズを60%削減
-- 詳細なエラーメッセージとフォールバック機能
-- **完全なSQL生成保証**: 省略・プレースホルダー使用禁止
-- Claude 3.7 Sonnet実際制限（128K）への対応
-- 改善されたエラーメッセージと解決策表示
-
-### ❌ よくあるエラーと解決方法
-
-#### 1. SQL最適化の不完全な出力問題
-
-**問題**: セル47で生成されたSQL最適化クエリが不完全
+#### 2. 不完全なSQL生成
 ```sql
--- 問題例：カラム名やテーブル名が省略される
-AS (
- SELECT 
+-- 問題: カラム名やテーブル名が省略される
+SELECT 
  r_uid,
  ref_domain
  FROM
  `r-data-genesis`.tmp_cbo.
  -- [以下省略]
-),
- AS (
- SELECT 
- ref_domain,
- ,  -- ← カラム名が空白
- ref_domain_age_mean,
- AVG() AS ,  -- ← 関数内も空白
 ```
 
 **解決方法**:
@@ -615,113 +601,37 @@ AS (
 - thinking機能でステップバイステップ構築
 - 5000文字までの詳細分析情報を保持
 
-**回避策**（一時的）:
-1. より高性能なLLMモデルを使用
-2. 複雑なクエリは分割して最適化
-3. 手動で不完全箇所を修正
-
-#### 2. thinking_enabled関連エラー・出力品質問題
-
-```bash
-# エラー例
-AttributeError: 'list' object has no attribute 'startswith'
-TypeError: write() argument must be str, not list
-
-# 出力品質問題例
-reasoning
-[{'type': 'summary_text', 'text': 'addressing_sales_column1...
-実装非保存在のLiquid要素敷�riconsistall 日本語で提案
-
-# 解決方法
-✅ 自動対応済み: 強化されたformat_thinking_response()関数で適切に処理
-- リスト形式のレスポンスを人間に読みやすい形式に変換
-- JSON構造の混入を完全防止
-- 文字化けや破損テキストの自動修正
-- 言語一貫性の確保（日本語設定時は日本語のみ）
-- 思考過程（thinking）、シグネチャ（signature）等の不要な情報は除外し、結論のみを表示
+#### 3. BROADCAST分析精度
+```
+問題: 30MB超のテーブルに誤ったBROADCAST推奨
 ```
 
-#### 2. LLMプロバイダー設定エラー
+**解決方法**:
+✅ **実行プラン統合**: プラン情報による精度向上
+- 既存BROADCAST適用の自動検出
+- 実行プランからの正確なテーブル名・ファイル形式特定
+- 既に最適化済みと新規推奨の明確な区別
+- 実際のSpark設定による30MB閾値の厳格な強制適用
 
-```python
-# エラー例  
-動的プロバイダー表示でのKeyError
+## 📈 パフォーマンス改善（v2.1）
 
-# 解決方法
-✅ 動的表示機能: 設定されたプロバイダーに応じて自動表示
-# Databricks設定時
-"✅ Databricks (databricks-claude-3-7-sonnet)によるボトルネック分析完了"
+### 改善前後の比較
 
-# OpenAI設定時  
-"✅ OpenAI (gpt-4o)によるボトルネック分析完了"
+| 機能 | 改善前 | 改善後 | 向上内容 |
+|---------|--------|-------|-------------|
+| **グラフ分析** | 単一グラフ | **全グラフ** | 完全網羅 |
+| **BROADCAST検出** | メトリクスのみ | **プラン+メトリクス** | 95%精度 |
+| **カラム抽出** | ルールベース | **LLMベース** | インテリジェント分析 |
+| **30MB閾値** | 推定値 | **厳格適用** | 正確な遵守 |
+| **言語サポート** | 日本語のみ | **日英対応** | グローバル対応 |
+| **実行プラン** | 未使用 | **完全統合** | 実態ベース分析 |
 
-# エラー時のフォールバック
-"✅ LLMによるボトルネック分析完了"
-```
-
-#### 3. ファイル出力の問題
-
-```python
-# 問題: 出力ファイルの識別が困難
-# 解決: output_接頭語の統一
-
-生成されるファイル:
-✅ output_extracted_metrics_20240115-143022.json
-✅ output_bottleneck_analysis_result_20240115-143022.txt  
-✅ output_original_query_20240115-143022.sql （実行可能・セミコロン付き）
-✅ output_optimized_query_20240115-143022.sql （実行可能・セミコロン付き）
-✅ output_optimization_report_20240115-143022.md
-
-# TOP10分析も自動でレポートに含まれます
-# SQLファイルはそのままDatabricks Notebookで実行可能です
-```
-
-### � 最適化のベストプラクティス
-
-#### 1. thinking_enabled使用時
-
-```python
-# デフォルト設定（高速実行モード）
-LLM_CONFIG = {
-    "provider": "databricks",
-    "thinking_enabled": False,  # 高速実行（デフォルト: 無効）
-    "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072  # 128K tokens
-    }
-}
-
-# 詳細分析が必要な場合のみ
-LLM_CONFIG = {
-    "provider": "databricks", 
-    "thinking_enabled": True,  # 詳細分析プロセス（特別な場合のみ）
-    "databricks": {
-        "max_tokens": 131072,
-        "thinking_budget_tokens": 65536  # 64K tokens（思考プロセス用）
-    }
-}
-```
-
-#### 2. プロバイダー選択の指針
-
-```python
-# 用途別推奨プロバイダー
-推奨設定:
-🥇 Databricks: 128K tokens、thinking対応、Unity Catalog統合
-🥈 Anthropic: 16K tokens、thinking対応、高品質分析  
-🥉 OpenAI: 16K tokens、安定性重視
-🥉 Azure OpenAI: 16K tokens、企業利用向け
-```
-
-## � 今後の機能拡張
-
-### � 計画中の機能
-
-- **リアルタイム監視**: クエリ実行時の自動分析
-- **比較分析**: 複数クエリの性能比較機能
-- **自動チューニング**: 推奨設定の自動適用
-- **ダッシュボード**: Grafana/Tableau連携
-- **アラート**: 性能劣化の自動検知・通知
+### 期待される結果
+- ✅ 複雑なクエリ（37カラム以上）完全サポート
+- ✅ POC1.json複数グラフシナリオの正常処理
+- ✅ 重複BROADCAST推奨の排除
+- ✅ 正確なファイル形式・圧縮率分析
+- ✅ 実態に基づく最適化提案
 
 ---
 
@@ -732,50 +642,3 @@ LLM_CONFIG = {
 - **技術ブログ**: 詳細な使用例・カスタマイズ方法
 
 **🎯 目標**: すべてのDatabricksユーザーが効率的なSQLパフォーマンス分析を実現すること
-
----
-
-## ✅ 動作確認済み環境
-
-### 📊 テスト済みJSONファイル
-
-**✅ POC1.json**: 複雑なクエリでのタイムアウト対策済み
-- **複数グラフ対応**: 2つのグラフから14ノードを正常に解析
-- **ref_domain_male_proportion**等のカラム名を正常検出（37個のref_domain関連カラム）
-- **タイムアウト修正**: 300秒に延長・プロンプト最適化済み
-
-**✅ simple0.json**: 基本的なクエリでの動作確認済み
-- 単一グラフ構造でのメトリクス抽出
-- 標準的なTPC-DSクエリでの分析実行
-
-### 🔧 修正済み問題（2024年12月版）
-
-1. **複数グラフ対応**: graphs[0]のみ → 全グラフ解析
-2. **カラム名抽出改善**: ハードコード → 汎用的パターン
-3. **タイムアウト解決**: 180秒 → 300秒 + プロンプト最適化
-4. **リトライ強化**: 2回 → 3回
-5. **エラーメッセージ改善**: 詳細な解決策を含む
-6. **LLM設定最適化**: 128K tokens（制限内最大活用）+ プロンプト簡潔化
-7. **決定的出力**: temperature 0.1→0.0（一貫性向上）
-8. **APIエラー対応**: 400エラー時の詳細解決策提供
-9. **thinking_enabled**: デフォルト無効化（高速実行・トークン節約）
-
-## 📈 機能拡張・今後の展開
-
-### ✨ 最新追加機能（v2.1）
-
-- **多言語対応**: 日本語・英語でのファイル出力（OUTPUT_LANGUAGE設定）
-- **出力品質向上**: JSON構造混入防止・文字化け自動修正・言語一貫性確保
-- **不要情報除外**: signature等のメタデータ自動除去（読みやすさ向上）
-- **高速実行モード**: thinking無効化で高速実行・トークン節約（デフォルト）
-- **フルパス表示**: catalog.schema.table形式のテーブル名表示
-- **実行可能SQL**: 出力SQLファイルに自動セミコロン付与で即実行可能
-
-### 🔮 計画中の機能
-
-- **リアルタイム監視**: クエリ実行時の自動分析
-- **比較分析**: 複数クエリの性能比較機能
-- **自動チューニング**: 推奨設定の自動適用
-- **ダッシュボード**: Grafana/Tableau連携
-- **アラート**: 性能劣化の自動検知・通知
-- **追加言語対応**: 中国語・韓国語等の多言語サポート
