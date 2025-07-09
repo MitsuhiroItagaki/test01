@@ -3881,27 +3881,39 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
             "  • SHOW TABLE EXTENDED LIKE 'table_name'"
         ]
     
-    # 30MB閾値にヒットする特別なケース分析
-    if small_tables:
+    # 30MB閾値にヒットする特別なケース分析（small_tables + marginal_tables を考慮）
+    all_30mb_candidates = small_tables + marginal_tables  # 30MB以下の全候補
+    
+    if all_30mb_candidates:
         broadcast_analysis["30mb_hit_analysis"] = {
             "has_30mb_candidates": True,
-            "candidate_count": len(small_tables),
-            "smallest_table_mb": min(scan["estimated_uncompressed_mb"] for scan in small_tables),
-            "largest_candidate_mb": max(scan["estimated_uncompressed_mb"] for scan in small_tables),
-            "total_candidate_size_mb": sum(scan["estimated_uncompressed_mb"] for scan in small_tables),
-            "recommended_broadcast_table": small_tables[0]["node_name"] if small_tables else None,
-            "memory_impact_estimation": f"{sum(scan['estimated_uncompressed_mb'] for scan in small_tables):.1f}MB がワーカーノードにブロードキャスト"
+            "candidate_count": len(all_30mb_candidates),
+            "small_tables_count": len(small_tables),  # 24MB以下（強く推奨）
+            "marginal_tables_count": len(marginal_tables),  # 24-30MB（条件付き推奨）
+            "smallest_table_mb": min(scan["estimated_uncompressed_mb"] for scan in all_30mb_candidates),
+            "largest_candidate_mb": max(scan["estimated_uncompressed_mb"] for scan in all_30mb_candidates),
+            "total_candidate_size_mb": sum(scan["estimated_uncompressed_mb"] for scan in all_30mb_candidates),
+            "recommended_broadcast_table": all_30mb_candidates[0]["node_name"] if all_30mb_candidates else None,
+            "memory_impact_estimation": f"{sum(scan['estimated_uncompressed_mb'] for scan in all_30mb_candidates):.1f}MB がワーカーノードにブロードキャスト"
         }
         
-        # 最適なBROADCAST候補の特定
-        if len(small_tables) > 1:
-            optimal_candidate = min(small_tables, key=lambda x: x["estimated_uncompressed_mb"])
+        # 最適なBROADCAST候補の特定（全30MB候補から選択）
+        if len(all_30mb_candidates) > 1:
+            optimal_candidate = min(all_30mb_candidates, key=lambda x: x["estimated_uncompressed_mb"])
             broadcast_analysis["30mb_hit_analysis"]["optimal_candidate"] = {
                 "table": optimal_candidate["node_name"],
                 "size_mb": optimal_candidate["estimated_uncompressed_mb"],
                 "rows": optimal_candidate["rows"],
                 "reasoning": f"最小サイズ{optimal_candidate['estimated_uncompressed_mb']:.1f}MBで最も効率的"
             }
+        
+        # 30MB閾値内の詳細分類情報を追加
+        broadcast_analysis["30mb_hit_analysis"]["size_classification"] = {
+            "safe_zone_tables": len(small_tables),  # 0-24MB（安全マージン内）
+            "caution_zone_tables": len(marginal_tables),  # 24-30MB（要注意）
+            "safe_zone_description": "24MB以下（強く推奨、安全マージン内）",
+            "caution_zone_description": "24-30MB（条件付き推奨、メモリ使用量要注意）"
+        }
     else:
         broadcast_analysis["30mb_hit_analysis"] = {
             "has_30mb_candidates": False,
