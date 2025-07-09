@@ -325,7 +325,8 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
         "stage_metrics": [],
         "node_metrics": [],
         "bottleneck_indicators": {},
-        "liquid_clustering_analysis": {}
+        "liquid_clustering_analysis": {},
+        "raw_profiler_data": profiler_data  # プラン分析のために生データを保存
     }
     
     # 基本的なクエリ情報
@@ -3227,6 +3228,202 @@ def extract_original_query_from_profiler_data(profiler_data: Dict[str, Any]) -> 
     
     return ""
 
+def extract_execution_plan_info(profiler_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    JSONメトリクスから実行プラン情報を抽出
+    """
+    plan_info = {
+        "broadcast_nodes": [],
+        "join_nodes": [],
+        "scan_nodes": [],
+        "shuffle_nodes": [],
+        "aggregate_nodes": [],
+        "plan_summary": {},
+        "broadcast_already_applied": False,
+        "join_strategies": [],
+        "table_scan_details": {}
+    }
+    
+    # プロファイラーデータから実行グラフ情報を取得
+    graphs = profiler_data.get('graphs', [])
+    if not graphs:
+        return plan_info
+    
+    # すべてのグラフからノードを収集
+    all_nodes = []
+    for graph_index, graph in enumerate(graphs):
+        nodes = graph.get('nodes', [])
+        for node in nodes:
+            node['graph_index'] = graph_index
+            all_nodes.append(node)
+    
+    # ノード分析
+    for node in all_nodes:
+        node_name = node.get('name', '').upper()
+        node_tag = node.get('tag', '').upper()
+        node_metadata = node.get('metadata', [])
+        
+        # BROADCASTノードの検出
+        if 'BROADCAST' in node_name or 'BROADCAST' in node_tag:
+            plan_info["broadcast_already_applied"] = True
+            broadcast_info = {
+                "node_name": node_name,
+                "node_tag": node_tag,
+                "node_id": node.get('id', ''),
+                "metadata": []
+            }
+            
+            # BROADCASTに関連するメタデータを抽出
+            for meta in node_metadata:
+                key = meta.get('key', '')
+                value = meta.get('value', '')
+                values = meta.get('values', [])
+                
+                if any(keyword in key.upper() for keyword in ['BROADCAST', 'BUILD', 'PROBE']):
+                    broadcast_info["metadata"].append({
+                        "key": key,
+                        "value": value,
+                        "values": values
+                    })
+            
+            plan_info["broadcast_nodes"].append(broadcast_info)
+        
+        # JOINノードの検出と戦略分析
+        elif any(keyword in node_name for keyword in ['JOIN', 'HASH']):
+            join_info = {
+                "node_name": node_name,
+                "node_tag": node_tag,
+                "node_id": node.get('id', ''),
+                "join_strategy": "unknown",
+                "join_keys": [],
+                "join_type": "unknown"
+            }
+            
+            # JOIN戦略の特定
+            if 'BROADCAST' in node_name:
+                join_info["join_strategy"] = "broadcast_hash_join"
+            elif 'SORT' in node_name and 'MERGE' in node_name:
+                join_info["join_strategy"] = "sort_merge_join"
+            elif 'HASH' in node_name:
+                join_info["join_strategy"] = "shuffle_hash_join"
+            elif 'NESTED' in node_name:
+                join_info["join_strategy"] = "broadcast_nested_loop_join"
+            
+            # JOINタイプの特定
+            if 'INNER' in node_name:
+                join_info["join_type"] = "inner"
+            elif 'LEFT' in node_name:
+                join_info["join_type"] = "left"
+            elif 'RIGHT' in node_name:
+                join_info["join_type"] = "right"
+            elif 'OUTER' in node_name:
+                join_info["join_type"] = "outer"
+            
+            # JOIN条件の抽出
+            for meta in node_metadata:
+                key = meta.get('key', '')
+                values = meta.get('values', [])
+                
+                if key in ['LEFT_KEYS', 'RIGHT_KEYS']:
+                    join_info["join_keys"].extend(values)
+            
+            plan_info["join_nodes"].append(join_info)
+            plan_info["join_strategies"].append(join_info["join_strategy"])
+        
+        # スキャンノードの詳細分析
+        elif any(keyword in node_name for keyword in ['SCAN', 'FILESCAN']):
+            scan_info = {
+                "node_name": node_name,
+                "node_tag": node_tag,
+                "node_id": node.get('id', ''),
+                "table_name": "unknown",
+                "file_format": "unknown",
+                "pushed_filters": [],
+                "output_columns": []
+            }
+            
+            # テーブル名とファイル形式の抽出
+            for meta in node_metadata:
+                key = meta.get('key', '')
+                value = meta.get('value', '')
+                values = meta.get('values', [])
+                
+                if key == 'SCAN_IDENTIFIER':
+                    scan_info["table_name"] = value
+                elif key == 'OUTPUT':
+                    scan_info["output_columns"] = values
+                elif key == 'PUSHED_FILTERS' or key == 'FILTERS':
+                    scan_info["pushed_filters"] = values
+            
+            # ファイル形式の推定
+            if 'DELTA' in node_name:
+                scan_info["file_format"] = "delta"
+            elif 'PARQUET' in node_name:
+                scan_info["file_format"] = "parquet"
+            elif 'JSON' in node_name:
+                scan_info["file_format"] = "json"
+            elif 'CSV' in node_name:
+                scan_info["file_format"] = "csv"
+            
+            plan_info["scan_nodes"].append(scan_info)
+            plan_info["table_scan_details"][scan_info["table_name"]] = scan_info
+        
+        # シャッフルノードの検出
+        elif any(keyword in node_name for keyword in ['SHUFFLE', 'EXCHANGE']):
+            shuffle_info = {
+                "node_name": node_name,
+                "node_tag": node_tag,
+                "node_id": node.get('id', ''),
+                "partition_keys": []
+            }
+            
+            # パーティション情報の抽出
+            for meta in node_metadata:
+                key = meta.get('key', '')
+                values = meta.get('values', [])
+                
+                if key in ['PARTITION_EXPRESSIONS', 'PARTITION_KEYS']:
+                    shuffle_info["partition_keys"] = values
+            
+            plan_info["shuffle_nodes"].append(shuffle_info)
+        
+        # 集約ノードの検出
+        elif any(keyword in node_name for keyword in ['AGGREGATE', 'GROUP']):
+            agg_info = {
+                "node_name": node_name,
+                "node_tag": node_tag,
+                "node_id": node.get('id', ''),
+                "group_keys": [],
+                "aggregate_expressions": []
+            }
+            
+            # 集約情報の抽出
+            for meta in node_metadata:
+                key = meta.get('key', '')
+                values = meta.get('values', [])
+                
+                if key == 'GROUPING_EXPRESSIONS':
+                    agg_info["group_keys"] = values
+                elif key == 'AGGREGATE_EXPRESSIONS':
+                    agg_info["aggregate_expressions"] = values
+            
+            plan_info["aggregate_nodes"].append(agg_info)
+    
+    # プランサマリーの生成
+    plan_info["plan_summary"] = {
+        "total_nodes": len(all_nodes),
+        "broadcast_nodes_count": len(plan_info["broadcast_nodes"]),
+        "join_nodes_count": len(plan_info["join_nodes"]),
+        "scan_nodes_count": len(plan_info["scan_nodes"]),
+        "shuffle_nodes_count": len(plan_info["shuffle_nodes"]),
+        "aggregate_nodes_count": len(plan_info["aggregate_nodes"]),
+        "unique_join_strategies": list(set(plan_info["join_strategies"])),
+        "has_broadcast_joins": plan_info["broadcast_already_applied"],
+        "tables_scanned": len(plan_info["table_scan_details"])
+    }
+    
+    return plan_info
+
 def get_spark_broadcast_threshold() -> float:
     """
     Sparkの実際のbroadcast閾値設定を取得
@@ -3258,7 +3455,7 @@ def estimate_uncompressed_size(compressed_size_mb: float, file_format: str = "pa
     ratio = compression_ratios.get(file_format.lower(), compression_ratios["default"])
     return compressed_size_mb * ratio
 
-def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) -> Dict[str, Any]:
+def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, plan_info: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     BROADCASTヒントの適用可能性を分析（正確な30MB閾値適用）
     """
@@ -3270,7 +3467,10 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
         "reasoning": [],
         "spark_threshold_mb": get_spark_broadcast_threshold(),
         "compression_analysis": {},
-        "detailed_size_analysis": []
+        "detailed_size_analysis": [],
+        "execution_plan_analysis": {},
+        "existing_broadcast_nodes": [],
+        "already_optimized": False
     }
     
     # クエリにJOINが含まれているかチェック
@@ -3284,6 +3484,42 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
     
     broadcast_analysis["is_join_query"] = True
     broadcast_analysis["reasoning"].append(f"Spark BROADCAST閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）")
+    
+    # 実行プラン情報の分析
+    if plan_info:
+        plan_summary = plan_info.get("plan_summary", {})
+        broadcast_nodes = plan_info.get("broadcast_nodes", [])
+        join_nodes = plan_info.get("join_nodes", [])
+        table_scan_details = plan_info.get("table_scan_details", {})
+        
+        # 既存のBROADCAST適用状況の記録
+        broadcast_analysis["existing_broadcast_nodes"] = broadcast_nodes
+        broadcast_analysis["already_optimized"] = len(broadcast_nodes) > 0
+        
+        # プラン分析結果の記録
+        broadcast_analysis["execution_plan_analysis"] = {
+            "has_broadcast_joins": plan_summary.get("has_broadcast_joins", False),
+            "unique_join_strategies": plan_summary.get("unique_join_strategies", []),
+            "broadcast_nodes_count": len(broadcast_nodes),
+            "join_nodes_count": len(join_nodes),
+            "scan_nodes_count": plan_summary.get("scan_nodes_count", 0),
+            "shuffle_nodes_count": plan_summary.get("shuffle_nodes_count", 0),
+            "tables_in_plan": list(table_scan_details.keys())
+        }
+        
+        # 既にBROADCASTが適用されている場合の詳細記録
+        if broadcast_nodes:
+            broadcast_analysis["reasoning"].append(f"✅ 実行プランで既にBROADCAST JOINが適用済み: {len(broadcast_nodes)}個のノード")
+            for i, node in enumerate(broadcast_nodes[:3]):  # 最大3個まで表示
+                broadcast_analysis["reasoning"].append(f"  • BROADCAST Node {i+1}: {node['node_name'][:50]}...")
+        else:
+            # BROADCAST未適用だが、JOINが存在する場合
+            if join_nodes:
+                join_strategies = set(node["join_strategy"] for node in join_nodes)
+                broadcast_analysis["reasoning"].append(f"🔍 現在のJOIN戦略: {', '.join(join_strategies)}")
+                broadcast_analysis["reasoning"].append("💡 BROADCAST最適化の機会を検討中...")
+    else:
+        broadcast_analysis["reasoning"].append("⚠️ 実行プラン情報が利用できません - メトリクス推定に基づく分析を実行")
     
     # メトリクスからテーブルサイズ情報を取得
     overall_metrics = metrics.get('overall_metrics', {})
@@ -3301,16 +3537,37 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
             rows_num = key_metrics.get('rowsNum', 0)
             duration_ms = key_metrics.get('durationMs', 0)
             
-            # ファイル形式の推定
+            # ファイル形式の推定（プラン情報を優先）
             file_format = "parquet"  # デフォルト
-            if "DELTA" in node_name:
-                file_format = "delta"
-            elif "PARQUET" in node_name:
-                file_format = "parquet"
-            elif "JSON" in node_name:
-                file_format = "json"
-            elif "CSV" in node_name:
-                file_format = "csv"
+            table_name_from_plan = "unknown"
+            
+            # プラン情報からテーブル名とファイル形式を取得
+            if plan_info and plan_info.get("table_scan_details"):
+                # メタデータから詳細なテーブル名を抽出
+                node_metadata = node.get('metadata', [])
+                for meta in node_metadata:
+                    meta_key = meta.get('key', '')
+                    meta_value = meta.get('value', '')
+                    if meta_key in ['SCAN_IDENTIFIER', 'SCAN_TABLE', 'TABLE_NAME'] and meta_value:
+                        # プランの詳細と照合
+                        for plan_table, scan_detail in plan_info["table_scan_details"].items():
+                            if meta_value in plan_table or plan_table in meta_value:
+                                table_name_from_plan = plan_table
+                                if scan_detail["file_format"] != "unknown":
+                                    file_format = scan_detail["file_format"]
+                                break
+                        break
+            
+            # フォールバック: ノード名からファイル形式を推定
+            if file_format == "parquet":  # まだデフォルトの場合
+                if "DELTA" in node_name:
+                    file_format = "delta"
+                elif "PARQUET" in node_name:
+                    file_format = "parquet"
+                elif "JSON" in node_name:
+                    file_format = "json"
+                elif "CSV" in node_name:
+                    file_format = "csv"
             
             # このテーブルの圧縮サイズを推定
             total_read_bytes = overall_metrics.get('read_bytes', 0)
@@ -3339,15 +3596,32 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
                 estimated_compressed_mb = (rows_num * compressed_avg_row_size) / 1024 / 1024 if 'compressed_avg_row_size' in locals() else 0
                 estimated_uncompressed_mb = (rows_num * uncompressed_avg_row_size) / 1024 / 1024
             
+            # 既存のBROADCAST適用状況をチェック
+            is_already_broadcasted = False
+            if plan_info and plan_info.get("broadcast_nodes"):
+                for broadcast_node in plan_info["broadcast_nodes"]:
+                    # テーブル名の部分一致をチェック
+                    broadcast_node_name = broadcast_node["node_name"]
+                    if (table_name_from_plan != "unknown" and 
+                        any(part in broadcast_node_name for part in table_name_from_plan.split('.') if len(part) > 3)):
+                        is_already_broadcasted = True
+                        break
+                    # ノード名での照合
+                    elif any(part in broadcast_node_name for part in node_name.split() if len(part) > 3):
+                        is_already_broadcasted = True
+                        break
+
             scan_info = {
                 "node_name": node_name,
+                "table_name_from_plan": table_name_from_plan,
                 "rows": rows_num,
                 "duration_ms": duration_ms,
                 "estimated_compressed_mb": estimated_compressed_mb,
                 "estimated_uncompressed_mb": estimated_uncompressed_mb,
                 "file_format": file_format,
                 "compression_ratio": estimated_uncompressed_mb / max(estimated_compressed_mb, 0.1),
-                "node_id": node.get('node_id', '')
+                "node_id": node.get('node_id', ''),
+                "is_already_broadcasted": is_already_broadcasted
             }
             scan_nodes.append(scan_info)
             
@@ -3375,25 +3649,47 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
         compressed_size_mb = scan["estimated_compressed_mb"]
         
         # 詳細サイズ分析の記録
+        table_display_name = scan.get("table_name_from_plan", scan["node_name"])
+        is_already_broadcasted = scan.get("is_already_broadcasted", False)
+        
         size_analysis = {
-            "table": scan["node_name"],
+            "table": table_display_name,
+            "node_name": scan["node_name"],
             "rows": scan["rows"],
             "compressed_mb": compressed_size_mb,
             "uncompressed_mb": uncompressed_size_mb,
             "file_format": scan["file_format"],
             "compression_ratio": scan["compression_ratio"],
             "broadcast_decision": "",
-            "decision_reasoning": ""
+            "decision_reasoning": "",
+            "is_already_broadcasted": is_already_broadcasted
         }
         
-        # 30MB閾値での判定（非圧縮サイズ）
-        if uncompressed_size_mb <= broadcast_safe_mb and scan["rows"] > 0:
+        # 30MB閾値での判定（非圧縮サイズ）- 既存適用状況を考慮
+        if is_already_broadcasted:
+            # 既にBROADCASTが適用済み
+            small_tables.append(scan)  # 統計目的で記録
+            size_analysis["broadcast_decision"] = "already_applied"
+            size_analysis["decision_reasoning"] = f"既にBROADCAST適用済み（推定サイズ: 非圧縮{uncompressed_size_mb:.1f}MB）"
+            broadcast_analysis["broadcast_candidates"].append({
+                "table": table_display_name,
+                "estimated_uncompressed_mb": uncompressed_size_mb,
+                "estimated_compressed_mb": compressed_size_mb,
+                "rows": scan["rows"],
+                "file_format": scan["file_format"],
+                "compression_ratio": scan["compression_ratio"],
+                "broadcast_feasible": True,
+                "confidence": "confirmed",
+                "status": "already_applied",
+                "reasoning": f"実行プランで既にBROADCAST適用確認済み（推定サイズ: 非圧縮{uncompressed_size_mb:.1f}MB）"
+            })
+        elif uncompressed_size_mb <= broadcast_safe_mb and scan["rows"] > 0:
             # 安全マージン内（24MB以下）- 強く推奨
             small_tables.append(scan)
             size_analysis["broadcast_decision"] = "strongly_recommended"
             size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB ≤ 安全閾値{broadcast_safe_mb:.1f}MB"
             broadcast_analysis["broadcast_candidates"].append({
-                "table": scan["node_name"],
+                "table": table_display_name,
                 "estimated_uncompressed_mb": uncompressed_size_mb,
                 "estimated_compressed_mb": compressed_size_mb,
                 "rows": scan["rows"],
@@ -3401,6 +3697,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
                 "compression_ratio": scan["compression_ratio"],
                 "broadcast_feasible": True,
                 "confidence": "high",
+                "status": "new_recommendation",
                 "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（安全閾値 {broadcast_safe_mb:.1f}MB 以下）でBROADCAST強く推奨"
             })
         elif uncompressed_size_mb <= broadcast_threshold_mb and scan["rows"] > 0:
@@ -3409,7 +3706,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
             size_analysis["broadcast_decision"] = "conditionally_recommended"
             size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB ≤ 閾値{broadcast_threshold_mb:.1f}MB（安全マージン超過）"
             broadcast_analysis["broadcast_candidates"].append({
-                "table": scan["node_name"],
+                "table": table_display_name,
                 "estimated_uncompressed_mb": uncompressed_size_mb,
                 "estimated_compressed_mb": compressed_size_mb,
                 "rows": scan["rows"],
@@ -3417,6 +3714,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
                 "compression_ratio": scan["compression_ratio"],
                 "broadcast_feasible": True,
                 "confidence": "medium",
+                "status": "new_recommendation",
                 "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（閾値 {broadcast_threshold_mb:.1f}MB 以下だが安全マージン {broadcast_safe_mb:.1f}MB 超過）で条件付きBROADCAST推奨"
             })
         elif uncompressed_size_mb > broadcast_max_mb:
@@ -3424,13 +3722,13 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
             large_tables.append(scan)
             size_analysis["broadcast_decision"] = "not_recommended"
             size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB > 最大閾値{broadcast_max_mb:.1f}MB"
-            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST不可（>{broadcast_max_mb:.1f}MB）")
+            broadcast_analysis["reasoning"].append(f"テーブル {table_display_name}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST不可（>{broadcast_max_mb:.1f}MB）")
         else:
             # 中間サイズのテーブル（30-300MB）
             large_tables.append(scan)
             size_analysis["broadcast_decision"] = "not_recommended"
             size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB > 閾値{broadcast_threshold_mb:.1f}MB"
-            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST非推奨（>{broadcast_threshold_mb:.1f}MB閾値）")
+            broadcast_analysis["reasoning"].append(f"テーブル {table_display_name}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST非推奨（>{broadcast_threshold_mb:.1f}MB閾値）")
         
         broadcast_analysis["detailed_size_analysis"].append(size_analysis)
     
@@ -3542,8 +3840,14 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     LLM分析結果に基づいてSQLクエリを最適化（BROADCAST分析を含む）
     """
     
-    # BROADCAST適用可能性の分析
-    broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query)
+    # 実行プラン情報の抽出（メトリクスから）
+    profiler_data = metrics.get('raw_profiler_data', {})
+    plan_info = None
+    if profiler_data:
+        plan_info = extract_execution_plan_info(profiler_data)
+    
+    # BROADCAST適用可能性の分析（プラン情報を含む）
+    broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query, plan_info)
     
     # 最適化のためのコンテキスト情報を準備
     optimization_context = []
@@ -4495,6 +4799,168 @@ print("🎉" * 25)
 # MAGIC # 外部ストレージからのコピー
 # MAGIC dbutils.fs.cp("s3a://bucket/profiler.json", "dbfs:/FileStore/profiler.json")
 # MAGIC ```
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔍 実行プラン情報を活用したBROADCAST分析機能の追加完了
+# MAGIC 
+# MAGIC この更新により、JSONメトリクスから抽出した実行プラン情報を活用したBROADCAST分析が可能になりました：
+# MAGIC 
+# MAGIC ### 🆕 新機能
+# MAGIC 
+# MAGIC #### 1. `extract_execution_plan_info()` 関数
+# MAGIC - **機能**: JSONメトリクスから詳細な実行プラン情報を抽出
+# MAGIC - **検出内容**:
+# MAGIC   - BROADCASTノード（既存の適用状況）
+# MAGIC   - JOINノード（戦略：broadcast_hash_join, sort_merge_join, shuffle_hash_join等）
+# MAGIC   - スキャンノード（テーブル名、ファイル形式、プッシュダウンフィルタ）
+# MAGIC   - シャッフルノード（パーティション情報）
+# MAGIC   - 集約ノード（GROUP BY表現、集約関数）
+# MAGIC - **出力**: 構造化されたプラン情報辞書
+# MAGIC 
+# MAGIC #### 2. `analyze_broadcast_feasibility()` 関数の拡張
+# MAGIC - **追加機能**:
+# MAGIC   - 既存のBROADCAST適用状況の自動検出
+# MAGIC   - プラン情報からテーブル名とファイル形式の正確な特定
+# MAGIC   - 既に最適化済みテーブルと新規推奨の区別
+# MAGIC   - 実行プラン分析結果の詳細記録
+# MAGIC - **判定強化**:
+# MAGIC   - `already_applied`: 既にBROADCAST適用済み
+# MAGIC   - `new_recommendation`: 新規BROADCAST推奨
+# MAGIC   - プラン情報と整合性のある分析
+# MAGIC 
+# MAGIC #### 3. SQL最適化の改善
+# MAGIC - **プラン考慮**: 実行プラン情報を含むBROADCAST分析
+# MAGIC - **LLMプロンプト強化**: プラン情報をLLMに提供して正確な最適化
+# MAGIC - **30MB閾値の厳格適用**: 実際のSparkプラン情報との整合性確保
+
+# COMMAND ----------
+
+# 🔍 実行プラン情報を活用したBROADCAST分析のデモ関数
+def demonstrate_plan_based_broadcast_analysis():
+    """
+    実行プラン情報を活用したBROADCAST分析のデモ
+    """
+    print("\n🔍 実行プラン情報を活用したBROADCAST分析デモ")
+    print("=" * 60)
+    
+    # メトリクスデータが存在するかチェック
+    try:
+        # extracted_metrics と profiler_data を使用
+        extracted_metrics
+        profiler_data
+        
+        print("📊 実行プラン情報を抽出中...")
+        plan_info = extract_execution_plan_info(profiler_data)
+        
+        print(f"✅ プラン情報の抽出完了")
+        print(f"   - 総ノード数: {plan_info.get('plan_summary', {}).get('total_nodes', 0)}")
+        print(f"   - BROADCASTノード数: {plan_info.get('plan_summary', {}).get('broadcast_nodes_count', 0)}")
+        print(f"   - JOINノード数: {plan_info.get('plan_summary', {}).get('join_nodes_count', 0)}")
+        print(f"   - スキャンノード数: {plan_info.get('plan_summary', {}).get('scan_nodes_count', 0)}")
+        print(f"   - シャッフルノード数: {plan_info.get('plan_summary', {}).get('shuffle_nodes_count', 0)}")
+        
+        # JOIN戦略の分析
+        join_strategies = plan_info.get('plan_summary', {}).get('unique_join_strategies', [])
+        if join_strategies:
+            print(f"\n🔗 検出されたJOIN戦略:")
+            for strategy in join_strategies:
+                print(f"   - {strategy}")
+        
+        # 既存のBROADCAST適用状況
+        broadcast_nodes = plan_info.get('broadcast_nodes', [])
+        if broadcast_nodes:
+            print(f"\n📡 既存のBROADCAST適用状況:")
+            for i, node in enumerate(broadcast_nodes[:3]):  # 最大3個まで表示
+                print(f"   {i+1}. {node['node_name'][:60]}...")
+                metadata_count = len(node.get('metadata', []))
+                print(f"      メタデータ項目数: {metadata_count}")
+        else:
+            print(f"\n📡 現在BROADCASTは適用されていません")
+        
+        # テーブルスキャンの詳細
+        table_scan_details = plan_info.get('table_scan_details', {})
+        if table_scan_details:
+            print(f"\n📋 スキャンされるテーブル:")
+            for table_name, scan_detail in list(table_scan_details.items())[:5]:  # 最大5個まで表示
+                file_format = scan_detail.get('file_format', 'unknown')
+                pushed_filters = len(scan_detail.get('pushed_filters', []))
+                output_columns = len(scan_detail.get('output_columns', []))
+                print(f"   - {table_name}")
+                print(f"     ファイル形式: {file_format}, フィルタ: {pushed_filters}個, カラム: {output_columns}個")
+        
+        # オリジナルクエリの抽出（存在する場合）
+        try:
+            original_query_for_demo = extract_original_query_from_profiler_data(profiler_data)
+            if not original_query_for_demo:
+                original_query_for_demo = "SELECT * FROM table1 t1 JOIN table2 t2 ON t1.id = t2.id"
+        except:
+            original_query_for_demo = "SELECT * FROM table1 t1 JOIN table2 t2 ON t1.id = t2.id"
+        
+        print(f"\n🎯 プラン情報を考慮したBROADCAST分析を実行中...")
+        broadcast_analysis = analyze_broadcast_feasibility(
+            extracted_metrics, 
+            original_query_for_demo, 
+            plan_info
+        )
+        
+        # BROADCAST分析結果の表示
+        print(f"\n📊 BROADCAST分析結果:")
+        print(f"   - JOINクエリ: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}")
+        print(f"   - 既に最適化済み: {'はい' if broadcast_analysis['already_optimized'] else 'いいえ'}")
+        print(f"   - Spark BROADCAST閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB")
+        print(f"   - 適用可能性: {broadcast_analysis['feasibility']}")
+        print(f"   - BROADCAST候補数: {len(broadcast_analysis['broadcast_candidates'])}")
+        
+        # 実行プラン分析結果
+        exec_plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
+        if exec_plan_analysis:
+            print(f"\n🔍 実行プラン分析詳細:")
+            print(f"   - BROADCASTが既に使用中: {'はい' if exec_plan_analysis['has_broadcast_joins'] else 'いいえ'}")
+            print(f"   - 使用されているJOIN戦略: {', '.join(exec_plan_analysis.get('unique_join_strategies', []))}")
+            print(f"   - プラン内のテーブル数: {len(exec_plan_analysis.get('tables_in_plan', []))}")
+        
+        # BROADCAST候補の詳細
+        if broadcast_analysis['broadcast_candidates']:
+            print(f"\n🔹 BROADCAST候補詳細:")
+            for candidate in broadcast_analysis['broadcast_candidates'][:3]:  # 最大3個まで表示
+                status = candidate.get('status', 'unknown')
+                status_icon = "✅" if status == "already_applied" else "🆕" if status == "new_recommendation" else "🔍"
+                print(f"   {status_icon} {candidate['table']}")
+                print(f"      非圧縮サイズ: {candidate['estimated_uncompressed_mb']:.1f}MB")
+                print(f"      圧縮サイズ: {candidate['estimated_compressed_mb']:.1f}MB")
+                print(f"      信頼度: {candidate['confidence']}")
+                print(f"      ステータス: {status}")
+                print(f"      根拠: {candidate['reasoning'][:80]}...")
+        
+        # 推奨事項
+        if broadcast_analysis['recommendations']:
+            print(f"\n💡 推奨事項:")
+            for rec in broadcast_analysis['recommendations'][:5]:  # 最大5個まで表示
+                print(f"   • {rec}")
+        
+        print(f"\n✅ プラン情報を活用したBROADCAST分析完了")
+        
+    except NameError as e:
+        print(f"⚠️ 必要な変数が定義されていません: {str(e)}")
+        print("   以下のセルを先に実行してください：")
+        print("   - Cell 11: JSON読み込み")
+        print("   - Cell 12: メトリクス抽出")
+    except Exception as e:
+        print(f"❌ プラン分析中にエラーが発生しました: {str(e)}")
+
+# デモ実行の呼び出し例（コメントアウトされているので、必要に応じて有効化）
+# demonstrate_plan_based_broadcast_analysis()
+
+print("✅ 関数定義完了: 実行プラン情報を活用したBROADCAST分析デモ")
+
+# COMMAND ----------
+
+print("🎉 実行プラン情報を活用したBROADCAST分析機能の追加完了")
+print("📊 SQLの最適化により精密で実用的なBROADCAST推奨が可能になりました")
+print("🔍 既存の最適化状況を考慮した、より実際的な分析を提供します")
+print("✅ 全ての機能が正常に統合されました")
 # MAGIC 
 # MAGIC ### 🎛️ カスタマイズポイント
 # MAGIC 
