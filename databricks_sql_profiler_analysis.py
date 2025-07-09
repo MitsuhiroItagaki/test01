@@ -4316,63 +4316,80 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if duration_ms > 0:  # このノードに関連するステージを推定
                     num_tasks = max(num_tasks, stage.get('num_tasks', 0))
             
-            # スピル検出（複数メトリクス対応・包括的検索）
+            # スピル検出（堅牢版 - メモリベース + 包括的メトリクス検索）
             spill_detected = False
             spill_bytes = 0
-            node_spill_found = False
-            target_spill_metrics = [
-                "Sink - Num bytes spilled to disk due to memory pressure",
-                "Num bytes spilled to disk due to memory pressure"
-            ]
+            spill_detection_method = "none"
             
-            # 1. detailed_metricsから検索（強化版）
+            # 1. メモリベーススピル検出（堅牢フォールバック）
+            # ピークメモリが1GB以上の場合、高確率でスピルが発生していると判定
+            memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / (1024 * 1024)
+            if memory_mb > 1024:  # 1GB以上
+                spill_detected = True
+                spill_detection_method = "memory_based"
+                # メモリの10%がスピルしたと仮定（保守的な見積もり）
+                spill_bytes = int(memory_mb * 1024 * 1024 * 0.1)
+            
+            # 2. 包括的スピルメトリクス検索（より詳細で正確）
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
                 metric_label = metric_info.get('label', '')
                 
-                # 複数のスピルメトリクス名をチェック（キーとラベル両方を詳細にチェック）
-                is_spill_metric = False
-                for target_metric in target_spill_metrics:
-                    if (metric_key == target_metric or 
-                        metric_label == target_metric or
-                        target_metric in metric_key or
-                        target_metric in metric_label):
-                        is_spill_metric = True
-                        break
+                # スピル関連キーワードの包括的検索（大文字小文字無視）
+                key_lower = metric_key.lower()
+                label_lower = metric_label.lower()
+                
+                is_spill_metric = (
+                    'spill' in key_lower or 'spill' in label_lower or
+                    'disk' in key_lower or 'disk' in label_lower or
+                    ('memory pressure' in key_lower) or ('memory pressure' in label_lower) or
+                    ('bytes spilled' in key_lower) or ('bytes spilled' in label_lower) or
+                    ('num bytes' in key_lower and 'disk' in key_lower) or
+                    ('num bytes' in label_lower and 'disk' in label_lower)
+                )
                 
                 if is_spill_metric and metric_value > 0:
                     spill_detected = True
-                    node_spill_found = True
-                    spill_bytes = metric_value
-                    break
+                    spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
+                    spill_detection_method = f"detailed_metrics ({metric_key})"
             
-            # 2. raw_metricsから検索（このノードでまだ見つからない場合）
-            if not node_spill_found:
-                raw_metrics = node.get('metrics', [])
+            # 3. raw_metricsからの包括的検索
+            raw_metrics = node.get('metrics', [])
+            if isinstance(raw_metrics, list):
                 for metric in raw_metrics:
                     metric_key = metric.get('key', '')
                     metric_label = metric.get('label', '')
                     metric_value = metric.get('value', 0)
                     
-                    # 複数のスピルメトリクス名をチェック
-                    if ((metric_key in target_spill_metrics or 
-                         metric_label in target_spill_metrics) and metric_value > 0):
+                    key_lower = metric_key.lower()
+                    label_lower = metric_label.lower()
+                    
+                    is_spill_metric = (
+                        'spill' in key_lower or 'spill' in label_lower or
+                        'disk' in key_lower or 'disk' in label_lower or
+                        ('memory pressure' in key_lower) or ('memory pressure' in label_lower)
+                    )
+                    
+                    if is_spill_metric and metric_value > 0:
                         spill_detected = True
-                        node_spill_found = True
-                        spill_bytes = metric_value
-                        break
+                        spill_bytes = max(spill_bytes, metric_value)
+                        spill_detection_method = f"raw_metrics ({metric_key})"
             
-            # 3. key_metricsから検索（最後のフォールバック）
-            if not node_spill_found:
-                key_metrics = node.get('key_metrics', {})
-                for key_metric_name, key_metric_value in key_metrics.items():
-                    # 複数のスピルメトリクス名をチェック
-                    if key_metric_name in target_spill_metrics and key_metric_value > 0:
-                        spill_detected = True
-                        node_spill_found = True
-                        spill_bytes = key_metric_value
-                        break
+            # 4. key_metricsからの包括的検索
+            key_metrics = node.get('key_metrics', {})
+            for key_metric_name, key_metric_value in key_metrics.items():
+                key_lower = key_metric_name.lower()
+                
+                is_spill_metric = (
+                    'spill' in key_lower or 'disk' in key_lower or
+                    'memory pressure' in key_lower
+                )
+                
+                if is_spill_metric and key_metric_value > 0:
+                    spill_detected = True
+                    spill_bytes = max(spill_bytes, key_metric_value)
+                    spill_detection_method = f"key_metrics ({key_metric_name})"
             
             # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用
             skew_detected = False
@@ -4430,8 +4447,16 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
             
             # スピル詳細情報
-            if spill_detected and spill_bytes > 0:
-                report_lines.append(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
+            if spill_detected:
+                if spill_bytes > 0:
+                    spill_mb = spill_bytes / 1024 / 1024
+                    if spill_mb >= 1024:  # GB単位
+                        spill_display = f"{spill_mb/1024:.1f} GB"
+                    else:  # MB単位
+                        spill_display = f"{spill_mb:.1f} MB"
+                    report_lines.append(f"    💿 スピル詳細: {spill_display} ({spill_detection_method})")
+                else:
+                    report_lines.append(f"    💿 スピル詳細: 検出済み ({spill_detection_method})")
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
