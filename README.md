@@ -81,14 +81,15 @@ LLM_CONFIG = {
     "thinking_enabled": True,  # 思考プロセス表示（推奨）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072,  # 128K tokens
-        "temperature": 0.1
+        "max_tokens": 200000,  # 200K tokens（完全なSQL生成用）
+        "temperature": 0.0,    # 決定的な出力（0.1→0.0）
+        "thinking_budget_tokens": 100000  # 100K tokens（拡張）
     },
     "openai": {
         "api_key": "",  # OpenAI APIキー
         "model": "gpt-4o",
         "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.1
+        "temperature": 0.0    # 決定的な出力（0.1→0.0）
     },
     "azure_openai": {
         "api_key": "",
@@ -96,13 +97,13 @@ LLM_CONFIG = {
         "deployment_name": "",
         "api_version": "2024-02-01",
         "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.1
+        "temperature": 0.0    # 決定的な出力（0.1→0.0）
     },
     "anthropic": {
         "api_key": "",
         "model": "claude-3-5-sonnet-20241022",
         "max_tokens": 16000,  # 16K tokens
-        "temperature": 0.1
+        "temperature": 0.0    # 決定的な出力（0.1→0.0）
     }
 }
 ```
@@ -182,7 +183,8 @@ LLM_CONFIG = {
     "openai": {
         "api_key": "sk-...",  # または環境変数OPENAI_API_KEY
         "model": "gpt-4o",
-        "max_tokens": 16000  # 16K tokens設定
+        "max_tokens": 16000,  # 16K tokens設定
+        "temperature": 0.0    # 決定的な出力
     }
 }
 
@@ -195,7 +197,8 @@ LLM_CONFIG = {
         "endpoint": "https://your-resource.openai.azure.com/",
         "deployment_name": "gpt-4",
         "api_version": "2024-02-01",
-        "max_tokens": 16000  # 16K tokens設定
+        "max_tokens": 16000,  # 16K tokens設定
+        "temperature": 0.0    # 決定的な出力
     }
 }
 
@@ -206,7 +209,8 @@ LLM_CONFIG = {
     "anthropic": {
         "api_key": "sk-ant-...",  # または環境変数ANTHROPIC_API_KEY
         "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 16000  # 16K tokens設定
+        "max_tokens": 16000,  # 16K tokens設定
+        "temperature": 0.0    # 決定的な出力
     }
 }
 ```
@@ -449,17 +453,52 @@ LIMIT 100;
 
 ## 🔍 高度な機能
 
-### 📊 思考プロセス表示（thinking_enabled）
+### � 完全なSQL生成のためのLLM設定
+
+#### 📊 Databricks設定（推奨）
+
+**完全なクエリ生成用に最適化された設定:**
 
 ```python
-# thinking_enabled: True の詳細設定
+# 複雑なクエリ（37カラム等）に対応
+LLM_CONFIG = {
+    "provider": "databricks",
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet",
+        "max_tokens": 200000,  # 200K tokens（従来128K→拡張）
+        "temperature": 0.0,    # 決定的出力（従来0.1→0.0）
+        "thinking_enabled": True,
+        "thinking_budget_tokens": 100000  # 100K tokens（従来64K→拡張）
+    }
+}
+```
+
+**設定変更の効果:**
+
+| 項目 | 従来設定 | 新設定 | 効果 |
+|-----|---------|--------|------|
+| **max_tokens** | 128K | **200K** | +56% 長いクエリ対応 |
+| **thinking_budget_tokens** | 64K | **100K** | +56% 思考プロセス強化 |
+| **temperature** | 0.1 | **0.0** | 決定的出力・一貫性向上 |
+
+**期待される改善:**
+- ✅ 37個のカラムを含む複雑なクエリでも完全生成
+- ✅ 省略・プレースホルダー使用の完全防止
+- ✅ 思考プロセスでの段階的構築
+- ✅ 一貫した結果の生成
+
+### �📊 思考プロセス表示（thinking_enabled）
+
+```python
+# thinking_enabled: True の詳細設定（完全なSQL生成用）
 LLM_CONFIG = {
     "provider": "databricks",
     "thinking_enabled": True,  # 思考プロセス表示を有効化
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 131072,  # 128K tokens（思考プロセス含む）
-        "temperature": 0.1
+        "max_tokens": 200000,  # 200K tokens（複雑なクエリ生成対応）
+        "temperature": 0.0,    # 決定的な出力
+        "thinking_budget_tokens": 100000  # 100K tokens（思考プロセス用）
     }
 }
 
@@ -685,6 +724,8 @@ LLM_CONFIG = {
 3. **タイムアウト解決**: 180秒 → 300秒 + プロンプト最適化
 4. **リトライ強化**: 2回 → 3回
 5. **エラーメッセージ改善**: 詳細な解決策を含む
+6. **LLM設定拡張**: 200K tokens + thinking 100K tokens（完全SQL生成用）
+7. **決定的出力**: temperature 0.1→0.0（一貫性向上）
 
 ## 📈 機能拡張・今後の展開
 

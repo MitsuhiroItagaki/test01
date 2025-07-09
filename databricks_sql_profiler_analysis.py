@@ -153,39 +153,39 @@ LLM_CONFIG = {
     # エンドポイントタイプ: 'databricks', 'openai', 'azure_openai', 'anthropic'
     "provider": "databricks",
     
-    # Databricks Model Serving設定
+    # Databricks Model Serving設定（完全なSQL生成用に拡張）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
-        "max_tokens": 131072,  # 128K tokens
-        "temperature": 0.1,
+        "max_tokens": 200000,  # 200K tokens（複雑なクエリ生成用に拡張）
+        "temperature": 0.0,    # 決定的な出力のため（0.1→0.0）
         "thinking_enabled": True,  # 拡張思考モード（デフォルト: 有効）
-        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens
+        "thinking_budget_tokens": 100000  # 思考用トークン予算 100K tokens（拡張）
     },
     
-    # OpenAI設定
+    # OpenAI設定（完全なSQL生成用に最適化）
     "openai": {
         "api_key": "",  # OpenAI APIキー (環境変数OPENAI_API_KEYでも可)
         "model": "gpt-4o",  # gpt-4o, gpt-4-turbo, gpt-3.5-turbo
-        "max_tokens": 16000,
-        "temperature": 0.1
+        "max_tokens": 16000,  # OpenAIの制限内最大
+        "temperature": 0.0    # 決定的な出力のため（0.1→0.0）
     },
     
-    # Azure OpenAI設定
+    # Azure OpenAI設定（完全なSQL生成用に最適化）
     "azure_openai": {
         "api_key": "",  # Azure OpenAI APIキー (環境変数AZURE_OPENAI_API_KEYでも可)
         "endpoint": "",  # https://your-resource.openai.azure.com/
         "deployment_name": "",  # デプロイメント名
         "api_version": "2024-02-01",
-        "max_tokens": 16000,
-        "temperature": 0.1
+        "max_tokens": 16000,  # Azure OpenAIの制限内最大
+        "temperature": 0.0    # 決定的な出力のため（0.1→0.0）
     },
     
-    # Anthropic設定
+    # Anthropic設定（完全なSQL生成用に最適化）
     "anthropic": {
         "api_key": "",  # Anthropic APIキー (環境変数ANTHROPIC_API_KEYでも可)
         "model": "claude-3-5-sonnet-20241022",  # claude-3-5-sonnet-20241022, claude-3-opus-20240229
-        "max_tokens": 16000,
-        "temperature": 0.1
+        "max_tokens": 16000,  # Anthropicの制限内最大
+        "temperature": 0.0    # 決定的な出力のため（0.1→0.0）
     }
 }
 
