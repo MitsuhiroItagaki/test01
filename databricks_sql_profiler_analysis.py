@@ -1448,14 +1448,14 @@ def _call_databricks_llm(prompt: str) -> str:
                 "budget_tokens": config.get("thinking_budget_tokens", 65536)
             }
         
-        # リトライ機能
-        max_retries = 2
+        # リトライ機能（SQL最適化用に増強）
+        max_retries = 3
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     print(f"🔄 リトライ中... (試行 {attempt + 1}/{max_retries})")
                 
-                response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
+                response = requests.post(endpoint_url, headers=headers, json=payload, timeout=300)
                 
                 if response.status_code == 200:
                     result = response.json()
@@ -1473,11 +1473,22 @@ def _call_databricks_llm(prompt: str) -> str:
                         
             except requests.exceptions.Timeout:
                 if attempt == max_retries - 1:
-                    timeout_msg = "⏰ タイムアウトエラー: Databricksエンドポイントの応答が180秒以内に完了しませんでした。"
+                    timeout_msg = f"""⏰ タイムアウトエラー: Databricksエンドポイントの応答が300秒以内に完了しませんでした。
+
+🔧 解決策:
+1. LLMエンドポイントの稼働状況を確認
+2. プロンプトサイズを削減
+3. より高性能なモデルを使用
+4. 手動でSQL最適化を実行
+
+💡 推奨アクション:
+- クエリの複雑度を確認
+- Databricks Model Servingエンドポイントのスケールアップ
+- シンプルなクエリでテスト実行"""
                     print(f"❌ {timeout_msg}")
                     return timeout_msg
                 else:
-                    print(f"⏰ タイムアウト発生 - リトライします... (試行 {attempt + 1}/{max_retries})")
+                    print(f"⏰ タイムアウト発生（300秒）- リトライします... (試行 {attempt + 1}/{max_retries})")
                     continue
                     
     except Exception as e:
@@ -1505,7 +1516,7 @@ def _call_openai_llm(prompt: str) -> str:
         }
         
         response = requests.post("https://api.openai.com/v1/chat/completions", 
-                               headers=headers, json=payload, timeout=180)
+                               headers=headers, json=payload, timeout=300)
         
         if response.status_code == 200:
             result = response.json()
@@ -1540,7 +1551,7 @@ def _call_azure_openai_llm(prompt: str) -> str:
             "temperature": config["temperature"]
         }
         
-        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=180)
+        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=300)
         
         if response.status_code == 200:
             result = response.json()
@@ -1576,7 +1587,7 @@ def _call_anthropic_llm(prompt: str) -> str:
         }
         
         response = requests.post("https://api.anthropic.com/v1/messages", 
-                               headers=headers, json=payload, timeout=180)
+                               headers=headers, json=payload, timeout=300)
         
         if response.status_code == 200:
             result = response.json()
@@ -3021,56 +3032,57 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         if cols:
             clustering_recommendations.append(f"テーブル {table}: {', '.join(cols)} でクラスタリング推奨")
     
-    # 最適化プロンプトの作成
+    # 最適化プロンプトの作成（簡潔版でタイムアウト回避）
+    
+    # 分析結果を簡潔化
+    analysis_summary = ""
+    if isinstance(analysis_result, str) and len(analysis_result) > 3000:
+        # 長すぎる場合は最初の3000文字のみ使用
+        analysis_summary = analysis_result[:3000] + "...[要約版]"
+    else:
+        analysis_summary = str(analysis_result)
+    
+    # ボトルネック情報の簡潔化
+    bottleneck_summary = "、".join(optimization_context[:3]) if optimization_context else "特になし"
+    
+    # Liquid Clustering推奨の簡潔化
+    clustering_summary = "、".join(clustering_recommendations[:2]) if clustering_recommendations else "特になし"
+    
     optimization_prompt = f"""
-あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
+あなたはDatabricksのSQLパフォーマンス専門家です。以下のSQLクエリを最適化してください。
 
-【元のSQLクエリ】
+【元のクエリ】
 ```sql
-{original_query}
+{original_query[:2000]}{"...[省略]" if len(original_query) > 2000 else ""}
 ```
 
-【パフォーマンス分析結果】
-{analysis_result}
-
-【特定されたボトルネック】
-{chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
+【主要ボトルネック】
+{bottleneck_summary}
 
 【Liquid Clustering推奨】
-{chr(10).join(clustering_recommendations) if clustering_recommendations else "特別な推奨事項はありません"}
+{clustering_summary}
 
-【最適化要求】
-1. 上記の分析結果に基づいて、元のSQLクエリを最適化してください
-2. 最適化のポイントを具体的に説明してください
-3. パフォーマンス向上の見込みを定量的に示してください
-4. 実行可能なSQLコードとして出力してください
-5. 必ず同じ結果セットを返却するクエリにしてください
-6. PHOTONエンジンの利用を優先してください
-7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
-8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
-9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
+【パフォーマンス分析概要】
+{analysis_summary[:1000]}{"...[省略]" if len(analysis_summary) > 1000 else ""}
+
+【要求】
+1. 同じ結果を返すより高速なSQLに最適化
+2. Photonエンジン対応
+3. JOIN/GROUP BY最適化
+4. 適切なCTE使用
+5. Liquid Clustering活用
 
 【出力形式】
-## 🚀 最適化されたSQLクエリ
-
+## 🚀 最適化SQL
 ```sql
--- 最適化されたクエリをここに記述
 [最適化されたSQL]
 ```
 
-## 📊 最適化のポイント
+## 📊 改善ポイント
+- [主要な改善点3つ]
 
-1. **[最適化項目1]**: [説明]
-2. **[最適化項目2]**: [説明]
-3. **[最適化項目3]**: [説明]
-
-## 📈 期待される効果
-
-- **実行時間**: [現在] → [最適化後] (改善率: [XX%])
-- **メモリ使用量**: [改善内容]
-- **スピル削減**: [改善内容]
-
-注意：実際の環境で実行前に、テストデータでの動作確認を推奨します。
+## 📈 期待効果
+- 実行時間: XX%改善見込み
 """
 
     # 設定されたLLMプロバイダーを使用
