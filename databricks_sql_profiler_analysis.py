@@ -3049,40 +3049,54 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     clustering_summary = "、".join(clustering_recommendations[:2]) if clustering_recommendations else "特になし"
     
     optimization_prompt = f"""
-あなたはDatabricksのSQLパフォーマンス専門家です。以下のSQLクエリを最適化してください。
+あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
 
-【元のクエリ】
+【元のSQLクエリ】
 ```sql
-{original_query[:2000]}{"...[省略]" if len(original_query) > 2000 else ""}
+{original_query}
 ```
 
-【主要ボトルネック】
-{bottleneck_summary}
+【パフォーマンス分析結果】
+{analysis_summary}
+
+【特定されたボトルネック】
+{chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
 
 【Liquid Clustering推奨】
-{clustering_summary}
+{chr(10).join(clustering_recommendations) if clustering_recommendations else "特別な推奨事項はありません"}
 
-【パフォーマンス分析概要】
-{analysis_summary[:1000]}{"...[省略]" if len(analysis_summary) > 1000 else ""}
-
-【要求】
-1. 同じ結果を返すより高速なSQLに最適化
-2. Photonエンジン対応
-3. JOIN/GROUP BY最適化
-4. 適切なCTE使用
-5. Liquid Clustering活用
+【最適化要求】
+1. 上記の分析結果に基づいて、元のSQLクエリを最適化してください
+2. 最適化のポイントを具体的に説明してください
+3. パフォーマンス向上の見込みを定量的に示してください
+4. 実行可能なSQLコードとして出力してください
+5. 必ず同じ結果セットを返却するクエリにしてください
+6. PHOTONエンジンの利用を優先してください
+7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
+8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
+9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
 
 【出力形式】
-## 🚀 最適化SQL
+## 🚀 最適化されたSQLクエリ
+
 ```sql
+-- 最適化されたクエリをここに記述
 [最適化されたSQL]
 ```
 
-## 📊 改善ポイント
-- [主要な改善点3つ]
+## 📊 最適化のポイント
 
-## 📈 期待効果
-- 実行時間: XX%改善見込み
+1. **[最適化項目1]**: [説明]
+2. **[最適化項目2]**: [説明]
+3. **[最適化項目3]**: [説明]
+
+## 📈 期待される効果
+
+- **実行時間**: [現在] → [最適化後] (改善率: [XX%])
+- **メモリ使用量**: [改善内容]
+- **スピル削減**: [改善内容]
+
+注意：実際の環境で実行前に、テストデータでの動作確認を推奨します。
 """
 
     # 設定されたLLMプロバイダーを使用
