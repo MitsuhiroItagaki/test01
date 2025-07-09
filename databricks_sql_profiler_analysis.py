@@ -359,64 +359,68 @@ def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]
                 "photon_utilization_ratio": min(query_metrics.get('photonTotalTimeMs', 0) / max(query_metrics.get('taskTotalTimeMs', 1), 1), 1.0)
             }
     
-    # グラフデータからステージとノードのメトリクスを抽出
+    # グラフデータからステージとノードのメトリクスを抽出（複数グラフ対応）
     if 'graphs' in profiler_data and profiler_data['graphs']:
-        graph = profiler_data['graphs'][0]
-        
-        # ステージデータ
-        if 'stageData' in graph:
-            for stage in graph['stageData']:
-                stage_metric = {
-                    "stage_id": stage.get('stageId', ''),
-                    "status": stage.get('status', ''),
-                    "duration_ms": stage.get('keyMetrics', {}).get('durationMs', 0),
-                    "num_tasks": stage.get('numTasks', 0),
-                    "num_failed_tasks": stage.get('numFailedTasks', 0),
-                    "num_complete_tasks": stage.get('numCompleteTasks', 0),
-                    "start_time_ms": stage.get('startTimeMs', 0),
-                    "end_time_ms": stage.get('endTimeMs', 0)
-                }
-                metrics["stage_metrics"].append(stage_metric)
-        
-        # ノードデータ（重要なもののみ）
-        if 'nodes' in graph:
-            for node in graph['nodes']:
-                if not node.get('hidden', False):
-                    node_metric = {
-                        "node_id": node.get('id', ''),
-                        "name": node.get('name', ''),
-                        "tag": node.get('tag', ''),
-                        "key_metrics": node.get('keyMetrics', {})
+        # すべてのグラフを分析
+        for graph_index, graph in enumerate(profiler_data['graphs']):
+            print(f"🔍 グラフ{graph_index}を分析中...")
+            
+            # ステージデータ
+            if 'stageData' in graph:
+                for stage in graph['stageData']:
+                    stage_metric = {
+                        "stage_id": stage.get('stageId', ''),
+                        "status": stage.get('status', ''),
+                        "duration_ms": stage.get('keyMetrics', {}).get('durationMs', 0),
+                        "num_tasks": stage.get('numTasks', 0),
+                        "num_failed_tasks": stage.get('numFailedTasks', 0),
+                        "num_complete_tasks": stage.get('numCompleteTasks', 0),
+                        "start_time_ms": stage.get('startTimeMs', 0),
+                        "end_time_ms": stage.get('endTimeMs', 0),
+                        "graph_index": graph_index  # どのグラフ由来かを記録
                     }
-                    
-                    # 重要なメトリクスのみ詳細抽出（スピル関連キーワード追加・label対応）
-                    detailed_metrics = {}
-                    for metric in node.get('metrics', []):
-                        metric_key = metric.get('key', '')
-                        metric_label = metric.get('label', '')
+                    metrics["stage_metrics"].append(stage_metric)
+            
+            # ノードデータ（重要なもののみ）
+            if 'nodes' in graph:
+                for node in graph['nodes']:
+                    if not node.get('hidden', False):
+                        node_metric = {
+                            "node_id": node.get('id', ''),
+                            "name": node.get('name', ''),
+                            "tag": node.get('tag', ''),
+                            "key_metrics": node.get('keyMetrics', {}),
+                            "graph_index": graph_index  # どのグラフ由来かを記録
+                        }
                         
-                        # キーワードをkeyとlabelの両方で確認
-                        key_keywords = ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE', 
-                                       'SPILL', 'DISK', 'PRESSURE', 'SINK']
-                        
-                        # metric_keyまたはmetric_labelに重要なキーワードが含まれる場合に抽出
-                        is_important_metric = (
-                            any(keyword in metric_key.upper() for keyword in key_keywords) or
-                            any(keyword in metric_label.upper() for keyword in key_keywords)
-                        )
-                        
-                        if is_important_metric:
-                            # メトリクス名として、labelが有効な場合はlabelを使用、そうでなければkeyを使用
-                            metric_name = metric_label if metric_label and metric_label != 'UNKNOWN_KEY' else metric_key
-                            detailed_metrics[metric_name] = {
-                                'value': metric.get('value', 0),
-                                'label': metric_label,
-                                'type': metric.get('metricType', ''),
-                                'original_key': metric_key,  # 元のキー名を保存
-                                'display_name': metric_name  # 表示用の名前
-                            }
-                    node_metric['detailed_metrics'] = detailed_metrics
-                    metrics["node_metrics"].append(node_metric)
+                        # 重要なメトリクスのみ詳細抽出（スピル関連キーワード追加・label対応）
+                        detailed_metrics = {}
+                        for metric in node.get('metrics', []):
+                            metric_key = metric.get('key', '')
+                            metric_label = metric.get('label', '')
+                            
+                            # キーワードをkeyとlabelの両方で確認
+                            key_keywords = ['TIME', 'MEMORY', 'ROWS', 'BYTES', 'DURATION', 'PEAK', 'CUMULATIVE', 'EXCLUSIVE', 
+                                           'SPILL', 'DISK', 'PRESSURE', 'SINK']
+                            
+                            # metric_keyまたはmetric_labelに重要なキーワードが含まれる場合に抽出
+                            is_important_metric = (
+                                any(keyword in metric_key.upper() for keyword in key_keywords) or
+                                any(keyword in metric_label.upper() for keyword in key_keywords)
+                            )
+                            
+                            if is_important_metric:
+                                # メトリクス名として、labelが有効な場合はlabelを使用、そうでなければkeyを使用
+                                metric_name = metric_label if metric_label and metric_label != 'UNKNOWN_KEY' else metric_key
+                                detailed_metrics[metric_name] = {
+                                    'value': metric.get('value', 0),
+                                    'label': metric_label,
+                                    'type': metric.get('metricType', ''),
+                                    'original_key': metric_key,  # 元のキー名を保存
+                                    'display_name': metric_name  # 表示用の名前
+                                }
+                        node_metric['detailed_metrics'] = detailed_metrics
+                        metrics["node_metrics"].append(node_metric)
     
     # ボトルネック指標の計算
     metrics["bottleneck_indicators"] = calculate_bottleneck_indicators(metrics)
@@ -866,18 +870,24 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
     
     print(f"🔍 デバッグ: プロファイラーデータからカラム情報を直接抽出開始")
     
-    # プロファイラーデータから実行グラフ情報を取得
+        # プロファイラーデータから実行グラフ情報を取得（複数グラフ対応）
     graphs = profiler_data.get('graphs', [])
     if not graphs:
         print("⚠️ グラフデータが見つかりません")
         return clustering_analysis
+
+    # すべてのグラフからノードを収集
+    all_nodes = []
+    for graph_index, graph in enumerate(graphs):
+        nodes = graph.get('nodes', [])
+        for node in nodes:
+            node['graph_index'] = graph_index  # どのグラフ由来かを記録
+            all_nodes.append(node)
     
-    # 実行プランノードからメタデータを解析
-    nodes = graphs[0].get('nodes', []) if graphs else []
-    print(f"🔍 デバッグ: {len(nodes)}個のノードを分析中")
-    
+    print(f"🔍 デバッグ: {len(graphs)}個のグラフから{len(all_nodes)}個のノードを分析中")
+
     # プロファイラーデータのノードからカラム情報を直接抽出
-    for node in nodes:
+    for node in all_nodes:
         node_name = node.get('name', '')
         node_tag = node.get('tag', '')
         node_metadata = node.get('metadata', [])
@@ -901,31 +911,109 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
                     })
                     print(f"   ✅ フィルター抽出: {filter_expr}")
                     
-                    # フィルター式からカラム名を抽出
-                    if '=' in filter_expr:
-                        # "cs_sold_date_sk = 2451659" のような形式からカラム名を抽出
-                        parts = filter_expr.split('=')
-                        if len(parts) >= 2:
-                            column_name = parts[0].strip().replace('(', '').replace(')', '').replace('tpcds.tpcds_sf1000_delta_lc.detail_itagaki.', '')
-                            if column_name.endswith('_sk') or column_name.endswith('_date') or column_name.endswith('_id'):
+                    # フィルター式からカラム名を抽出（汎用的な処理）
+                    if '=' in filter_expr or 'IS NOT NULL' in filter_expr or 'IS NULL' in filter_expr:
+                        # 様々な形式のフィルター式に対応
+                        if '=' in filter_expr:
+                            parts = filter_expr.split('=')
+                        elif 'IS NOT NULL' in filter_expr:
+                            parts = [filter_expr.replace('IS NOT NULL', '').strip()]
+                        elif 'IS NULL' in filter_expr:
+                            parts = [filter_expr.replace('IS NULL', '').strip()]
+                        else:
+                            parts = [filter_expr]
+                            
+                        if len(parts) >= 1:
+                            raw_column = parts[0].strip().replace('(', '').replace(')', '')
+                            # 汎用的なカラム名抽出：最後の.以降をカラム名として抽出
+                            column_name = raw_column.split('.')[-1] if '.' in raw_column else raw_column
+                            # より包括的な条件：重要なカラム名パターンを検出
+                            is_important_column = (
+                                column_name.endswith('_sk') or column_name.endswith('_date') or 
+                                column_name.endswith('_id') or column_name.endswith('_key') or
+                                column_name.endswith('_proportion') or column_name.endswith('_mean') or
+                                column_name.endswith('_sd') or column_name.endswith('_min') or
+                                column_name.endswith('_max') or 'ref_domain' in column_name or
+                                'proportion' in column_name or 'encoding' in column_name
+                            )
+                            if is_important_column and column_name:
                                 clustering_analysis["filter_columns"].append(column_name)
                                 print(f"     → フィルターカラム: {column_name}")
             
-            # GROUP BY式の抽出
+            # GROUP BY式の抽出（汎用的な処理）
             elif key == 'GROUPING_EXPRESSIONS' and values:
                 for group_expr in values:
-                    # "tpcds.tpcds_sf1000_delta_lc.detail_itagaki.cs_bill_customer_sk" からカラム名を抽出
-                    column_name = group_expr.replace('tpcds.tpcds_sf1000_delta_lc.detail_itagaki.', '')
-                    if column_name.endswith('_sk') or column_name.endswith('_date') or column_name.endswith('_id'):
+                    # 汎用的なカラム名抽出：最後の.以降をカラム名として抽出
+                    column_name = group_expr.split('.')[-1] if '.' in group_expr else group_expr
+                    # より包括的な条件：重要なカラム名パターンを検出
+                    is_important_column = (
+                        column_name.endswith('_sk') or column_name.endswith('_date') or 
+                        column_name.endswith('_id') or column_name.endswith('_key') or
+                        column_name.endswith('_proportion') or column_name.endswith('_mean') or
+                        column_name.endswith('_sd') or column_name.endswith('_min') or
+                        column_name.endswith('_max') or 'ref_domain' in column_name or
+                        'proportion' in column_name or 'encoding' in column_name or
+                        'r_uid' in column_name
+                    )
+                    if is_important_column and column_name:
                         clustering_analysis["groupby_columns"].append(column_name)
                         print(f"   ✅ GROUP BYカラム: {column_name}")
+            
+            # JOIN条件の抽出（新規追加）
+            elif key in ['LEFT_KEYS', 'RIGHT_KEYS'] and values:
+                for join_key in values:
+                    # 汎用的なカラム名抽出：最後の.以降をカラム名として抽出
+                    column_name = join_key.split('.')[-1] if '.' in join_key else join_key
+                    # より包括的な条件：重要なカラム名パターンを検出
+                    is_important_column = (
+                        column_name.endswith('_sk') or column_name.endswith('_date') or 
+                        column_name.endswith('_id') or column_name.endswith('_key') or
+                        'ref_domain' in column_name or 'domain' in column_name or
+                        'r_uid' in column_name
+                    )
+                    if is_important_column and column_name:
+                        clustering_analysis["join_columns"].append(column_name)
+                        print(f"   🔗 JOINカラム: {column_name}")
+            
+            # 集約関数の抽出（新規追加）
+            elif key == 'AGGREGATE_EXPRESSIONS' and values:
+                for agg_expr in values:
+                    # avg(ref_domain_te.ref_domain_male_proportion) のような式から抽出
+                    import re
+                    # 関数内のカラム名を抽出
+                    pattern = r'[\w_]+\((.*?)\)'
+                    matches = re.findall(pattern, agg_expr)
+                    for match in matches:
+                        # カラム名を抽出
+                        column_name = match.split('.')[-1] if '.' in match else match
+                        # より包括的な条件：重要なカラム名パターンを検出
+                        is_important_column = (
+                            column_name.endswith('_proportion') or column_name.endswith('_mean') or
+                            column_name.endswith('_sd') or column_name.endswith('_min') or
+                            column_name.endswith('_max') or 'ref_domain' in column_name or
+                            'proportion' in column_name or 'encoding' in column_name or
+                            'male' in column_name or 'age' in column_name or 'nendai' in column_name or
+                            'occupation' in column_name or 'income' in column_name
+                        )
+                        if is_important_column and column_name:
+                            clustering_analysis["groupby_columns"].append(column_name)
+                            print(f"   📈 集約カラム: {column_name}")
             
             # テーブルスキャンの出力列情報
             elif key == 'OUTPUT' and values and 'SCAN' in node_name.upper():
                 table_name = value if key == 'SCAN_IDENTIFIER' else f"table_{node.get('id', 'unknown')}"
                 for output_col in values:
                     column_name = output_col.split('.')[-1] if '.' in output_col else output_col
-                    if column_name.endswith('_sk') or column_name.endswith('_date') or column_name.endswith('_id'):
+                    # より包括的な条件：重要なカラム名パターンを検出
+                    is_important_column = (
+                        column_name.endswith('_sk') or column_name.endswith('_date') or 
+                        column_name.endswith('_id') or column_name.endswith('_key') or
+                        column_name.endswith('_proportion') or column_name.endswith('_mean') or
+                        column_name.endswith('_sd') or column_name.endswith('_min') or
+                        column_name.endswith('_max') or 'ref_domain' in column_name or
+                        'proportion' in column_name or 'encoding' in column_name
+                    )
+                    if is_important_column and column_name:
                         print(f"   📊 出力カラム: {column_name}")
             
             # スキャンテーブル情報の抽出
