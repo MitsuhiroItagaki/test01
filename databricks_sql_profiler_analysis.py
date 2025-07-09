@@ -153,13 +153,13 @@ LLM_CONFIG = {
     # エンドポイントタイプ: 'databricks', 'openai', 'azure_openai', 'anthropic'
     "provider": "databricks",
     
-    # Databricks Model Serving設定（完全なSQL生成用に拡張）
+    # Databricks Model Serving設定（完全なSQL生成用に最適化）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
-        "max_tokens": 200000,  # 200K tokens（複雑なクエリ生成用に拡張）
+        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnetの最大制限）
         "temperature": 0.0,    # 決定的な出力のため（0.1→0.0）
         "thinking_enabled": True,  # 拡張思考モード（デフォルト: 有効）
-        "thinking_budget_tokens": 100000  # 思考用トークン予算 100K tokens（拡張）
+        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens（制限内最適化）
     },
     
     # OpenAI設定（完全なSQL生成用に最適化）
@@ -1464,9 +1464,33 @@ def _call_databricks_llm(prompt: str) -> str:
                     return analysis_text
                 else:
                     error_msg = f"APIエラー: ステータスコード {response.status_code}"
+                    if response.status_code == 400:
+                        # 400エラーの場合は詳細な解決策を提供
+                        error_detail = response.text
+                        if "maximum tokens" in error_detail.lower():
+                            if attempt == max_retries - 1:
+                                detailed_error = f"""❌ {error_msg}
+
+🔧 トークン制限エラーの解決策:
+1. LLM_CONFIG["databricks"]["max_tokens"] を 65536 (64K) に削減
+2. より単純なクエリで再試行
+3. 手動でSQL最適化を実行
+4. クエリを分割して段階的に最適化
+
+💡 推奨設定:
+LLM_CONFIG["databricks"]["max_tokens"] = 65536
+LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 32768
+
+詳細エラー: {error_detail}"""
+                                print(detailed_error)
+                                return detailed_error
+                            else:
+                                print(f"⚠️ {error_msg} (トークン制限) - リトライします...")
+                                continue
+                    
                     if attempt == max_retries - 1:
                         print(f"❌ {error_msg}\nレスポンス: {response.text}")
-                        return error_msg
+                        return f"{error_msg}\nレスポンス: {response.text}"
                     else:
                         print(f"⚠️ {error_msg} - リトライします...")
                         continue
@@ -3034,11 +3058,11 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     
     # 最適化プロンプトの作成（簡潔版でタイムアウト回避）
     
-    # 分析結果を簡潔化（ただし最適化に必要な情報は保持）
+    # 分析結果を簡潔化（128K制限内で最大効率化）
     analysis_summary = ""
-    if isinstance(analysis_result, str) and len(analysis_result) > 5000:
-        # 長すぎる場合は最初の5000文字のみ使用（完全なクエリ生成に十分な情報を保持）
-        analysis_summary = analysis_result[:5000] + "...[要約版：ボトルネック分析の詳細部分のみ省略]"
+    if isinstance(analysis_result, str) and len(analysis_result) > 2000:
+        # プロンプト容量の確保のため、分析結果は要点のみに圧縮
+        analysis_summary = analysis_result[:2000] + "...[要約：主要ボトルネックのみ保持]"
     else:
         analysis_summary = str(analysis_result)
     
@@ -3051,12 +3075,10 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     optimization_prompt = f"""
 あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
 
-【処理手順】（thinking機能を活用）
-1. まず、オリジナルクエリの構造を完全に理解してください
-2. すべてのSELECT項目、CTE、テーブル名をリストアップしてください  
-3. 最適化戦略を立案してください
-4. 元のクエリの機能を100%保持しながら最適化を適用してください
-5. 最終的に完全なSQLクエリを生成してください（省略は絶対禁止）
+【重要な処理方針】
+- 一回の出力で完全なSQLクエリを生成してください
+- 段階的な出力や複数回に分けての出力は禁止です
+- thinking機能で構造理解→一回で完全なSQL出力
 
 【元のSQLクエリ】
 ```sql
@@ -3091,44 +3113,20 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
 - 実際に実行できる完全なSQLクエリのみを出力してください
 
-【出力形式】
-## 🚀 最適化されたSQLクエリ
+【出力形式】（簡潔版）
+## 最適化されたSQL
 
-IMPORTANT: 以下のSQLは完全で実行可能でなければなりません。省略は一切禁止です。
+**絶対条件: 省略・プレースホルダー禁止**
 
 ```sql
--- 完全に最適化されたクエリ（省略なし）
--- すべてのカラム名、テーブル名、CTE名を完全に記述
--- オリジナルクエリのすべての機能を保持
-[ここに完全な最適化されたSQLクエリを記述]
+[完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
 ```
 
-注意事項:
-- オリジナルクエリが長くても、すべてのSELECT項目を保持してください
-- CTEの名前、カラム名、テーブル名をすべて明記してください
-- 「...」「[省略]」「[残りのカラム]」などのプレースホルダーは使用禁止です
-- 実際にDatabricksで実行できる完全なSQLのみを出力してください
+## 改善ポイント
+[3つの主要改善点]
 
-## 📊 最適化のポイント
-
-1. **[最適化項目1]**: [説明]
-2. **[最適化項目2]**: [説明]
-3. **[最適化項目3]**: [説明]
-
-## 📈 期待される効果
-
-- **実行時間**: [現在] → [最適化後] (改善率: [XX%])
-- **メモリ使用量**: [改善内容]
-- **スピル削減**: [改善内容]
-
-注意：実際の環境で実行前に、テストデータでの動作確認を推奨します。
-
-【再度確認】
-- 出力するSQLクエリは完全で実行可能でなければなりません
-- オリジナルクエリが長くても、すべてのカラムを保持してください
-- 途中で出力を打ち切ったり、省略したりしないでください
-- 「...続く」「[省略]」などは使用禁止です
-- thinking機能を活用して、段階的に完全なクエリを構築してください
+## 期待効果  
+[実行時間・メモリ・スピル改善の見込み]
 """
 
     # 設定されたLLMプロバイダーを使用

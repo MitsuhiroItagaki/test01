@@ -81,9 +81,9 @@ LLM_CONFIG = {
     "thinking_enabled": True,  # 思考プロセス表示（推奨）
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 200000,  # 200K tokens（完全なSQL生成用）
+        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的な出力（0.1→0.0）
-        "thinking_budget_tokens": 100000  # 100K tokens（拡張）
+        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
     },
     "openai": {
         "api_key": "",  # OpenAI APIキー
@@ -460,26 +460,27 @@ LIMIT 100;
 **完全なクエリ生成用に最適化された設定:**
 
 ```python
-# 複雑なクエリ（37カラム等）に対応
+# 複雑なクエリ（37カラム等）に対応（制限内最適化）
 LLM_CONFIG = {
     "provider": "databricks",
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 200000,  # 200K tokens（従来128K→拡張）
+        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的出力（従来0.1→0.0）
         "thinking_enabled": True,
-        "thinking_budget_tokens": 100000  # 100K tokens（従来64K→拡張）
+        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
     }
 }
 ```
 
 **設定変更の効果:**
 
-| 項目 | 従来設定 | 新設定 | 効果 |
+| 項目 | 従来設定 | 最適化設定 | 効果 |
 |-----|---------|--------|------|
-| **max_tokens** | 128K | **200K** | +56% 長いクエリ対応 |
-| **thinking_budget_tokens** | 64K | **100K** | +56% 思考プロセス強化 |
+| **max_tokens** | 128K | **128K** | Claude 3.7 Sonnet最大制限活用 |
+| **thinking_budget_tokens** | 64K | **64K** | 制限内最適化 |
 | **temperature** | 0.1 | **0.0** | 決定的出力・一貫性向上 |
+| **プロンプト最適化** | - | **簡潔化** | 出力容量最大確保 |
 
 **期待される改善:**
 - ✅ 37個のカラムを含む複雑なクエリでも完全生成
@@ -496,9 +497,9 @@ LLM_CONFIG = {
     "thinking_enabled": True,  # 思考プロセス表示を有効化
     "databricks": {
         "endpoint_name": "databricks-claude-3-7-sonnet",
-        "max_tokens": 200000,  # 200K tokens（複雑なクエリ生成対応）
+        "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnet最大制限）
         "temperature": 0.0,    # 決定的な出力
-        "thinking_budget_tokens": 100000  # 100K tokens（思考プロセス用）
+        "thinking_budget_tokens": 65536  # 64K tokens（制限内最適化）
     }
 }
 
@@ -542,11 +543,29 @@ df.explain(True)
 ❌ ⏰ タイムアウトエラー: Databricksエンドポイントの応答が300秒以内に完了しませんでした。
 ```
 
+### 🚫 APIエラー問題の解決
+
+**問題**: セル47で400 APIエラーが発生
+```
+❌ APIエラー: ステータスコード 400
+レスポンス: {"error_code":"BAD_REQUEST","message":"The maximum tokens you requested exceeds the model limit of 131072"}
+```
+
 **解決策**:
-1. **LLMエンドポイントの確認**: Model Servingエンドポイントが稼働中か確認
-2. **クエリサイズの削減**: 複雑なクエリは分割して最適化を実行
-3. **より高性能なモデル**: GPU_MEDIUMからGPU_LARGEにスケールアップ
-4. **手動最適化**: 自動最適化が失敗する場合は手動で実行
+1. **トークン数の調整**: LLM設定を適切な制限内に設定
+```python
+LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 128K（最大制限）
+LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 65536  # 64K
+```
+
+2. **より保守的な設定**（複雑クエリの場合）:
+```python
+LLM_CONFIG["databricks"]["max_tokens"] = 65536   # 64K（安全設定）
+LLM_CONFIG["databricks"]["thinking_budget_tokens"] = 32768  # 32K
+```
+
+3. **クエリ分割**: 非常に複雑なクエリは段階的に最適化
+4. **手動最適化**: 自動最適化が失敗する場合の代替手段
 
 **修正済み機能**（2024年12月版）:
 - タイムアウト時間: 180秒 → **300秒（5分）**に延長
@@ -554,6 +573,8 @@ df.explain(True)
 - プロンプト最適化: サイズを60%削減
 - 詳細なエラーメッセージとフォールバック機能
 - **完全なSQL生成保証**: 省略・プレースホルダー使用禁止
+- Claude 3.7 Sonnet実際制限（128K）への対応
+- 改善されたエラーメッセージと解決策表示
 
 ### ❌ よくあるエラーと解決方法
 
@@ -724,8 +745,9 @@ LLM_CONFIG = {
 3. **タイムアウト解決**: 180秒 → 300秒 + プロンプト最適化
 4. **リトライ強化**: 2回 → 3回
 5. **エラーメッセージ改善**: 詳細な解決策を含む
-6. **LLM設定拡張**: 200K tokens + thinking 100K tokens（完全SQL生成用）
+6. **LLM設定最適化**: 128K tokens（制限内最大活用）+ プロンプト簡潔化
 7. **決定的出力**: temperature 0.1→0.0（一貫性向上）
+8. **APIエラー対応**: 400エラー時の詳細解決策提供
 
 ## 📈 機能拡張・今後の展開
 
