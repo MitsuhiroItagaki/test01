@@ -4321,75 +4321,125 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             spill_bytes = 0
             spill_detection_method = "none"
             
-            # 1. メモリベーススピル検出（堅牢フォールバック）
-            # ピークメモリが1GB以上の場合、高確率でスピルが発生していると判定
+            # メモリ使用量を事前に計算（後のフォールバックで使用）
             memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / (1024 * 1024)
-            if memory_mb > 1024:  # 1GB以上
-                spill_detected = True
-                spill_detection_method = "memory_based"
-                # メモリの10%がスピルしたと仮定（保守的な見積もり）
-                spill_bytes = int(memory_mb * 1024 * 1024 * 0.1)
             
-            # 2. 包括的スピルメトリクス検索（より詳細で正確）
+            # 2. 正確なメトリクス名による検索（優先）
+            exact_spill_metrics = [
+                "Num bytes spilled to disk due to memory pressure",
+                "Sink - Num bytes spilled to disk due to memory pressure",
+                "Sink/Num bytes spilled to disk due to memory pressure"
+            ]
+            
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
                 metric_label = metric_info.get('label', '')
                 
-                # スピル関連キーワードの包括的検索（大文字小文字無視）
-                key_lower = metric_key.lower()
-                label_lower = metric_label.lower()
-                
-                is_spill_metric = (
-                    'spill' in key_lower or 'spill' in label_lower or
-                    'disk' in key_lower or 'disk' in label_lower or
-                    ('memory pressure' in key_lower) or ('memory pressure' in label_lower) or
-                    ('bytes spilled' in key_lower) or ('bytes spilled' in label_lower) or
-                    ('num bytes' in key_lower and 'disk' in key_lower) or
-                    ('num bytes' in label_lower and 'disk' in label_lower)
-                )
-                
-                if is_spill_metric and metric_value > 0:
+                # まず正確な名前でチェック
+                if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
                     spill_detected = True
-                    spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
-                    spill_detection_method = f"detailed_metrics ({metric_key})"
+                    spill_bytes = max(spill_bytes, metric_value)
+                    spill_detection_method = f"exact_match_detailed ({metric_key})"
+                    break
             
-            # 3. raw_metricsからの包括的検索
-            raw_metrics = node.get('metrics', [])
-            if isinstance(raw_metrics, list):
-                for metric in raw_metrics:
-                    metric_key = metric.get('key', '')
-                    metric_label = metric.get('label', '')
-                    metric_value = metric.get('value', 0)
+            # 3. 包括的スピルメトリクス検索（正確な名前で見つからない場合）
+            if not spill_detected:
+                for metric_key, metric_info in detailed_metrics.items():
+                    metric_value = metric_info.get('value', 0)
+                    metric_label = metric_info.get('label', '')
                     
+                    # スピル関連キーワードの包括的検索（大文字小文字無視）
                     key_lower = metric_key.lower()
                     label_lower = metric_label.lower()
                     
                     is_spill_metric = (
                         'spill' in key_lower or 'spill' in label_lower or
                         'disk' in key_lower or 'disk' in label_lower or
-                        ('memory pressure' in key_lower) or ('memory pressure' in label_lower)
+                        ('memory pressure' in key_lower) or ('memory pressure' in label_lower) or
+                        ('bytes spilled' in key_lower) or ('bytes spilled' in label_lower) or
+                        ('num bytes' in key_lower and 'disk' in key_lower) or
+                        ('num bytes' in label_lower and 'disk' in label_lower)
                     )
                     
                     if is_spill_metric and metric_value > 0:
                         spill_detected = True
-                        spill_bytes = max(spill_bytes, metric_value)
-                        spill_detection_method = f"raw_metrics ({metric_key})"
+                        spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
+                        spill_detection_method = f"pattern_match_detailed ({metric_key})"
             
-            # 4. key_metricsからの包括的検索
-            key_metrics = node.get('key_metrics', {})
-            for key_metric_name, key_metric_value in key_metrics.items():
-                key_lower = key_metric_name.lower()
+            # 4. raw_metricsから正確なメトリクス名で検索
+            if not spill_detected:
+                raw_metrics = node.get('metrics', [])
+                if isinstance(raw_metrics, list):
+                    # まず正確な名前で検索
+                    for metric in raw_metrics:
+                        metric_key = metric.get('key', '')
+                        metric_label = metric.get('label', '')
+                        metric_value = metric.get('value', 0)
+                        
+                        if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
+                            spill_detected = True
+                            spill_bytes = max(spill_bytes, metric_value)
+                            spill_detection_method = f"exact_match_raw ({metric_key})"
+                            break
+                    
+                    # 正確な名前で見つからない場合、パターンマッチング
+                    if not spill_detected:
+                        for metric in raw_metrics:
+                            metric_key = metric.get('key', '')
+                            metric_label = metric.get('label', '')
+                            metric_value = metric.get('value', 0)
+                            
+                            key_lower = metric_key.lower()
+                            label_lower = metric_label.lower()
+                            
+                            is_spill_metric = (
+                                'spill' in key_lower or 'spill' in label_lower or
+                                'disk' in key_lower or 'disk' in label_lower or
+                                ('memory pressure' in key_lower) or ('memory pressure' in label_lower)
+                            )
+                            
+                            if is_spill_metric and metric_value > 0:
+                                spill_detected = True
+                                spill_bytes = max(spill_bytes, metric_value)
+                                spill_detection_method = f"pattern_match_raw ({metric_key})"
+                                break
+            
+            # 5. key_metricsから正確なメトリクス名で検索
+                        if not spill_detected:
+                key_metrics = node.get('key_metrics', {})
                 
-                is_spill_metric = (
-                    'spill' in key_lower or 'disk' in key_lower or
-                    'memory pressure' in key_lower
-                )
+                # まず正確な名前で検索
+                for exact_metric in exact_spill_metrics:
+                    if exact_metric in key_metrics and key_metrics[exact_metric] > 0:
+                        spill_detected = True
+                        spill_bytes = max(spill_bytes, key_metrics[exact_metric])
+                        spill_detection_method = f"exact_match_key ({exact_metric})"
+                        break
                 
-                if is_spill_metric and key_metric_value > 0:
-                    spill_detected = True
-                    spill_bytes = max(spill_bytes, key_metric_value)
-                    spill_detection_method = f"key_metrics ({key_metric_name})"
+                # 正確な名前で見つからない場合、パターンマッチング
+                if not spill_detected:
+                    for key_metric_name, key_metric_value in key_metrics.items():
+                        key_lower = key_metric_name.lower()
+                        
+                        is_spill_metric = (
+                            'spill' in key_lower or 'disk' in key_lower or
+                            'memory pressure' in key_lower
+                        )
+                        
+                        if is_spill_metric and key_metric_value > 0:
+                            spill_detected = True
+                            spill_bytes = max(spill_bytes, key_metric_value)
+                            spill_detection_method = f"pattern_match_key ({key_metric_name})"
+                            break
+            
+            # 6. メモリベーススピル検出（最終フォールバック）
+            # すべてのメトリクス検索で見つからなかった場合のフォールバック
+            if not spill_detected and memory_mb > 1024:  # 1GB以上でスピル未検出の場合
+                spill_detected = True
+                spill_detection_method = "memory_based_fallback"
+                # メモリの10%がスピルしたと仮定（保守的な見積もり）
+                spill_bytes = int(memory_mb * 1024 * 1024 * 0.1)
             
             # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用
             skew_detected = False
@@ -4446,7 +4496,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 rows_per_sec = (rows_num * 1000) / duration_ms
                 report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
             
-            # スピル詳細情報
+            # スピル詳細情報とデバッグ情報
             if spill_detected:
                 if spill_bytes > 0:
                     spill_mb = spill_bytes / 1024 / 1024
@@ -4457,6 +4507,52 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     report_lines.append(f"    💿 スピル詳細: {spill_display} ({spill_detection_method})")
                 else:
                     report_lines.append(f"    💿 スピル詳細: 検出済み ({spill_detection_method})")
+            else:
+                # スピル未検出時のデバッグ情報（大容量メモリ使用時のみ）
+                if memory_mb > 1024:  # 1GB以上なのにスピル未検出の場合
+                    report_lines.append(f"    🔍 スピルデバッグ: メモリ{memory_mb:.1f}MBなのに未検出")
+                    
+                    # 利用可能なメトリクス一覧を表示（'spill'や'disk'関連のみ）
+                    spill_related_metrics = []
+                    
+                    # detailed_metricsから検索
+                    detailed_metrics = node.get('detailed_metrics', {})
+                    for key, info in detailed_metrics.items():
+                        if ('spill' in key.lower() or 'disk' in key.lower() or 
+                            'spill' in info.get('label', '').lower() or 'disk' in info.get('label', '').lower()):
+                            value = info.get('value', 0)
+                            label = info.get('label', '')
+                            spill_related_metrics.append(f"detailed[{key}]={value}")
+                            if label and label != key:
+                                spill_related_metrics.append(f"  label='{label}'")
+                    
+                    # raw_metricsから検索
+                    raw_metrics = node.get('metrics', [])
+                    if isinstance(raw_metrics, list):
+                        for metric in raw_metrics:
+                            key = metric.get('key', '')
+                            label = metric.get('label', '')
+                            value = metric.get('value', 0)
+                            if ('spill' in key.lower() or 'disk' in key.lower() or 
+                                'spill' in label.lower() or 'disk' in label.lower()):
+                                spill_related_metrics.append(f"raw[{key}]={value}")
+                                if label and label != key:
+                                    spill_related_metrics.append(f"  label='{label}'")
+                    
+                    # key_metricsから検索
+                    key_metrics = node.get('key_metrics', {})
+                    for key, value in key_metrics.items():
+                        if 'spill' in key.lower() or 'disk' in key.lower():
+                            spill_related_metrics.append(f"key[{key}]={value}")
+                    
+                    if spill_related_metrics:
+                        report_lines.append(f"    🔍 発見されたスピル関連メトリクス:")
+                        for metric in spill_related_metrics[:5]:  # 最大5個まで表示
+                            report_lines.append(f"      • {metric}")
+                        if len(spill_related_metrics) > 5:
+                            report_lines.append(f"      • ... 他{len(spill_related_metrics)-5}個")
+                    else:
+                        report_lines.append(f"    🔍 スピル関連メトリクスが全く見つかりません")
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
