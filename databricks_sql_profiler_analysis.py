@@ -3034,11 +3034,11 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     
     # 最適化プロンプトの作成（簡潔版でタイムアウト回避）
     
-    # 分析結果を簡潔化
+    # 分析結果を簡潔化（ただし最適化に必要な情報は保持）
     analysis_summary = ""
-    if isinstance(analysis_result, str) and len(analysis_result) > 3000:
-        # 長すぎる場合は最初の3000文字のみ使用
-        analysis_summary = analysis_result[:3000] + "...[要約版]"
+    if isinstance(analysis_result, str) and len(analysis_result) > 5000:
+        # 長すぎる場合は最初の5000文字のみ使用（完全なクエリ生成に十分な情報を保持）
+        analysis_summary = analysis_result[:5000] + "...[要約版：ボトルネック分析の詳細部分のみ省略]"
     else:
         analysis_summary = str(analysis_result)
     
@@ -3050,6 +3050,13 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     
     optimization_prompt = f"""
 あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
+
+【処理手順】（thinking機能を活用）
+1. まず、オリジナルクエリの構造を完全に理解してください
+2. すべてのSELECT項目、CTE、テーブル名をリストアップしてください  
+3. 最適化戦略を立案してください
+4. 元のクエリの機能を100%保持しながら最適化を適用してください
+5. 最終的に完全なSQLクエリを生成してください（省略は絶対禁止）
 
 【元のSQLクエリ】
 ```sql
@@ -3076,13 +3083,31 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
 9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
 
+【重要な制約】
+- 絶対に不完全なクエリを生成しないでください
+- すべてのカラム名、テーブル名、CTE名を完全に記述してください
+- プレースホルダー（...、[省略]、空白など）は一切使用しないでください
+- オリジナルクエリのすべてのSELECT項目を保持してください
+- 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
+- 実際に実行できる完全なSQLクエリのみを出力してください
+
 【出力形式】
 ## 🚀 最適化されたSQLクエリ
 
+IMPORTANT: 以下のSQLは完全で実行可能でなければなりません。省略は一切禁止です。
+
 ```sql
--- 最適化されたクエリをここに記述
-[最適化されたSQL]
+-- 完全に最適化されたクエリ（省略なし）
+-- すべてのカラム名、テーブル名、CTE名を完全に記述
+-- オリジナルクエリのすべての機能を保持
+[ここに完全な最適化されたSQLクエリを記述]
 ```
+
+注意事項:
+- オリジナルクエリが長くても、すべてのSELECT項目を保持してください
+- CTEの名前、カラム名、テーブル名をすべて明記してください
+- 「...」「[省略]」「[残りのカラム]」などのプレースホルダーは使用禁止です
+- 実際にDatabricksで実行できる完全なSQLのみを出力してください
 
 ## 📊 最適化のポイント
 
@@ -3097,6 +3122,13 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - **スピル削減**: [改善内容]
 
 注意：実際の環境で実行前に、テストデータでの動作確認を推奨します。
+
+【再度確認】
+- 出力するSQLクエリは完全で実行可能でなければなりません
+- オリジナルクエリが長くても、すべてのカラムを保持してください
+- 途中で出力を打ち切ったり、省略したりしないでください
+- 「...続く」「[省略]」などは使用禁止です
+- thinking機能を活用して、段階的に完全なクエリを構築してください
 """
 
     # 設定されたLLMプロバイダーを使用
