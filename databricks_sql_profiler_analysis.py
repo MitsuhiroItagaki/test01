@@ -2959,6 +2959,11 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any]) -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
+    
+    特徴:
+    - SQLファイルの末尾に自動でセミコロン(;)を付与
+    - そのままDatabricks Notebookで実行可能
+    - %sql マジックコマンドでも直接実行可能
     """
     
     import re
@@ -2984,7 +2989,12 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"-- クエリID: {query_id}\n")
         f.write(f"-- 抽出日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"-- ファイル: {original_filename}\n\n")
-        f.write(original_query)
+        
+        # オリジナルクエリの末尾にもセミコロンを確実に追加
+        original_query_clean = original_query.strip()
+        if original_query_clean and not original_query_clean.endswith(';'):
+            original_query_clean += ';'
+        f.write(original_query_clean)
     
     # 最適化されたクエリの抽出と保存
     optimized_filename = f"output_optimized_query_{timestamp}.sql"
@@ -3024,7 +3034,11 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"-- ファイル: {optimized_filename}\n\n")
         
         if optimized_sql:
-            f.write(optimized_sql)
+            # SQLの末尾にセミコロンを確実に追加
+            optimized_sql_clean = optimized_sql.strip()
+            if optimized_sql_clean and not optimized_sql_clean.endswith(';'):
+                optimized_sql_clean += ';'
+            f.write(optimized_sql_clean)
         else:
             f.write("-- ⚠️ SQLコードの自動抽出に失敗しました\n")
             f.write("-- 以下は最適化分析の全結果です:\n\n")

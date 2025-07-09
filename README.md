@@ -423,6 +423,8 @@ ORDER BY total_amount DESC
 LIMIT 100;
 ```
 
+> **📝 注意**: 出力SQLファイルには自動でセミコロン(;)が付与され、そのまま実行可能です。
+
 ## � 最適化のポイント
 
 1. **早期フィルタリング**: WHERE句を各CTEに配置してデータ量を削減
@@ -471,12 +473,15 @@ LLM_CONFIG = {
 ### � Databricks Notebook専用実行
 
 ```python
-# %sql マジックコマンドでの実行
+# %sql マジックコマンドでの実行（セミコロン付きで実行可能）
 optimized_sql = open('output_optimized_query_20240115-143022.sql').read()
 
-# Spark SQLでの実行
+# Spark SQLでの実行（そのまま実行可能）
 df = spark.sql(optimized_sql)
 df.show()
+
+# または %sql マジックコマンドで直接実行
+%sql $optimized_sql
 
 # パフォーマンス測定
 import time
@@ -534,11 +539,12 @@ TypeError: write() argument must be str, not list
 生成されるファイル:
 ✅ output_extracted_metrics_20240115-143022.json
 ✅ output_bottleneck_analysis_result_20240115-143022.txt  
-✅ output_original_query_20240115-143022.sql
-✅ output_optimized_query_20240115-143022.sql
+✅ output_original_query_20240115-143022.sql （実行可能・セミコロン付き）
+✅ output_optimized_query_20240115-143022.sql （実行可能・セミコロン付き）
 ✅ output_optimization_report_20240115-143022.md
 
 # TOP10分析も自動でレポートに含まれます
+# SQLファイルはそのままDatabricks Notebookで実行可能です
 ```
 
 ### � 最適化のベストプラクティス
@@ -605,8 +611,9 @@ LLM_CONFIG = {
 
 - **多言語対応**: 日本語・英語でのファイル出力（OUTPUT_LANGUAGE設定）
 - **不要情報除外**: signature等のメタデータ自動除去（読みやすさ向上）
-- **拡張思考モード**: 結論のみ表示で冗長な思考過程を除外
+- **拡張思考モード**: 結論のみ表示で冗長な思考過程を除外（デフォルト有効）
 - **フルパス表示**: catalog.schema.table形式のテーブル名表示
+- **実行可能SQL**: 出力SQLファイルに自動セミコロン付与で即実行可能
 
 ### 🔮 計画中の機能
 
