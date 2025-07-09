@@ -3643,31 +3643,31 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
             size_source = "metrics_estimation"
             
             # メトリクスベース推定
-                total_read_bytes = overall_metrics.get('read_bytes', 0)
-                total_rows = overall_metrics.get('rows_read_count', 0)
-                
-                if total_rows > 0 and total_read_bytes > 0 and rows_num > 0:
-                    # 全体の読み込み量からこのテーブルの割合を計算
-                    table_ratio = rows_num / total_rows
-                    estimated_compressed_bytes = total_read_bytes * table_ratio
-                    estimated_compressed_mb = estimated_compressed_bytes / 1024 / 1024
-                     
-                    # 非圧縮サイズを推定
-                    estimated_uncompressed_mb = estimate_uncompressed_size(estimated_compressed_mb, file_format)
+            total_read_bytes = overall_metrics.get('read_bytes', 0)
+            total_rows = overall_metrics.get('rows_read_count', 0)
+            
+            if total_rows > 0 and total_read_bytes > 0 and rows_num > 0:
+                # 全体の読み込み量からこのテーブルの割合を計算
+                table_ratio = rows_num / total_rows
+                estimated_compressed_bytes = total_read_bytes * table_ratio
+                estimated_compressed_mb = estimated_compressed_bytes / 1024 / 1024
+                 
+                # 非圧縮サイズを推定
+                estimated_uncompressed_mb = estimate_uncompressed_size(estimated_compressed_mb, file_format)
+            else:
+                # フォールバック: 行数ベースの推定（保守的）
+                # 平均行サイズを推定（非圧縮）
+                if total_rows > 0 and total_read_bytes > 0:
+                    # 全体データから圧縮後の平均行サイズを計算
+                    compressed_avg_row_size = total_read_bytes / total_rows
+                    # 圧縮率を考慮して非圧縮サイズを推定
+                    uncompressed_avg_row_size = compressed_avg_row_size * estimate_uncompressed_size(1.0, file_format)
                 else:
-                    # フォールバック: 行数ベースの推定（保守的）
-                    # 平均行サイズを推定（非圧縮）
-                    if total_rows > 0 and total_read_bytes > 0:
-                        # 全体データから圧縮後の平均行サイズを計算
-                        compressed_avg_row_size = total_read_bytes / total_rows
-                        # 圧縮率を考慮して非圧縮サイズを推定
-                        uncompressed_avg_row_size = compressed_avg_row_size * estimate_uncompressed_size(1.0, file_format)
-                    else:
-                        # 完全なフォールバック: 一般的な非圧縮行サイズ（1KB）
-                        uncompressed_avg_row_size = 1024
-                    
-                    estimated_compressed_mb = (rows_num * compressed_avg_row_size) / 1024 / 1024 if 'compressed_avg_row_size' in locals() else 0
-                    estimated_uncompressed_mb = (rows_num * uncompressed_avg_row_size) / 1024 / 1024
+                    # 完全なフォールバック: 一般的な非圧縮行サイズ（1KB）
+                    uncompressed_avg_row_size = 1024
+                
+                estimated_compressed_mb = (rows_num * compressed_avg_row_size) / 1024 / 1024 if 'compressed_avg_row_size' in locals() else 0
+                estimated_uncompressed_mb = (rows_num * uncompressed_avg_row_size) / 1024 / 1024
             
             # 既存のBROADCAST適用状況をチェック
             is_already_broadcasted = False
