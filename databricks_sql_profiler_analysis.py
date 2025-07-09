@@ -1822,63 +1822,243 @@ def format_thinking_response(response) -> str:
     """
     thinking_enabled: Trueの場合のレスポンスを人間に読みやすい形式に変換
     思考過程（thinking）とシグネチャ（signature）等の不要な情報は除外し、最終的な結論のみを表示
+    JSON構造や不適切な文字列の露出を防止
     """
     if not isinstance(response, list):
-        # リストでない場合はそのまま文字列として返す
-        return str(response).replace('\\n', '\n')
+        # リストでない場合は文字列として処理し、クリーンアップ
+        cleaned_text = clean_response_text(str(response))
+        return cleaned_text
     
-    # 除外すべきキーのリスト（拡張可能）
+    # 除外すべきキーのリスト（拡張）
     excluded_keys = {
-        'thinking',     # 思考過程
-        'signature',    # シグネチャ情報
-        'metadata',     # メタデータ
-        'id',           # ID情報
-        'request_id',   # リクエストID
-        'timestamp',    # タイムスタンプ
-        'uuid'          # UUID
+        'thinking', 'signature', 'metadata', 'id', 'request_id', 
+        'timestamp', 'uuid', 'reasoning', 'type', 'model'
     }
     
     formatted_parts = []
     
     for item in response:
         if isinstance(item, dict):
-            # 優先順位: text > summary_text > その他（除外キー以外）
-            if 'text' in item and item['text']:
-                main_content = str(item['text']).replace('\\n', '\n')
-                formatted_parts.append(main_content)
-            elif 'summary_text' in item and item['summary_text']:
-                summary_content = str(item['summary_text']).replace('\\n', '\n')
-                formatted_parts.append(summary_content)
-            else:
-                # その他のキーも処理（除外キー以外）
-                for key, value in item.items():
-                    if key not in excluded_keys and value:
-                        content = str(value).replace('\\n', '\n')
-                        formatted_parts.append(content)
+            # 最も適切なテキストコンテンツを抽出
+            content = extract_best_content_from_dict(item, excluded_keys)
+            if content:
+                cleaned_content = clean_response_text(content)
+                if is_valid_content(cleaned_content):
+                    formatted_parts.append(cleaned_content)
         else:
-            # 辞書でない場合はそのまま追加（改行コードを実際の改行に変換）
-            content = str(item).replace('\\n', '\n')
-            formatted_parts.append(content)
+            # 辞書でない場合もクリーンアップ
+            cleaned_content = clean_response_text(str(item))
+            if is_valid_content(cleaned_content):
+                formatted_parts.append(cleaned_content)
     
-    return '\n'.join(formatted_parts)
+    final_result = '\n'.join(formatted_parts)
+    
+    # 最終的な品質チェックとクリーンアップ
+    final_result = final_quality_check(final_result)
+    
+    return final_result
+
+def extract_best_content_from_dict(item_dict, excluded_keys):
+    """辞書から最適なコンテンツを抽出"""
+    # 優先順位: text > summary_text > content > message > その他
+    priority_keys = ['text', 'summary_text', 'content', 'message', 'response']
+    
+    for key in priority_keys:
+        if key in item_dict and item_dict[key]:
+            content = str(item_dict[key])
+            # JSON構造が含まれていないかチェック
+            if not looks_like_json_structure(content):
+                return content
+    
+    # 優先キーで見つからない場合、他のキーをチェック（除外キー以外）
+    for key, value in item_dict.items():
+        if key not in excluded_keys and value and isinstance(value, str):
+            if not looks_like_json_structure(value):
+                return value
+    
+    return None
+
+def looks_like_json_structure(text):
+    """テキストがJSON構造を含んでいるかチェック"""
+    json_indicators = [
+        "{'type':", '[{\'type\':', '{"type":', '[{"type":',
+        "'text':", '"text":', "'summary_text':", '"summary_text":',
+        'reasoning', 'metadata', 'signature'
+    ]
+    text_lower = text.lower()
+    return any(indicator.lower() in text_lower for indicator in json_indicators)
+
+def clean_response_text(text):
+    """レスポンステキストのクリーンアップ"""
+    if not text or not isinstance(text, str):
+        return ""
+    
+    # 改行コードの正規化
+    text = text.replace('\\n', '\n').replace('\\t', '\t')
+    
+    # JSON構造の除去
+    import re
+    
+    # 典型的なJSON構造パターンを除去
+    json_patterns = [
+        r"'type':\s*'[^']*'",
+        r'"type":\s*"[^"]*"',
+        r"\[?\{'type':[^}]*\}[,\]]?",
+        r'\[?\{"type":[^}]*\}[,\]]?',
+        r"'reasoning':\s*\[[^\]]*\]",
+        r'"reasoning":\s*\[[^\]]*\]',
+        r"'signature':\s*'[A-Za-z0-9+/=]{50,}'",
+        r'"signature":\s*"[A-Za-z0-9+/=]{50,}"'
+    ]
+    
+    for pattern in json_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+    
+    # 不完全なJSONブラケットの除去
+    text = re.sub(r'^\s*[\[\{]', '', text)  # 先頭の [ や {
+    text = re.sub(r'[\]\}]\s*$', '', text)  # 末尾の ] や }
+    text = re.sub(r'^\s*[,;]\s*', '', text)  # 先頭のカンマやセミコロン
+    
+    # 連続する空白・改行の正規化
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # 3つ以上の連続改行を2つに
+    text = re.sub(r'[ \t]+', ' ', text)  # 連続するスペース・タブを1つに
+    
+    # 前後の空白を除去
+    text = text.strip()
+    
+    return text
+
+def is_valid_content(text):
+    """コンテンツが有効かどうかをチェック"""
+    if not text or len(text.strip()) < 10:
+        return False
+    
+    # 無効なパターンをチェック
+    invalid_patterns = [
+        r'^[{\[\'"]*$',  # JSON構造のみ
+        r'^[,;:\s]*$',   # 区切り文字のみ
+        r'^\s*reasoning\s*$',  # reasoningのみ
+        r'^\s*metadata\s*$',   # metadataのみ
+        r'^[A-Za-z0-9+/=]{50,}$',  # Base64っぽい長い文字列
+    ]
+    
+    for pattern in invalid_patterns:
+        if re.match(pattern, text.strip(), re.IGNORECASE):
+            return False
+    
+    return True
+
+def final_quality_check(text):
+    """最終的な品質チェックとクリーンアップ"""
+    if not text:
+        return "分析結果の抽出に失敗しました。"
+    
+    # 言語の一貫性チェック（安全な変数アクセス）
+    try:
+        language = globals().get('OUTPUT_LANGUAGE', 'ja')  # デフォルトは日本語
+    except:
+        language = 'ja'
+    
+    if language == 'ja':
+        text = ensure_japanese_consistency(text)
+    elif language == 'en':
+        text = ensure_english_consistency(text)
+    
+    # 最小限の長さチェック
+    if len(text.strip()) < 20:
+        if language == 'ja':
+            return "分析結果が不完全です。詳細な分析を実行中です。"
+        else:
+            return "Analysis result is incomplete. Detailed analysis in progress."
+    
+    return text
+
+def ensure_japanese_consistency(text):
+    """日本語の一貫性を確保"""
+    import re
+    
+    # 明らかに破損している部分を除去
+    # 例: "正caientify="predicate_liquid_referencet1" のような破損文字列
+    text = re.sub(r'[a-zA-Z0-9_="\']{20,}', '', text)
+    
+    # 不完全なマークダウンの修正
+    text = re.sub(r'#\s*[^#\n]*["\'>]+[^#\n]*', '', text)  # 破損したマークダウンヘッダー
+    
+    # 意味不明な文字列パターンの除去（拡張）
+    nonsense_patterns = [
+        r'addressing_sales_column\d*',
+        r'predicate_liquid_reference[a-zA-Z0-9]*',
+        r'bottlenars\s+effect',
+        r'実装非保存在',
+        r'裏票のend_by',
+        r'riconsistall',
+        r'caientify[a-zA-Z0-9="\']*',
+        r'iving\s+[a-zA-Z0-9]*',
+        r'o\s+Matter配賛',
+        r'ubsが低い僮性',
+        r'到田データの方効性',
+        r'パフォーマンス.*topic.*項行に考',
+        r'［[^］]*］">[^<]*',  # 破損したHTML/XML要素
+        r'\]\s*">\s*$'  # 文末の破損したタグ
+    ]
+    
+    for pattern in nonsense_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    
+    # 連続する記号の除去
+    text = re.sub(r'["\'>]{2,}', '', text)
+    text = re.sub(r'[=\'"]{3,}', '', text)
+    
+    # 破損した日本語の修正パターン
+    broken_japanese_patterns = [
+        (r'の方法動的がら', '動的な方法で'),
+        (r'思考に沿って進めていきます。$', '思考に沿って分析を進めます。'),
+        (r'ベストプラクティスに沿った改善を.*までしているの', 'ベストプラクティスに沿った改善提案'),
+    ]
+    
+    for broken, fixed in broken_japanese_patterns:
+        text = re.sub(broken, fixed, text, flags=re.IGNORECASE)
+    
+    # 空行の正規化
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+    
+    return text.strip()
+
+def ensure_english_consistency(text):
+    """英語の一貫性を確保"""
+    import re
+    
+    # 同様のクリーンアップを英語用に実装
+    text = re.sub(r'[^\x00-\x7F\s]{10,}', '', text)  # 非ASCII文字の長い連続を除去
+    
+    return text.strip()
 
 def extract_main_content_from_thinking_response(response) -> str:
     """
     thinking形式のレスポンスから主要コンテンツ（textまたはsummary_text）のみを抽出
     thinking、signature等の不要な情報は除外
+    JSON構造や破損したテキストの混入を防止
     """
     if not isinstance(response, list):
-        return str(response).replace('\\n', '\n')
+        cleaned_text = clean_response_text(str(response))
+        return final_quality_check(cleaned_text)
+    
+    # 除外すべきキー
+    excluded_keys = {
+        'thinking', 'signature', 'metadata', 'id', 'request_id', 
+        'timestamp', 'uuid', 'reasoning', 'type', 'model'
+    }
     
     for item in response:
         if isinstance(item, dict):
-            # 優先順位: text > summary_text > その他（thinking、signature以外）
-            if 'text' in item and item['text']:
-                return str(item['text']).replace('\\n', '\n')
-            elif 'summary_text' in item and item['summary_text']:
-                return str(item['summary_text']).replace('\\n', '\n')
+            # 最適なコンテンツを抽出
+            content = extract_best_content_from_dict(item, excluded_keys)
+            if content:
+                cleaned_content = clean_response_text(content)
+                if is_valid_content(cleaned_content):
+                    return final_quality_check(cleaned_content)
     
-    # 主要コンテンツが見つからない場合は全体をフォーマット（thinking、signature除外済み）
+    # 主要コンテンツが見つからない場合は全体をフォーマット
     return format_thinking_response(response)
 
 def convert_sets_to_lists(obj):

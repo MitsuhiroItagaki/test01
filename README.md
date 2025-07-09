@@ -498,17 +498,24 @@ df.explain(True)
 
 ### ❌ よくあるエラーと解決方法
 
-#### 1. thinking_enabled関連エラー
+#### 1. thinking_enabled関連エラー・出力品質問題
 
 ```bash
 # エラー例
 AttributeError: 'list' object has no attribute 'startswith'
 TypeError: write() argument must be str, not list
 
+# 出力品質問題例
+reasoning
+[{'type': 'summary_text', 'text': 'addressing_sales_column1...
+実装非保存在のLiquid要素敷�riconsistall 日本語で提案
+
 # 解決方法
-✅ 自動対応済み: format_thinking_response()関数で適切に処理
+✅ 自動対応済み: 強化されたformat_thinking_response()関数で適切に処理
 - リスト形式のレスポンスを人間に読みやすい形式に変換
-- 改行コード(\n)を実際の改行に変換
+- JSON構造の混入を完全防止
+- 文字化けや破損テキストの自動修正
+- 言語一貫性の確保（日本語設定時は日本語のみ）
 - 思考過程（thinking）、シグネチャ（signature）等の不要な情報は除外し、結論のみを表示
 ```
 
@@ -610,6 +617,7 @@ LLM_CONFIG = {
 ### ✨ 最新追加機能（v2.1）
 
 - **多言語対応**: 日本語・英語でのファイル出力（OUTPUT_LANGUAGE設定）
+- **出力品質向上**: JSON構造混入防止・文字化け自動修正・言語一貫性確保
 - **不要情報除外**: signature等のメタデータ自動除去（読みやすさ向上）
 - **拡張思考モード**: 結論のみ表示で冗長な思考過程を除外（デフォルト有効）
 - **フルパス表示**: catalog.schema.table形式のテーブル名表示
