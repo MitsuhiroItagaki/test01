@@ -766,8 +766,11 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     total_spill_bytes = 0
     spill_details = []
     
-    # ターゲットメトリクス名
-    target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+    # ターゲットメトリクス名（複数パターン対応）
+    target_spill_metrics = [
+        "Sink - Num bytes spilled to disk due to memory pressure",
+        "Num bytes spilled to disk due to memory pressure"
+    ]
     
     # 各ノードでスピル検出を実行
     for node in metrics.get('node_metrics', []):
@@ -779,8 +782,9 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
             metric_value = metric_info.get('value', 0)
             metric_label = metric_info.get('label', '')
             
-            if (metric_key == target_spill_metric or 
-                metric_label == target_spill_metric) and metric_value > 0:
+            # 複数のスピルメトリクス名をチェック
+            if ((metric_key in target_spill_metrics or 
+                 metric_label in target_spill_metrics) and metric_value > 0):
                 spill_detected = True
                 node_spill_found = True
                 total_spill_bytes += metric_value
@@ -788,6 +792,7 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
                     'node_id': node.get('node_id', ''),
                     'node_name': node.get('name', ''),
                     'spill_bytes': metric_value,
+                    'spill_metric': metric_key if metric_key in target_spill_metrics else metric_label,
                     'source': 'detailed_metrics'
                 })
                 break
@@ -800,8 +805,9 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
                 metric_label = metric.get('label', '')
                 metric_value = metric.get('value', 0)
                 
-                if (metric_key == target_spill_metric or 
-                    metric_label == target_spill_metric) and metric_value > 0:
+                # 複数のスピルメトリクス名をチェック
+                if ((metric_key in target_spill_metrics or 
+                     metric_label in target_spill_metrics) and metric_value > 0):
                     spill_detected = True
                     node_spill_found = True
                     total_spill_bytes += metric_value
@@ -809,6 +815,7 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
                         'node_id': node.get('node_id', ''),
                         'node_name': node.get('name', ''),
                         'spill_bytes': metric_value,
+                        'spill_metric': metric_key if metric_key in target_spill_metrics else metric_label,
                         'source': 'raw_metrics'
                     })
                     break
@@ -817,7 +824,8 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
         if not node_spill_found:
             key_metrics = node.get('key_metrics', {})
             for key_metric_name, key_metric_value in key_metrics.items():
-                if key_metric_name == target_spill_metric and key_metric_value > 0:
+                # 複数のスピルメトリクス名をチェック
+                if key_metric_name in target_spill_metrics and key_metric_value > 0:
                     spill_detected = True
                     node_spill_found = True
                     total_spill_bytes += key_metric_value
@@ -825,6 +833,7 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
                         'node_id': node.get('node_id', ''),
                         'node_name': node.get('name', ''),
                         'spill_bytes': key_metric_value,
+                        'spill_metric': key_metric_name,
                         'source': 'key_metrics'
                     })
                     break
@@ -2758,7 +2767,7 @@ if sorted_nodes:
                 else:
                     value_display = f"{value} bytes"
                 
-                print(f"       🎯 ターゲットメトリクス: 'Sink - Num bytes spilled to disk due to memory pressure'")
+                print(f"       🎯 ターゲットメトリクス: 'Sink/Num bytes spilled to disk due to memory pressure'")
                 print(f"       📊 検出値: {value_display} (from {source}.{matched_field})")
                 print(f"       🔍 メトリクス名: {metric_name}")
                 if label and label != metric_name:
@@ -2769,7 +2778,7 @@ if sorted_nodes:
             import os
             if os.environ.get('DEBUG_SPILL_ANALYSIS', '').lower() in ['true', '1', 'yes']:
                 print(f"    🔍 スピル未検出:")
-                print(f"       🎯 ターゲットメトリクス: 'Sink - Num bytes spilled to disk due to memory pressure'")
+                print(f"       🎯 ターゲットメトリクス: 'Sink/Num bytes spilled to disk due to memory pressure'")
                 print(f"       ❌ 検出結果: メトリクスが見つからないか、値が0")
                 
                 # 各ソースでの検索結果を表示
@@ -2777,15 +2786,19 @@ if sorted_nodes:
                 raw_metrics = node.get('metrics', [])
                 key_metrics = node.get('key_metrics', {})
                 
-                target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+                target_spill_metrics = [
+                    "Sink - Num bytes spilled to disk due to memory pressure",
+                    "Num bytes spilled to disk due to memory pressure"
+                ]
                 
                 # detailed_metricsでの検索結果
                 found_in_detailed = False
                 for metric_key, metric_info in detailed_metrics.items():
-                    if metric_key == target_spill_metric or metric_info.get('label', '') == target_spill_metric:
+                    if metric_key in target_spill_metrics or metric_info.get('label', '') in target_spill_metrics:
                         found_in_detailed = True
                         value = metric_info.get('value', 0)
-                        print(f"       📊 detailed_metrics: 見つかったが値={value} (≤ 0)")
+                        matched_metric = metric_key if metric_key in target_spill_metrics else metric_info.get('label', '')
+                        print(f"       📊 detailed_metrics: {matched_metric} 見つかったが値={value} (≤ 0)")
                         break
                 if not found_in_detailed:
                     print(f"       📊 detailed_metrics: ターゲットメトリクス未発見 ({len(detailed_metrics)}個中)")
@@ -2793,19 +2806,26 @@ if sorted_nodes:
                 # raw_metricsでの検索結果
                 found_in_raw = False
                 for metric in raw_metrics:
-                    if metric.get('key', '') == target_spill_metric or metric.get('label', '') == target_spill_metric:
+                    metric_key = metric.get('key', '')
+                    metric_label = metric.get('label', '')
+                    if metric_key in target_spill_metrics or metric_label in target_spill_metrics:
                         found_in_raw = True
                         value = metric.get('value', 0)
-                        print(f"       📊 raw_metrics: 見つかったが値={value} (≤ 0)")
+                        matched_metric = metric_key if metric_key in target_spill_metrics else metric_label
+                        print(f"       📊 raw_metrics: {matched_metric} 見つかったが値={value} (≤ 0)")
                         break
                 if not found_in_raw:
                     print(f"       📊 raw_metrics: ターゲットメトリクス未発見 ({len(raw_metrics)}個中)")
                 
                 # key_metricsでの検索結果
-                if target_spill_metric in key_metrics:
-                    value = key_metrics[target_spill_metric]
-                    print(f"       📊 key_metrics: 見つかったが値={value} (≤ 0)")
-                else:
+                found_in_key = False
+                for target_metric in target_spill_metrics:
+                    if target_metric in key_metrics:
+                        found_in_key = True
+                        value = key_metrics[target_metric]
+                        print(f"       📊 key_metrics: {target_metric} 見つかったが値={value} (≤ 0)")
+                        break
+                if not found_in_key:
                     print(f"       📊 key_metrics: ターゲットメトリクス未発見 ({len(key_metrics)}個中)")
                 
                 # 利用可能なスピル関連メトリクス一覧（参考）
@@ -4227,7 +4247,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     report_lines.append("## 🐌 最も時間がかかっている処理TOP10")
     report_lines.append("=" * 80)
     report_lines.append("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
-    report_lines.append('💿 スピル判定: "Sink - Num bytes spilled to disk due to memory pressure" > 0')
+    report_lines.append('💿 スピル判定: "Sink/Num bytes spilled to disk due to memory pressure" > 0')
     report_lines.append("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
     report_lines.append("")
 
@@ -4280,10 +4300,13 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if duration_ms > 0:  # このノードに関連するステージを推定
                     num_tasks = max(num_tasks, stage.get('num_tasks', 0))
             
-            # スピル検出
+            # スピル検出（複数メトリクス対応）
             spill_detected = False
             spill_bytes = 0
-            target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+            target_spill_metrics = [
+                "Sink - Num bytes spilled to disk due to memory pressure",
+                "Num bytes spilled to disk due to memory pressure"
+            ]
             
             # detailed_metricsから検索
             detailed_metrics = node.get('detailed_metrics', {})
@@ -4291,8 +4314,9 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 metric_value = metric_info.get('value', 0)
                 metric_label = metric_info.get('label', '')
                 
-                if (metric_key == target_spill_metric or 
-                    metric_label == target_spill_metric) and metric_value > 0:
+                # 複数のスピルメトリクス名をチェック
+                if ((metric_key in target_spill_metrics or 
+                     metric_label in target_spill_metrics) and metric_value > 0):
                     spill_detected = True
                     spill_bytes = metric_value
                     break
