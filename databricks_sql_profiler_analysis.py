@@ -3227,16 +3227,50 @@ def extract_original_query_from_profiler_data(profiler_data: Dict[str, Any]) -> 
     
     return ""
 
+def get_spark_broadcast_threshold() -> float:
+    """
+    Sparkの実際のbroadcast閾値設定を取得
+    """
+    try:
+        # Sparkの設定値を取得
+        threshold_bytes = spark.conf.get("spark.databricks.optimizer.autoBroadcastJoinThreshold", "31457280")  # デフォルト30MB
+        threshold_mb = float(threshold_bytes) / 1024 / 1024
+        return threshold_mb
+    except:
+        # 取得できない場合は標準的な30MBを返す
+        return 30.0
+
+def estimate_uncompressed_size(compressed_size_mb: float, file_format: str = "parquet") -> float:
+    """
+    圧縮サイズから非圧縮サイズを推定
+    """
+    # ファイル形式別の一般的な圧縮率
+    compression_ratios = {
+        "parquet": 4.0,    # Parquetは通常3-5倍圧縮
+        "delta": 4.0,      # Delta Lakeも同様
+        "orc": 3.5,        # ORC
+        "json": 6.0,       # JSONは高圧縮率
+        "csv": 3.0,        # CSV
+        "avro": 3.5,       # Avro
+        "default": 4.0     # デフォルト
+    }
+    
+    ratio = compression_ratios.get(file_format.lower(), compression_ratios["default"])
+    return compressed_size_mb * ratio
+
 def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) -> Dict[str, Any]:
     """
-    BROADCASTヒントの適用可能性を分析
+    BROADCASTヒントの適用可能性を分析（正確な30MB閾値適用）
     """
     broadcast_analysis = {
         "is_join_query": False,
         "broadcast_candidates": [],
         "recommendations": [],
         "feasibility": "not_applicable",
-        "reasoning": []
+        "reasoning": [],
+        "spark_threshold_mb": get_spark_broadcast_threshold(),
+        "compression_analysis": {},
+        "detailed_size_analysis": []
     }
     
     # クエリにJOINが含まれているかチェック
@@ -3249,6 +3283,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
         return broadcast_analysis
     
     broadcast_analysis["is_join_query"] = True
+    broadcast_analysis["reasoning"].append(f"Spark BROADCAST閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）")
     
     # メトリクスからテーブルサイズ情報を取得
     overall_metrics = metrics.get('overall_metrics', {})
@@ -3256,6 +3291,9 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
     
     # スキャンノードからテーブル情報を抽出
     scan_nodes = []
+    total_compressed_bytes = 0
+    total_rows_all_tables = 0
+    
     for node in node_metrics:
         node_name = node.get('name', '').upper()
         if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN', 'PARQUET', 'DELTA']):
@@ -3263,90 +3301,239 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) 
             rows_num = key_metrics.get('rowsNum', 0)
             duration_ms = key_metrics.get('durationMs', 0)
             
-            # おおよそのデータサイズを推定（行数×平均行サイズ）
-            # データ読み込み量から平均行サイズを逆算して、より現実的な推定を行う
+            # ファイル形式の推定
+            file_format = "parquet"  # デフォルト
+            if "DELTA" in node_name:
+                file_format = "delta"
+            elif "PARQUET" in node_name:
+                file_format = "parquet"
+            elif "JSON" in node_name:
+                file_format = "json"
+            elif "CSV" in node_name:
+                file_format = "csv"
+            
+            # このテーブルの圧縮サイズを推定
             total_read_bytes = overall_metrics.get('read_bytes', 0)
             total_rows = overall_metrics.get('rows_read_count', 0)
             
-            if total_rows > 0 and total_read_bytes > 0:
-                # 実際のデータから平均行サイズを計算
-                avg_row_size_bytes = total_read_bytes / total_rows
-                estimated_size_mb = (rows_num * avg_row_size_bytes) / 1024 / 1024  # MB単位
+            if total_rows > 0 and total_read_bytes > 0 and rows_num > 0:
+                # 全体の読み込み量からこのテーブルの割合を計算
+                table_ratio = rows_num / total_rows
+                estimated_compressed_bytes = total_read_bytes * table_ratio
+                estimated_compressed_mb = estimated_compressed_bytes / 1024 / 1024
+                
+                # 非圧縮サイズを推定
+                estimated_uncompressed_mb = estimate_uncompressed_size(estimated_compressed_mb, file_format)
             else:
-                # フォールバック: 一般的な平均行サイズを使用（256バイト）
-                estimated_size_mb = (rows_num * 256) / 1024 / 1024  # MB単位
+                # フォールバック: 行数ベースの推定（保守的）
+                # 平均行サイズを推定（非圧縮）
+                if total_rows > 0 and total_read_bytes > 0:
+                    # 全体データから圧縮後の平均行サイズを計算
+                    compressed_avg_row_size = total_read_bytes / total_rows
+                    # 圧縮率を考慮して非圧縮サイズを推定
+                    uncompressed_avg_row_size = compressed_avg_row_size * estimate_uncompressed_size(1.0, file_format)
+                else:
+                    # 完全なフォールバック: 一般的な非圧縮行サイズ（1KB）
+                    uncompressed_avg_row_size = 1024
+                
+                estimated_compressed_mb = (rows_num * compressed_avg_row_size) / 1024 / 1024 if 'compressed_avg_row_size' in locals() else 0
+                estimated_uncompressed_mb = (rows_num * uncompressed_avg_row_size) / 1024 / 1024
             
             scan_info = {
                 "node_name": node_name,
                 "rows": rows_num,
                 "duration_ms": duration_ms,
-                "estimated_size_mb": estimated_size_mb,
+                "estimated_compressed_mb": estimated_compressed_mb,
+                "estimated_uncompressed_mb": estimated_uncompressed_mb,
+                "file_format": file_format,
+                "compression_ratio": estimated_uncompressed_mb / max(estimated_compressed_mb, 0.1),
                 "node_id": node.get('node_id', '')
             }
             scan_nodes.append(scan_info)
+            
+            total_compressed_bytes += estimated_compressed_bytes if 'estimated_compressed_bytes' in locals() else 0
+            total_rows_all_tables += rows_num
     
-    # BROADCAST候補の判定
-    broadcast_threshold_mb = 200  # 200MB以下をBROADCAST候補とする
-    broadcast_max_mb = 1024      # 1GB以上は確実にBROADCAST不可
+    # BROADCAST候補の判定（30MB閾値使用）
+    broadcast_threshold_mb = broadcast_analysis["spark_threshold_mb"]  # 実際のSpark設定値
+    broadcast_safe_mb = broadcast_threshold_mb * 0.8  # 安全マージン（80%）
+    broadcast_max_mb = broadcast_threshold_mb * 10    # 明らかに大きすぎる閾値
     
     small_tables = []
     large_tables = []
+    marginal_tables = []
+    
+    # 圧縮分析の記録
+    broadcast_analysis["compression_analysis"] = {
+        "total_compressed_gb": total_compressed_bytes / 1024 / 1024 / 1024 if total_compressed_bytes > 0 else 0,
+        "total_rows": total_rows_all_tables,
+        "avg_compression_ratio": 0
+    }
     
     for scan in scan_nodes:
-        size_mb = scan["estimated_size_mb"]
-        if size_mb <= broadcast_threshold_mb and scan["rows"] > 0:
+        uncompressed_size_mb = scan["estimated_uncompressed_mb"]
+        compressed_size_mb = scan["estimated_compressed_mb"]
+        
+        # 詳細サイズ分析の記録
+        size_analysis = {
+            "table": scan["node_name"],
+            "rows": scan["rows"],
+            "compressed_mb": compressed_size_mb,
+            "uncompressed_mb": uncompressed_size_mb,
+            "file_format": scan["file_format"],
+            "compression_ratio": scan["compression_ratio"],
+            "broadcast_decision": "",
+            "decision_reasoning": ""
+        }
+        
+        # 30MB閾値での判定（非圧縮サイズ）
+        if uncompressed_size_mb <= broadcast_safe_mb and scan["rows"] > 0:
+            # 安全マージン内（24MB以下）- 強く推奨
             small_tables.append(scan)
+            size_analysis["broadcast_decision"] = "strongly_recommended"
+            size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB ≤ 安全閾値{broadcast_safe_mb:.1f}MB"
             broadcast_analysis["broadcast_candidates"].append({
                 "table": scan["node_name"],
-                "estimated_size_mb": size_mb,
+                "estimated_uncompressed_mb": uncompressed_size_mb,
+                "estimated_compressed_mb": compressed_size_mb,
                 "rows": scan["rows"],
+                "file_format": scan["file_format"],
+                "compression_ratio": scan["compression_ratio"],
                 "broadcast_feasible": True,
-                "reasoning": f"推定サイズ {size_mb:.1f}MB（<{broadcast_threshold_mb}MB）でBROADCAST可能"
+                "confidence": "high",
+                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（安全閾値 {broadcast_safe_mb:.1f}MB 以下）でBROADCAST強く推奨"
             })
-        elif size_mb > broadcast_max_mb:
+        elif uncompressed_size_mb <= broadcast_threshold_mb and scan["rows"] > 0:
+            # 閾値内だが安全マージンは超過（24-30MB）- 条件付き推奨
+            marginal_tables.append(scan)
+            size_analysis["broadcast_decision"] = "conditionally_recommended"
+            size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB ≤ 閾値{broadcast_threshold_mb:.1f}MB（安全マージン超過）"
+            broadcast_analysis["broadcast_candidates"].append({
+                "table": scan["node_name"],
+                "estimated_uncompressed_mb": uncompressed_size_mb,
+                "estimated_compressed_mb": compressed_size_mb,
+                "rows": scan["rows"],
+                "file_format": scan["file_format"],
+                "compression_ratio": scan["compression_ratio"],
+                "broadcast_feasible": True,
+                "confidence": "medium",
+                "reasoning": f"非圧縮推定サイズ {uncompressed_size_mb:.1f}MB（閾値 {broadcast_threshold_mb:.1f}MB 以下だが安全マージン {broadcast_safe_mb:.1f}MB 超過）で条件付きBROADCAST推奨"
+            })
+        elif uncompressed_size_mb > broadcast_max_mb:
+            # 明らかに大きすぎる（300MB超）
             large_tables.append(scan)
-            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: {size_mb:.1f}MB - BROADCAST不可（>{broadcast_max_mb}MB）")
+            size_analysis["broadcast_decision"] = "not_recommended"
+            size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB > 最大閾値{broadcast_max_mb:.1f}MB"
+            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST不可（>{broadcast_max_mb:.1f}MB）")
         else:
-            # 中間サイズのテーブル
-            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: {size_mb:.1f}MB - BROADCAST要検討（{broadcast_threshold_mb}-{broadcast_max_mb}MB）")
+            # 中間サイズのテーブル（30-300MB）
+            large_tables.append(scan)
+            size_analysis["broadcast_decision"] = "not_recommended"
+            size_analysis["decision_reasoning"] = f"非圧縮{uncompressed_size_mb:.1f}MB > 閾値{broadcast_threshold_mb:.1f}MB"
+            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: 非圧縮{uncompressed_size_mb:.1f}MB - BROADCAST非推奨（>{broadcast_threshold_mb:.1f}MB閾値）")
+        
+        broadcast_analysis["detailed_size_analysis"].append(size_analysis)
     
-    # 総データ読み込み量との整合性チェック
+    # 圧縮分析サマリーの更新
+    if scan_nodes:
+        total_uncompressed_mb = sum(scan["estimated_uncompressed_mb"] for scan in scan_nodes)
+        total_compressed_mb = sum(scan["estimated_compressed_mb"] for scan in scan_nodes)
+        if total_compressed_mb > 0:
+            broadcast_analysis["compression_analysis"]["avg_compression_ratio"] = total_uncompressed_mb / total_compressed_mb
+        broadcast_analysis["compression_analysis"]["total_uncompressed_mb"] = total_uncompressed_mb
+        broadcast_analysis["compression_analysis"]["total_compressed_mb"] = total_compressed_mb
+    
+    # 総データ読み込み量との整合性チェック（圧縮ベース）
     total_read_gb = overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024
-    estimated_total_mb = sum(scan["estimated_size_mb"] for scan in scan_nodes)
+    estimated_total_compressed_mb = sum(scan["estimated_compressed_mb"] for scan in scan_nodes)
     
-    if estimated_total_mb > 0:
-        size_ratio = (total_read_gb * 1024) / estimated_total_mb
+    if estimated_total_compressed_mb > 0:
+        size_ratio = (total_read_gb * 1024) / estimated_total_compressed_mb
         if size_ratio > 3 or size_ratio < 0.3:
-            broadcast_analysis["reasoning"].append(f"推定サイズ({estimated_total_mb:.1f}MB)と実読み込み量({total_read_gb:.1f}GB)に乖離あり - サイズ推定に注意")
+            broadcast_analysis["reasoning"].append(f"推定圧縮サイズ({estimated_total_compressed_mb:.1f}MB)と実読み込み量({total_read_gb:.1f}GB)に乖離あり - サイズ推定に注意")
+        else:
+            broadcast_analysis["reasoning"].append(f"サイズ推定整合性: 推定圧縮{estimated_total_compressed_mb:.1f}MB vs 実際{total_read_gb:.1f}GB（比率:{size_ratio:.2f}）")
     
-    # BROADCAST推奨事項の生成
-    if small_tables and large_tables:
-        broadcast_analysis["feasibility"] = "recommended"
-        broadcast_analysis["recommendations"] = [
-            f"小テーブル（{len(small_tables)}個）をBROADCAST対象として推奨",
-            f"大テーブル（{len(large_tables)}個）は通常のJOINを使用"
-        ]
+    # BROADCAST推奨事項の生成（30MB閾値対応）
+    total_broadcast_candidates = len(small_tables) + len(marginal_tables)
+    total_tables = len(scan_nodes)
+    
+    if small_tables or marginal_tables:
+        if large_tables:
+            broadcast_analysis["feasibility"] = "recommended"
+            broadcast_analysis["recommendations"] = [
+                f"🎯 BROADCAST推奨テーブル: {total_broadcast_candidates}個（全{total_tables}個中）",
+                f"  ✅ 強く推奨: {len(small_tables)}個（安全閾値{broadcast_safe_mb:.1f}MB以下）",
+                f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個（閾値{broadcast_threshold_mb:.1f}MB以下、要注意）",
+                f"  ❌ 非推奨: {len(large_tables)}個（閾値超過）"
+            ]
+        else:
+            broadcast_analysis["feasibility"] = "all_small"
+            broadcast_analysis["recommendations"] = [
+                f"🎯 全テーブル（{total_tables}個）がBROADCAST閾値以下",
+                f"  ✅ 強く推奨: {len(small_tables)}個",
+                f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個",
+                "📋 最小テーブルを優先的にBROADCASTすることを推奨"
+            ]
+        
+        # 具体的なBROADCAST候補の詳細
         for small_table in small_tables:
             broadcast_analysis["recommendations"].append(
-                f"BROADCAST({small_table['node_name']}) - 推定{small_table['estimated_size_mb']:.1f}MB"
+                f"🔹 BROADCAST({small_table['node_name']}) - 非圧縮{small_table['estimated_uncompressed_mb']:.1f}MB（圧縮{small_table['estimated_compressed_mb']:.1f}MB、{small_table['file_format']}、圧縮率{small_table['compression_ratio']:.1f}x）"
             )
-    elif small_tables and not large_tables:
-        broadcast_analysis["feasibility"] = "possible"
-        broadcast_analysis["recommendations"] = [
-            f"すべてのテーブル（{len(small_tables)}個）がBROADCAST可能サイズ",
-            "最小テーブルをBROADCASTすることを推奨"
-        ]
-    elif not small_tables and large_tables:
+        
+        for marginal_table in marginal_tables:
+            broadcast_analysis["recommendations"].append(
+                f"🔸 BROADCAST({marginal_table['node_name']}) - 非圧縮{marginal_table['estimated_uncompressed_mb']:.1f}MB（条件付き、メモリ使用量要注意）"
+            )
+            
+    elif large_tables:
         broadcast_analysis["feasibility"] = "not_recommended"
         broadcast_analysis["recommendations"] = [
-            f"すべてのテーブル（{len(large_tables)}個）がBROADCAST非推奨サイズ",
-            "Liquid ClusteringやZORDER BYでの最適化を推奨"
+            f"❌ 全テーブル（{len(large_tables)}個）が30MB閾値超過のためBROADCAST非推奨",
+            f"📊 最小テーブルでも非圧縮{min(scan['estimated_uncompressed_mb'] for scan in large_tables):.1f}MB",
+            "🔧 代替最適化手法を推奨:",
+            "  • Liquid Clustering実装",
+            "  • データパーティショニング",
+            "  • クエリ最適化（フィルタープッシュダウン等）",
+            "  • spark.databricks.optimizer.autoBroadcastJoinThreshold設定値の調整検討"
         ]
     else:
         broadcast_analysis["feasibility"] = "insufficient_data"
         broadcast_analysis["recommendations"] = [
-            "テーブルサイズ情報が不足しているため、手動でのサイズ確認が必要"
+            "⚠️ テーブルサイズ情報が不足しているため、手動でのサイズ確認が必要",
+            "📋 以下のコマンドでテーブルサイズを確認:",
+            "  • DESCRIBE DETAIL table_name",
+            "  • SELECT COUNT(*) FROM table_name",
+            "  • SHOW TABLE EXTENDED LIKE 'table_name'"
         ]
+    
+    # 30MB閾値にヒットする特別なケース分析
+    if small_tables:
+        broadcast_analysis["30mb_hit_analysis"] = {
+            "has_30mb_candidates": True,
+            "candidate_count": len(small_tables),
+            "smallest_table_mb": min(scan["estimated_uncompressed_mb"] for scan in small_tables),
+            "largest_candidate_mb": max(scan["estimated_uncompressed_mb"] for scan in small_tables),
+            "total_candidate_size_mb": sum(scan["estimated_uncompressed_mb"] for scan in small_tables),
+            "recommended_broadcast_table": small_tables[0]["node_name"] if small_tables else None,
+            "memory_impact_estimation": f"{sum(scan['estimated_uncompressed_mb'] for scan in small_tables):.1f}MB がワーカーノードにブロードキャスト"
+        }
+        
+        # 最適なBROADCAST候補の特定
+        if len(small_tables) > 1:
+            optimal_candidate = min(small_tables, key=lambda x: x["estimated_uncompressed_mb"])
+            broadcast_analysis["30mb_hit_analysis"]["optimal_candidate"] = {
+                "table": optimal_candidate["node_name"],
+                "size_mb": optimal_candidate["estimated_uncompressed_mb"],
+                "rows": optimal_candidate["rows"],
+                "reasoning": f"最小サイズ{optimal_candidate['estimated_uncompressed_mb']:.1f}MBで最も効率的"
+            }
+    else:
+        broadcast_analysis["30mb_hit_analysis"] = {
+            "has_30mb_candidates": False,
+            "reason": f"全テーブルが30MB閾値を超過（最小: {min(scan['estimated_uncompressed_mb'] for scan in scan_nodes):.1f}MB）" if scan_nodes else "テーブル情報なし"
+        }
     
     return broadcast_analysis
 
@@ -3400,19 +3587,42 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     # Liquid Clustering推奨の簡潔化
     clustering_summary = "、".join(clustering_recommendations[:2]) if clustering_recommendations else "特になし"
     
-    # BROADCAST分析結果のサマリー作成
+    # BROADCAST分析結果のサマリー作成（30MB閾値対応）
     broadcast_summary = []
     if broadcast_analysis["is_join_query"]:
-        broadcast_summary.append(f"BROADCAST適用可能性: {broadcast_analysis['feasibility']}")
+        broadcast_summary.append(f"🎯 BROADCAST適用可能性: {broadcast_analysis['feasibility']}")
+        broadcast_summary.append(f"⚖️ Spark閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）")
+        
+        # 30MB以下の候補がある場合
+        if broadcast_analysis["30mb_hit_analysis"]["has_30mb_candidates"]:
+            hit_analysis = broadcast_analysis["30mb_hit_analysis"]
+            broadcast_summary.append(f"✅ 30MB閾値ヒット: {hit_analysis['candidate_count']}個のテーブルが条件適合")
+            broadcast_summary.append(f"📊 候補サイズ範囲: {hit_analysis['smallest_table_mb']:.1f}MB - {hit_analysis['largest_candidate_mb']:.1f}MB")
+            
+            if "optimal_candidate" in hit_analysis:
+                optimal = hit_analysis["optimal_candidate"]
+                broadcast_summary.append(f"🏆 最適候補: {optimal['table']} ({optimal['size_mb']:.1f}MB)")
+        else:
+            broadcast_summary.append(f"❌ 30MB閾値ヒットなし: {broadcast_analysis['30mb_hit_analysis']['reason']}")
+        
+        # BROADCAST候補の詳細（最大3個）
         if broadcast_analysis["broadcast_candidates"]:
-            for candidate in broadcast_analysis["broadcast_candidates"][:3]:  # 上位3候補
-                broadcast_summary.append(f"- {candidate['table']}: {candidate['estimated_size_mb']:.1f}MB ({candidate['reasoning']})")
-        if broadcast_analysis["recommendations"]:
-            broadcast_summary.extend(broadcast_analysis["recommendations"][:3])
+            broadcast_summary.append("📋 BROADCAST候補詳細:")
+            for i, candidate in enumerate(broadcast_analysis["broadcast_candidates"][:3]):
+                confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
+                broadcast_summary.append(
+                    f"  {confidence_icon} {candidate['table']}: 非圧縮{candidate['estimated_uncompressed_mb']:.1f}MB "
+                    f"(圧縮{candidate['estimated_compressed_mb']:.1f}MB, {candidate['file_format']}, "
+                    f"圧縮率{candidate['compression_ratio']:.1f}x)"
+                )
+        
+        # 重要な注意事項
         if broadcast_analysis["reasoning"]:
-            broadcast_summary.extend([f"注意: {reason}" for reason in broadcast_analysis["reasoning"][:2]])
+            broadcast_summary.append("⚠️ 重要な注意事項:")
+            for reason in broadcast_analysis["reasoning"][:2]:
+                broadcast_summary.append(f"  • {reason}")
     else:
-        broadcast_summary.append("JOINクエリではないため、BROADCASTヒント適用対象外")
+        broadcast_summary.append("❌ JOINクエリではないため、BROADCASTヒント適用対象外")
     
     optimization_prompt = f"""
 あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
@@ -3449,12 +3659,15 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
 8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
 9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
-10. **BROADCAST分析結果を厳密に反映してください**：
-    - BROADCAST適用推奨の場合のみBROADCASTヒント（/*+ BROADCAST(table_name) */）を適用
-    - テーブルサイズが200MB以下の小テーブルのみBROADCAST対象
-    - 1GB以上の大テーブルには絶対にBROADCASTヒントを適用しない
-    - BROADCAST適用時は必ず推定サイズと根拠を説明に記載
+10. **BROADCAST分析結果を厳密に反映してください（30MB閾値）**：
+    - Spark標準の30MB閾値（非圧縮）を厳格に適用
+    - BROADCAST適用推奨（recommended/all_small）の場合のみBROADCASTヒント（/*+ BROADCAST(table_name) */）を適用
+    - 非圧縮サイズが30MB以下の小テーブルのみBROADCAST対象
+    - 30MB超過の大テーブルには絶対にBROADCASTヒントを適用しない
+    - 条件付き推奨（24-30MB）の場合は要注意として明記
+    - BROADCAST適用時は必ず推定非圧縮サイズ、圧縮サイズ、圧縮率を説明に記載
     - JOINクエリでない場合はBROADCASTヒントを使用しない
+    - 30MB閾値ヒットがない場合は代替最適化手法を提案
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
@@ -3476,11 +3689,19 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 ## 改善ポイント
 [3つの主要改善点]
 
-## BROADCAST適用根拠
+## BROADCAST適用根拠（30MB閾値基準）
 [BROADCASTヒント適用の詳細根拠]
-- 適用テーブル: [テーブル名] (推定サイズ: [XX]MB、根拠: [データ量・行数など])
-- 適用可否判定: [テーブルサイズ分析結果]
-- 期待効果: [ネットワーク転送量削減・JOIN処理高速化など]
+- 📏 Spark閾値: 30MB（非圧縮、spark.databricks.optimizer.autoBroadcastJoinThreshold）
+- 🎯 適用テーブル: [テーブル名]
+  - 非圧縮推定サイズ: [XX]MB
+  - 圧縮推定サイズ: [YY]MB
+  - 推定圧縮率: [ZZ]x
+  - ファイル形式: [parquet/delta/等]
+  - 推定根拠: [行数・データ読み込み量ベース]
+- ⚖️ 判定結果: [strongly_recommended/conditionally_recommended/not_recommended]
+- 🔍 閾値適合性: [30MB以下で適合/30MB超過で非適合]
+- 💾 メモリ影響: [推定メモリ使用量]MB がワーカーノードにブロードキャスト
+- 🚀 期待効果: [ネットワーク転送量削減・JOIN処理高速化・シャッフル削減など]
 
 ## 期待効果  
 [実行時間・メモリ・スピル改善の見込み（BROADCAST効果を含む）]
@@ -3759,17 +3980,37 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         try:
             broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query)
             if OUTPUT_LANGUAGE == 'ja':
-                f.write(f"\n\n## BROADCASTヒント分析結果\n\n")
+                f.write(f"\n\n## BROADCASTヒント分析結果（30MB閾値基準）\n\n")
                 f.write(f"- **JOINクエリ**: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}\n")
+                f.write(f"- **Spark BROADCAST閾値**: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）\n")
                 f.write(f"- **BROADCAST適用可能性**: {broadcast_analysis['feasibility']}\n")
-                f.write(f"- **BROADCAST候補数**: {len(broadcast_analysis['broadcast_candidates'])}個\n\n")
+                f.write(f"- **BROADCAST候補数**: {len(broadcast_analysis['broadcast_candidates'])}個\n")
+                
+                # 30MB閾値ヒット分析
+                if broadcast_analysis["30mb_hit_analysis"]["has_30mb_candidates"]:
+                    hit_analysis = broadcast_analysis["30mb_hit_analysis"]
+                    f.write(f"- **30MB閾値ヒット**: ✅ {hit_analysis['candidate_count']}個のテーブルが適合\n")
+                    f.write(f"- **候補サイズ範囲**: {hit_analysis['smallest_table_mb']:.1f}MB - {hit_analysis['largest_candidate_mb']:.1f}MB\n")
+                    f.write(f"- **総メモリ影響**: {hit_analysis['memory_impact_estimation']}\n")
+                    if "optimal_candidate" in hit_analysis:
+                        optimal = hit_analysis["optimal_candidate"]
+                        f.write(f"- **最適候補**: {optimal['table']} ({optimal['size_mb']:.1f}MB) - {optimal['reasoning']}\n")
+                else:
+                    f.write(f"- **30MB閾値ヒット**: ❌ {broadcast_analysis['30mb_hit_analysis']['reason']}\n")
+                f.write("\n")
                 
                 if broadcast_analysis["broadcast_candidates"]:
-                    f.write("### BROADCAST候補テーブル\n\n")
+                    f.write("### BROADCAST候補テーブル（詳細分析）\n\n")
                     for candidate in broadcast_analysis["broadcast_candidates"]:
-                        f.write(f"- **{candidate['table']}**: {candidate['estimated_size_mb']:.1f}MB\n")
-                        f.write(f"  - 根拠: {candidate['reasoning']}\n")
-                        f.write(f"  - 行数: {candidate['rows']:,}行\n\n")
+                        confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
+                        f.write(f"{confidence_icon} **{candidate['table']}**\n")
+                        f.write(f"  - **非圧縮サイズ**: {candidate['estimated_uncompressed_mb']:.1f}MB\n")
+                        f.write(f"  - **圧縮サイズ**: {candidate['estimated_compressed_mb']:.1f}MB\n")
+                        f.write(f"  - **圧縮率**: {candidate['compression_ratio']:.1f}x\n")
+                        f.write(f"  - **ファイル形式**: {candidate['file_format']}\n")
+                        f.write(f"  - **行数**: {candidate['rows']:,}行\n")
+                        f.write(f"  - **信頼度**: {candidate['confidence']}\n")
+                        f.write(f"  - **根拠**: {candidate['reasoning']}\n\n")
                 
                 if broadcast_analysis["recommendations"]:
                     f.write("### 推奨事項\n\n")
@@ -3783,17 +4024,37 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                         f.write(f"- {reason}\n")
                     f.write("\n")
             else:
-                f.write(f"\n\n## BROADCAST Hint Analysis\n\n")
+                f.write(f"\n\n## BROADCAST Hint Analysis (30MB Threshold)\n\n")
                 f.write(f"- **JOIN Query**: {'Yes' if broadcast_analysis['is_join_query'] else 'No'}\n")
+                f.write(f"- **Spark BROADCAST Threshold**: {broadcast_analysis['spark_threshold_mb']:.1f}MB (uncompressed)\n")
                 f.write(f"- **BROADCAST Feasibility**: {broadcast_analysis['feasibility']}\n")
-                f.write(f"- **BROADCAST Candidates**: {len(broadcast_analysis['broadcast_candidates'])}\n\n")
+                f.write(f"- **BROADCAST Candidates**: {len(broadcast_analysis['broadcast_candidates'])}\n")
+                
+                # 30MB threshold hit analysis
+                if broadcast_analysis["30mb_hit_analysis"]["has_30mb_candidates"]:
+                    hit_analysis = broadcast_analysis["30mb_hit_analysis"]
+                    f.write(f"- **30MB Threshold Hit**: ✅ {hit_analysis['candidate_count']} tables qualify\n")
+                    f.write(f"- **Candidate Size Range**: {hit_analysis['smallest_table_mb']:.1f}MB - {hit_analysis['largest_candidate_mb']:.1f}MB\n")
+                    f.write(f"- **Total Memory Impact**: {hit_analysis['memory_impact_estimation']}\n")
+                    if "optimal_candidate" in hit_analysis:
+                        optimal = hit_analysis["optimal_candidate"]
+                        f.write(f"- **Optimal Candidate**: {optimal['table']} ({optimal['size_mb']:.1f}MB) - {optimal['reasoning']}\n")
+                else:
+                    f.write(f"- **30MB Threshold Hit**: ❌ {broadcast_analysis['30mb_hit_analysis']['reason']}\n")
+                f.write("\n")
                 
                 if broadcast_analysis["broadcast_candidates"]:
-                    f.write("### BROADCAST Candidate Tables\n\n")
+                    f.write("### BROADCAST Candidate Tables (Detailed Analysis)\n\n")
                     for candidate in broadcast_analysis["broadcast_candidates"]:
-                        f.write(f"- **{candidate['table']}**: {candidate['estimated_size_mb']:.1f}MB\n")
-                        f.write(f"  - Reasoning: {candidate['reasoning']}\n")
-                        f.write(f"  - Rows: {candidate['rows']:,}\n\n")
+                        confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
+                        f.write(f"{confidence_icon} **{candidate['table']}**\n")
+                        f.write(f"  - **Uncompressed Size**: {candidate['estimated_uncompressed_mb']:.1f}MB\n")
+                        f.write(f"  - **Compressed Size**: {candidate['estimated_compressed_mb']:.1f}MB\n")
+                        f.write(f"  - **Compression Ratio**: {candidate['compression_ratio']:.1f}x\n")
+                        f.write(f"  - **File Format**: {candidate['file_format']}\n")
+                        f.write(f"  - **Rows**: {candidate['rows']:,}\n")
+                        f.write(f"  - **Confidence**: {candidate['confidence']}\n")
+                        f.write(f"  - **Reasoning**: {candidate['reasoning']}\n\n")
                 
                 if broadcast_analysis["recommendations"]:
                     f.write("### Recommendations\n\n")
@@ -3826,7 +4087,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         'report_file': report_filename
     }
 
-print("✅ 関数定義完了: SQL最適化関連関数")
+print("✅ 関数定義完了: SQL最適化関連関数（30MB BROADCAST閾値対応）")
 
 # COMMAND ----------
 
