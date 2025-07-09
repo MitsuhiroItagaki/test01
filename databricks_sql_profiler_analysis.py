@@ -3704,10 +3704,10 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
                 total_rows = overall_metrics.get('rows_read_count', 0)
                 
                 if total_rows > 0 and total_read_bytes > 0 and rows_num > 0:
-                # 全体の読み込み量からこのテーブルの割合を計算
-                table_ratio = rows_num / total_rows
-                estimated_compressed_bytes = total_read_bytes * table_ratio
-                estimated_compressed_mb = estimated_compressed_bytes / 1024 / 1024
+                    # 全体の読み込み量からこのテーブルの割合を計算
+                    table_ratio = rows_num / total_rows
+                    estimated_compressed_bytes = total_read_bytes * table_ratio
+                    estimated_compressed_mb = estimated_compressed_bytes / 1024 / 1024
                      
                     # 非圧縮サイズを推定
                     estimated_uncompressed_mb = estimate_uncompressed_size(estimated_compressed_mb, file_format)
