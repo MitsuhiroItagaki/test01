@@ -4300,15 +4300,16 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if duration_ms > 0:  # このノードに関連するステージを推定
                     num_tasks = max(num_tasks, stage.get('num_tasks', 0))
             
-            # スピル検出（複数メトリクス対応）
+            # スピル検出（複数メトリクス対応・包括的検索）
             spill_detected = False
             spill_bytes = 0
+            node_spill_found = False
             target_spill_metrics = [
                 "Sink - Num bytes spilled to disk due to memory pressure",
                 "Num bytes spilled to disk due to memory pressure"
             ]
             
-            # detailed_metricsから検索
+            # 1. detailed_metricsから検索
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
@@ -4318,8 +4319,36 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if ((metric_key in target_spill_metrics or 
                      metric_label in target_spill_metrics) and metric_value > 0):
                     spill_detected = True
+                    node_spill_found = True
                     spill_bytes = metric_value
                     break
+            
+            # 2. raw_metricsから検索（このノードでまだ見つからない場合）
+            if not node_spill_found:
+                raw_metrics = node.get('metrics', [])
+                for metric in raw_metrics:
+                    metric_key = metric.get('key', '')
+                    metric_label = metric.get('label', '')
+                    metric_value = metric.get('value', 0)
+                    
+                    # 複数のスピルメトリクス名をチェック
+                    if ((metric_key in target_spill_metrics or 
+                         metric_label in target_spill_metrics) and metric_value > 0):
+                        spill_detected = True
+                        node_spill_found = True
+                        spill_bytes = metric_value
+                        break
+            
+            # 3. key_metricsから検索（最後のフォールバック）
+            if not node_spill_found:
+                key_metrics = node.get('key_metrics', {})
+                for key_metric_name, key_metric_value in key_metrics.items():
+                    # 複数のスピルメトリクス名をチェック
+                    if key_metric_name in target_spill_metrics and key_metric_value > 0:
+                        spill_detected = True
+                        node_spill_found = True
+                        spill_bytes = key_metric_value
+                        break
             
             # スキュー検出
             skew_detected = False
