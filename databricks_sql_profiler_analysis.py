@@ -3227,10 +3227,136 @@ def extract_original_query_from_profiler_data(profiler_data: Dict[str, Any]) -> 
     
     return ""
 
+def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str) -> Dict[str, Any]:
+    """
+    BROADCASTヒントの適用可能性を分析
+    """
+    broadcast_analysis = {
+        "is_join_query": False,
+        "broadcast_candidates": [],
+        "recommendations": [],
+        "feasibility": "not_applicable",
+        "reasoning": []
+    }
+    
+    # クエリにJOINが含まれているかチェック
+    query_upper = original_query.upper()
+    join_types = ['JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'SEMI JOIN', 'ANTI JOIN']
+    has_join = any(join_type in query_upper for join_type in join_types)
+    
+    if not has_join:
+        broadcast_analysis["reasoning"].append("JOINクエリではないため、BROADCASTヒントは適用不可")
+        return broadcast_analysis
+    
+    broadcast_analysis["is_join_query"] = True
+    
+    # メトリクスからテーブルサイズ情報を取得
+    overall_metrics = metrics.get('overall_metrics', {})
+    node_metrics = metrics.get('node_metrics', [])
+    
+    # スキャンノードからテーブル情報を抽出
+    scan_nodes = []
+    for node in node_metrics:
+        node_name = node.get('name', '').upper()
+        if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN', 'PARQUET', 'DELTA']):
+            key_metrics = node.get('key_metrics', {})
+            rows_num = key_metrics.get('rowsNum', 0)
+            duration_ms = key_metrics.get('durationMs', 0)
+            
+            # おおよそのデータサイズを推定（行数×平均行サイズ）
+            # データ読み込み量から平均行サイズを逆算して、より現実的な推定を行う
+            total_read_bytes = overall_metrics.get('read_bytes', 0)
+            total_rows = overall_metrics.get('rows_read_count', 0)
+            
+            if total_rows > 0 and total_read_bytes > 0:
+                # 実際のデータから平均行サイズを計算
+                avg_row_size_bytes = total_read_bytes / total_rows
+                estimated_size_mb = (rows_num * avg_row_size_bytes) / 1024 / 1024  # MB単位
+            else:
+                # フォールバック: 一般的な平均行サイズを使用（256バイト）
+                estimated_size_mb = (rows_num * 256) / 1024 / 1024  # MB単位
+            
+            scan_info = {
+                "node_name": node_name,
+                "rows": rows_num,
+                "duration_ms": duration_ms,
+                "estimated_size_mb": estimated_size_mb,
+                "node_id": node.get('node_id', '')
+            }
+            scan_nodes.append(scan_info)
+    
+    # BROADCAST候補の判定
+    broadcast_threshold_mb = 200  # 200MB以下をBROADCAST候補とする
+    broadcast_max_mb = 1024      # 1GB以上は確実にBROADCAST不可
+    
+    small_tables = []
+    large_tables = []
+    
+    for scan in scan_nodes:
+        size_mb = scan["estimated_size_mb"]
+        if size_mb <= broadcast_threshold_mb and scan["rows"] > 0:
+            small_tables.append(scan)
+            broadcast_analysis["broadcast_candidates"].append({
+                "table": scan["node_name"],
+                "estimated_size_mb": size_mb,
+                "rows": scan["rows"],
+                "broadcast_feasible": True,
+                "reasoning": f"推定サイズ {size_mb:.1f}MB（<{broadcast_threshold_mb}MB）でBROADCAST可能"
+            })
+        elif size_mb > broadcast_max_mb:
+            large_tables.append(scan)
+            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: {size_mb:.1f}MB - BROADCAST不可（>{broadcast_max_mb}MB）")
+        else:
+            # 中間サイズのテーブル
+            broadcast_analysis["reasoning"].append(f"テーブル {scan['node_name']}: {size_mb:.1f}MB - BROADCAST要検討（{broadcast_threshold_mb}-{broadcast_max_mb}MB）")
+    
+    # 総データ読み込み量との整合性チェック
+    total_read_gb = overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024
+    estimated_total_mb = sum(scan["estimated_size_mb"] for scan in scan_nodes)
+    
+    if estimated_total_mb > 0:
+        size_ratio = (total_read_gb * 1024) / estimated_total_mb
+        if size_ratio > 3 or size_ratio < 0.3:
+            broadcast_analysis["reasoning"].append(f"推定サイズ({estimated_total_mb:.1f}MB)と実読み込み量({total_read_gb:.1f}GB)に乖離あり - サイズ推定に注意")
+    
+    # BROADCAST推奨事項の生成
+    if small_tables and large_tables:
+        broadcast_analysis["feasibility"] = "recommended"
+        broadcast_analysis["recommendations"] = [
+            f"小テーブル（{len(small_tables)}個）をBROADCAST対象として推奨",
+            f"大テーブル（{len(large_tables)}個）は通常のJOINを使用"
+        ]
+        for small_table in small_tables:
+            broadcast_analysis["recommendations"].append(
+                f"BROADCAST({small_table['node_name']}) - 推定{small_table['estimated_size_mb']:.1f}MB"
+            )
+    elif small_tables and not large_tables:
+        broadcast_analysis["feasibility"] = "possible"
+        broadcast_analysis["recommendations"] = [
+            f"すべてのテーブル（{len(small_tables)}個）がBROADCAST可能サイズ",
+            "最小テーブルをBROADCASTすることを推奨"
+        ]
+    elif not small_tables and large_tables:
+        broadcast_analysis["feasibility"] = "not_recommended"
+        broadcast_analysis["recommendations"] = [
+            f"すべてのテーブル（{len(large_tables)}個）がBROADCAST非推奨サイズ",
+            "Liquid ClusteringやZORDER BYでの最適化を推奨"
+        ]
+    else:
+        broadcast_analysis["feasibility"] = "insufficient_data"
+        broadcast_analysis["recommendations"] = [
+            "テーブルサイズ情報が不足しているため、手動でのサイズ確認が必要"
+        ]
+    
+    return broadcast_analysis
+
 def generate_optimized_query_with_llm(original_query: str, analysis_result: str, metrics: Dict[str, Any]) -> str:
     """
-    LLM分析結果に基づいてSQLクエリを最適化
+    LLM分析結果に基づいてSQLクエリを最適化（BROADCAST分析を含む）
     """
+    
+    # BROADCAST適用可能性の分析
+    broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query)
     
     # 最適化のためのコンテキスト情報を準備
     optimization_context = []
@@ -3248,15 +3374,15 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     if bottlenecks.get('cache_hit_ratio', 0) < 0.5:
         optimization_context.append("キャッシュ効率低下 - データアクセスパターンの最適化が必要")
     
-    # Liquid Clustering推奨情報
+    # Liquid Clustering推奨情報（LLMベース対応）
     liquid_analysis = metrics.get('liquid_clustering_analysis', {})
-    recommended_tables = liquid_analysis.get('recommended_tables', {})
+    extracted_data = liquid_analysis.get('extracted_data', {})
+    table_info = extracted_data.get('table_info', {})
     
     clustering_recommendations = []
-    for table, info in recommended_tables.items():
-        cols = info.get('clustering_columns', [])
-        if cols:
-            clustering_recommendations.append(f"テーブル {table}: {', '.join(cols)} でクラスタリング推奨")
+    if table_info:
+        for table_name in list(table_info.keys())[:3]:  # 上位3テーブル
+            clustering_recommendations.append(f"テーブル {table_name}: LLM分析による推奨カラムでクラスタリング推奨")
     
     # 最適化プロンプトの作成（簡潔版でタイムアウト回避）
     
@@ -3273,6 +3399,20 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     
     # Liquid Clustering推奨の簡潔化
     clustering_summary = "、".join(clustering_recommendations[:2]) if clustering_recommendations else "特になし"
+    
+    # BROADCAST分析結果のサマリー作成
+    broadcast_summary = []
+    if broadcast_analysis["is_join_query"]:
+        broadcast_summary.append(f"BROADCAST適用可能性: {broadcast_analysis['feasibility']}")
+        if broadcast_analysis["broadcast_candidates"]:
+            for candidate in broadcast_analysis["broadcast_candidates"][:3]:  # 上位3候補
+                broadcast_summary.append(f"- {candidate['table']}: {candidate['estimated_size_mb']:.1f}MB ({candidate['reasoning']})")
+        if broadcast_analysis["recommendations"]:
+            broadcast_summary.extend(broadcast_analysis["recommendations"][:3])
+        if broadcast_analysis["reasoning"]:
+            broadcast_summary.extend([f"注意: {reason}" for reason in broadcast_analysis["reasoning"][:2]])
+    else:
+        broadcast_summary.append("JOINクエリではないため、BROADCASTヒント適用対象外")
     
     optimization_prompt = f"""
 あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
@@ -3293,6 +3433,9 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 【特定されたボトルネック】
 {chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
 
+【BROADCAST分析結果】
+{chr(10).join(broadcast_summary)}
+
 【Liquid Clustering推奨】
 {chr(10).join(clustering_recommendations) if clustering_recommendations else "特別な推奨事項はありません"}
 
@@ -3306,6 +3449,12 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
 8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
 9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
+10. **BROADCAST分析結果を厳密に反映してください**：
+    - BROADCAST適用推奨の場合のみBROADCASTヒント（/*+ BROADCAST(table_name) */）を適用
+    - テーブルサイズが200MB以下の小テーブルのみBROADCAST対象
+    - 1GB以上の大テーブルには絶対にBROADCASTヒントを適用しない
+    - BROADCAST適用時は必ず推定サイズと根拠を説明に記載
+    - JOINクエリでない場合はBROADCASTヒントを使用しない
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
@@ -3327,8 +3476,14 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 ## 改善ポイント
 [3つの主要改善点]
 
+## BROADCAST適用根拠
+[BROADCASTヒント適用の詳細根拠]
+- 適用テーブル: [テーブル名] (推定サイズ: [XX]MB、根拠: [データ量・行数など])
+- 適用可否判定: [テーブルサイズ分析結果]
+- 期待効果: [ネットワーク転送量削減・JOIN処理高速化など]
+
 ## 期待効果  
-[実行時間・メモリ・スピル改善の見込み]
+[実行時間・メモリ・スピル改善の見込み（BROADCAST効果を含む）]
 """
 
     # 設定されたLLMプロバイダーを使用
@@ -3599,6 +3754,62 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write(f"- **Execution Time**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
             f.write(f"- **Data Read**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
             f.write(f"- **Spill**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+        
+        # BROADCAST分析結果の追加
+        try:
+            broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query)
+            if OUTPUT_LANGUAGE == 'ja':
+                f.write(f"\n\n## BROADCASTヒント分析結果\n\n")
+                f.write(f"- **JOINクエリ**: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}\n")
+                f.write(f"- **BROADCAST適用可能性**: {broadcast_analysis['feasibility']}\n")
+                f.write(f"- **BROADCAST候補数**: {len(broadcast_analysis['broadcast_candidates'])}個\n\n")
+                
+                if broadcast_analysis["broadcast_candidates"]:
+                    f.write("### BROADCAST候補テーブル\n\n")
+                    for candidate in broadcast_analysis["broadcast_candidates"]:
+                        f.write(f"- **{candidate['table']}**: {candidate['estimated_size_mb']:.1f}MB\n")
+                        f.write(f"  - 根拠: {candidate['reasoning']}\n")
+                        f.write(f"  - 行数: {candidate['rows']:,}行\n\n")
+                
+                if broadcast_analysis["recommendations"]:
+                    f.write("### 推奨事項\n\n")
+                    for rec in broadcast_analysis["recommendations"]:
+                        f.write(f"- {rec}\n")
+                    f.write("\n")
+                
+                if broadcast_analysis["reasoning"]:
+                    f.write("### 判定根拠\n\n")
+                    for reason in broadcast_analysis["reasoning"]:
+                        f.write(f"- {reason}\n")
+                    f.write("\n")
+            else:
+                f.write(f"\n\n## BROADCAST Hint Analysis\n\n")
+                f.write(f"- **JOIN Query**: {'Yes' if broadcast_analysis['is_join_query'] else 'No'}\n")
+                f.write(f"- **BROADCAST Feasibility**: {broadcast_analysis['feasibility']}\n")
+                f.write(f"- **BROADCAST Candidates**: {len(broadcast_analysis['broadcast_candidates'])}\n\n")
+                
+                if broadcast_analysis["broadcast_candidates"]:
+                    f.write("### BROADCAST Candidate Tables\n\n")
+                    for candidate in broadcast_analysis["broadcast_candidates"]:
+                        f.write(f"- **{candidate['table']}**: {candidate['estimated_size_mb']:.1f}MB\n")
+                        f.write(f"  - Reasoning: {candidate['reasoning']}\n")
+                        f.write(f"  - Rows: {candidate['rows']:,}\n\n")
+                
+                if broadcast_analysis["recommendations"]:
+                    f.write("### Recommendations\n\n")
+                    for rec in broadcast_analysis["recommendations"]:
+                        f.write(f"- {rec}\n")
+                    f.write("\n")
+                
+                if broadcast_analysis["reasoning"]:
+                    f.write("### Analysis Details\n\n")
+                    for reason in broadcast_analysis["reasoning"]:
+                        f.write(f"- {reason}\n")
+                    f.write("\n")
+                        
+        except Exception as e:
+            error_msg = f"⚠️ BROADCAST分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating BROADCAST analysis: {str(e)}\n"
+            f.write(error_msg)
         
         # 最も時間がかかっている処理TOP10の追加（多言語対応）
         f.write(f"\n\n## {get_message('top10_processes')}\n")
