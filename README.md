@@ -8,16 +8,16 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 
 ### 🔍 **高度なパフォーマンス分析**
 - SQLプロファイラーJSONファイルの自動解析
-- 時間消費TOP10プロセスの詳細分析（テーブル名表示対応）
+- 時間消費TOP10プロセスの詳細分析（カタログ.スキーマ.テーブルのフルパス表示対応）
 - スピル検出・データスキュー・並列度問題の特定
 - Photonエンジン利用状況の可視化
 
 ### 🤖 **マルチプロバイダーAI分析**
-- **Databricks Claude 3.7 Sonnet**（推奨）
-- **OpenAI GPT-4/GPT-4 Turbo**
-- **Azure OpenAI**
-- **Anthropic Claude**
-- 128K tokens対応・拡張思考モード
+- **Databricks Claude 3.7 Sonnet**（推奨・128K tokens）
+- **OpenAI GPT-4/GPT-4 Turbo**（16K tokens）
+- **Azure OpenAI**（16K tokens）
+- **Anthropic Claude**（16K tokens）
+- **思考プロセス表示機能**（thinking_enabled）で分析過程を可視化
 
 ### 🗂️ **Liquid Clustering最適化**
 - プロファイラーデータからカラム使用パターンを分析
@@ -29,29 +29,29 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 - オリジナルクエリの自動抽出
 - AI駆動によるクエリ最適化
 - 実行可能な最適化SQLの生成
-- テスト実行スクリプトの自動作成
+- **Databricks Notebook専用設計**（テスト実行方法を内包）
 
 ### 📊 **包括的レポーティング**
-- JSON・テキスト・Markdown・Pythonファイルの自動生成
+- **output_**接頭語付きファイル自動生成
 - 視覚的なダッシュボード表示
 - 詳細なボトルネック分析レポート
+- **TOP10処理時間分析**も自動保存
 - パフォーマンス改善の定量的評価
 
 ## 📁 ファイル構成
 
 ```
 📦 Databricks SQL Profiler Analysis Tool
-├── 📄 databricks_sql_profiler_analysis.py    # 🌟 メインノートブック（23セル構成）
+├── 📄 databricks_sql_profiler_analysis.py    # 🌟 メインノートブック（55セル構成）
 ├── 📄 simple0.json                           # サンプルSQLプロファイラーファイル
 ├── 📄 README.md                              # このファイル
 ├── 📁 outputs/                               # 生成ファイル（実行時作成）
-│   ├── 📄 extracted_metrics_YYYYMMDD-HHMISS.json
-│   ├── 📄 bottleneck_analysis_YYYYMMDD-HHMISS.txt
-│   ├── 📄 original_query_YYYYMMDD-HHMISS.sql
-│   ├── 📄 optimized_query_YYYYMMDD-HHMISS.sql
-│   ├── 📄 optimization_report_YYYYMMDD-HHMISS.md
-│   └── 📄 test_optimized_query_YYYYMMDD-HHMISS.py
-└── 📁 samples/                               # 追加サンプル（オプション）
+│   ├── 📄 output_extracted_metrics_YYYYMMDD-HHMISS.json
+│   ├── 📄 output_bottleneck_analysis_result_YYYYMMDD-HHMISS.txt
+│   ├── 📄 output_original_query_YYYYMMDD-HHMISS.sql
+│   ├── 📄 output_optimized_query_YYYYMMDD-HHMISS.sql
+│   └── 📄 output_optimization_report_YYYYMMDD-HHMISS.md
+└──  samples/                               # 追加サンプル（オプション）
     ├── 📄 largeplan.json
     └── 📄 nophoton.json
 ```
@@ -67,14 +67,37 @@ DatabricksのSQLプロファイラーJSONログファイルを読み込み、AI�
 ### ステップ 2: 基本設定
 
 ```python
-# 📁 分析対象ファイル設定（セル2）
+# 📁 分析対象ファイル設定（セル4）
 JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'
 
-# 🤖 LLMエンドポイント設定（セル3）
+# 🤖 LLMエンドポイント設定（セル6）
 LLM_CONFIG = {
     "provider": "databricks",  # "databricks", "openai", "azure_openai", "anthropic"
+    "thinking_enabled": True,  # 思考プロセス表示（推奨）
     "databricks": {
-        "endpoint_name": "databricks-claude-3-7-sonnet"
+        "endpoint_name": "databricks-claude-3-7-sonnet",
+        "max_tokens": 131072,  # 128K tokens
+        "temperature": 0.1
+    },
+    "openai": {
+        "api_key": "",  # OpenAI APIキー
+        "model": "gpt-4o",
+        "max_tokens": 16000,  # 16K tokens
+        "temperature": 0.1
+    },
+    "azure_openai": {
+        "api_key": "",
+        "endpoint": "",
+        "deployment_name": "",
+        "api_version": "2024-02-01",
+        "max_tokens": 16000,  # 16K tokens
+        "temperature": 0.1
+    },
+    "anthropic": {
+        "api_key": "",
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 16000,  # 16K tokens
+        "temperature": 0.1
     }
 }
 ```
@@ -82,47 +105,47 @@ LLM_CONFIG = {
 ### ステップ 3: 順次実行
 
 ```bash
-🔧 設定・準備セクション     → セル2〜10を実行
-🚀 メイン処理実行セクション  → セル11〜16を実行
-🔧 SQL最適化機能セクション   → セル17〜22を実行（オプション）
-📚 参考・応用セクション      → セル23参照
+🔧 設定・準備セクション     → セル3〜17を実行
+🚀 メイン処理実行セクション  → セル18〜40を実行
+🔧 SQL最適化機能セクション   → セル43〜53を実行（オプション）
+📚 参考・応用セクション      → セル55参照
 ```
 
 ## 📋 セル構成詳細
 
-### 🔧 設定・準備セクション（セル2-10）
+### 🔧 設定・準備セクション（セル3-17）
 | セル | 機能 | 説明 |
 |-----|-----|-----|
-| 2 | 📁 分析対象ファイル設定 | JSONファイルパスの指定 |
-| 3 | 🤖 LLMエンドポイント設定 | AI分析プロバイダーの選択 |
-| 4 | 📂 ファイル読み込み関数 | DBFS/FileStore/ローカル対応 |
-| 5 | 📊 メトリクス抽出関数 | パフォーマンス指標の抽出 |
-| 6 | 🏷️ ノード名解析関数 | 意味のあるノード名への変換 |
-| 7 | 🎯 ボトルネック計算関数 | 指標計算とスピル検出 |
-| 8 | 🧬 Liquid Clustering関数 | クラスタリング分析 |
-| 9 | 🤖 LLM分析関数 | AI分析用プロンプト生成 |
-| 10 | 🔌 LLMプロバイダー関数 | 各AIサービス接続 |
+| 4 | 📁 分析対象ファイル設定 | JSONファイルパスの指定 |
+| 6 | 🤖 LLMエンドポイント設定 | AI分析プロバイダーの選択（thinking機能含む） |
+| 8 | 📂 ファイル読み込み関数 | DBFS/FileStore/ローカル対応 |
+| 9 | 📊 メトリクス抽出関数 | パフォーマンス指標の抽出 |
+| 10 | 🏷️ ノード名解析関数 | 意味のあるノード名への変換（フルパス対応） |
+| 11 | 🎯 ボトルネック計算関数 | 指標計算とスピル検出 |
+| 12 | 🧬 Liquid Clustering関数 | クラスタリング分析 |
+| 13 | 🤖 LLM分析関数 | AI分析用プロンプト生成 |
+| 14-17 | 🔌 LLMプロバイダー関数 | 各AIサービス接続 |
 
-### 🚀 メイン処理実行セクション（セル11-16）
+### 🚀 メイン処理実行セクション（セル18-40）
 | セル | 機能 | 説明 |
 |-----|-----|-----|
-| 11 | 🚀 ファイル読み込み実行 | JSONデータの読み込み |
-| 12 | 📊 メトリクス抽出 | 性能指標の抽出と表示 |
-| 13 | 🔍 ボトルネック詳細分析 | TOP10時間消費プロセス |
-| 14 | 💾 メトリクス保存 | JSONファイル出力 |
-| 15 | 🗂️ Liquid Clustering分析 | クラスタリング推奨 |
-| 16 | 📋 LLM分析準備 | AI分析の実行準備 |
-| 17 | 🎯 AI分析結果表示 | ボトルネック分析結果 |
+| 23 | 🚀 ファイル読み込み実行 | JSONデータの読み込み |
+| 26 | 📊 メトリクス抽出 | 性能指標の抽出と表示 |
+| 33 | 🔍 ボトルネック詳細分析 | TOP10時間消費プロセス（フルパス表示） |
+| 35 | 💾 メトリクス保存 | output_extracted_metrics_*.json出力 |
+| 37 | 🗂️ Liquid Clustering分析 | クラスタリング推奨 |
+| 39 | 📋 LLM分析準備 | AI分析の実行準備 |
+| 40 | 🎯 AI分析結果表示 | ボトルネック分析結果（思考プロセス表示対応） |
 
-### 🔧 SQL最適化機能セクション（セル17-22）
+### 🔧 SQL最適化機能セクション（セル43-53）
 | セル | 機能 | 説明 |
 |-----|-----|-----|
-| 17 | 🔧 最適化関数定義 | SQL最適化関数の定義 |
-| 18 | 🚀 クエリ抽出 | オリジナルクエリの抽出 |
-| 19 | 🤖 LLM最適化実行 | AI駆動クエリ最適化 |
-| 20 | 💾 結果保存 | 最適化ファイル生成 |
-| 21 | 🧪 テスト準備 | 実行ガイドとスクリプト |
-| 22 | 🏁 完了サマリー | 全処理の完了確認 |
+| 43 | 🔧 最適化関数定義 | SQL最適化関数の定義（thinking対応） |
+| 46 | 🚀 クエリ抽出 | オリジナルクエリの抽出 |
+| 47 | 🤖 LLM最適化実行 | AI駆動クエリ最適化（思考プロセス表示） |
+| 49 | 💾 結果保存 | output_*ファイル生成（TOP10分析含む） |
+| 50 | 🧪 実行ガイド | Databricks Notebook実行方法 |
+| 53 | 🏁 完了サマリー | 全処理の完了確認（動的プロバイダー表示） |
 
 ## 🔧 セットアップ詳細
 
@@ -147,56 +170,73 @@ databricks serving-endpoints create \
 #### 他のLLMプロバイダー
 
 ```python
-# OpenAI設定例
+# OpenAI設定例（16K tokens）
 LLM_CONFIG = {
     "provider": "openai",
+    "thinking_enabled": False,  # OpenAIでは標準的なレスポンス
     "openai": {
         "api_key": "sk-...",  # または環境変数OPENAI_API_KEY
         "model": "gpt-4o",
-        "max_tokens": 2000
+        "max_tokens": 16000  # 16K tokens設定
     }
 }
 
-# Azure OpenAI設定例  
+# Azure OpenAI設定例（16K tokens）
 LLM_CONFIG = {
     "provider": "azure_openai",
+    "thinking_enabled": False,
     "azure_openai": {
         "api_key": "your-azure-key",
         "endpoint": "https://your-resource.openai.azure.com/",
         "deployment_name": "gpt-4",
-        "api_version": "2024-02-01"
+        "api_version": "2024-02-01",
+        "max_tokens": 16000  # 16K tokens設定
     }
 }
 
-# Anthropic設定例
+# Anthropic設定例（16K tokens）
 LLM_CONFIG = {
     "provider": "anthropic", 
+    "thinking_enabled": True,  # Anthropicでもthinking対応
     "anthropic": {
         "api_key": "sk-ant-...",  # または環境変数ANTHROPIC_API_KEY
-        "model": "claude-3-5-sonnet-20241022"
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 16000  # 16K tokens設定
     }
 }
 ```
 
-### 2. SQLプロファイラーファイルの取得
+### 2. 思考プロセス表示機能（thinking_enabled）
+
+```python
+# thinking_enabled: True の場合
+LLM_CONFIG = {
+    "provider": "databricks",
+    "thinking_enabled": True,  # 思考プロセスを表示
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet"
+    }
+}
+
+# 出力例：
+## 🤔 思考過程
+この問題について段階的に分析してみましょう...
+まず、実行時間の分布を確認し...
+次に、スピルの原因を特定し...
+============================================================
+
+## 📄 回答内容
+分析結果として、主要なボトルネックは...
+推奨される改善策は...
+```
+
+### 3. SQLプロファイラーファイルの取得
 
 #### Databricks SQLエディタから取得
 
 1. **SQLクエリを実行**
 2. **Query History** → 対象クエリを選択
 3. **Query Profile** タブ → **Download Profile JSON**
-
-#### プログラマティック取得
-
-```sql
--- システムテーブルから取得
-SELECT query_id, query_text, query_start_time, total_time_ms
-FROM system.query.history 
-WHERE query_start_time >= current_timestamp() - INTERVAL 1 DAY
-  AND total_time_ms > 30000  -- 30秒以上のクエリ
-ORDER BY total_time_ms DESC
-LIMIT 10;
-```
 
 #### ファイルアップロード方法
 
@@ -207,13 +247,13 @@ LIMIT 10;
 # 方法2: dbutils
 dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
 
-# 方法3: Databricks CLI
-# databricks fs cp profiler.json dbfs:/FileStore/profiler.json
+# 方法3: Volumes（推奨）
+# Unity Catalog Volumes内にアップロード
 ```
 
-## 📊 出力ファイル詳細
+## 📊 出力ファイル詳細（output_接頭語付き）
 
-### 📄 extracted_metrics_YYYYMMDD-HHMISS.json
+### 📄 output_extracted_metrics_YYYYMMDD-HHMISS.json
 
 ```json
 {
@@ -242,7 +282,7 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
   },
   "liquid_clustering_analysis": {
     "recommended_tables": {
-      "customer": {
+      "catalog.schema.customer": {
         "clustering_columns": ["customer_id", "region"],
         "scan_performance": {
           "rows_scanned": 1000000,
@@ -255,7 +295,7 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
 }
 ```
 
-### 📄 bottleneck_analysis_YYYYMMDD-HHMISS.txt
+### 📄 output_bottleneck_analysis_result_YYYYMMDD-HHMISS.txt
 
 ```text
 🔍 Databricks SQL プロファイラー分析結果
@@ -266,7 +306,15 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
 💾 読み込みデータ: 115.4 GB
 📈 出力行数: 2,753 行
 
-🚨 【特定されたボトルネック】
+## 🤔 思考過程
+このクエリの分析を始めます...
+実行時間84秒は一般的なクエリとしては長いため、ボトルネックを特定する必要があります...
+スピルが1GBも発生しているのが主要な問題のようです...
+============================================================
+
+## � 回答内容
+
+�🚨 【特定されたボトルネック】
 
 1. 🔥 **大量スピル発生 (HIGH PRIORITY)**
    - スピル量: 1.0 GB
@@ -278,10 +326,22 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
    - 最大シャッフル時間: 15,234 ms
    - 影響: 全体実行時間の18%
 
-3. 📊 **データ選択性の問題 (MEDIUM PRIORITY)**
-   - 選択性: 0.0022% (非常に低い)
-   - 読み込み115.4GB → 出力2,753行
-   - 改善余地: フィルター条件の最適化
+## � 最も時間がかかっている処理TOP10
+=================================================================================
+�📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー
+
+ 1. 🔴💚🔥💿✅ [CRITICAL] Data Source Scan (catalog.schema.large_table)
+    ⏱️  実行時間:   45,234 ms ( 45.2 sec) - 全体の 53.7%
+    📊 処理行数: 12,345,678 行
+    💾 ピークメモリ: 2048.0 MB
+    🔧 並列度: 128 タスク | 💿 スピル: あり | ⚖️ スキュー: なし
+
+ 2. 🟠⚠️🔥✅⚖️ [HIGH    ] HashAggregate
+    ⏱️  実行時間:   18,456 ms ( 18.5 sec) - 全体の 21.9%
+    📊 処理行数:  1,234,567 行
+    💾 ピークメモリ: 1024.0 MB
+    🔧 並列度:  64 タスク | 💿 スピル: なし | ⚖️ スキュー: あり
+...
 
 🚀 【推奨改善策】
 
@@ -290,13 +350,8 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
    - クラスターメモリ増強 (32GB → 64GB推奨)
 
 2. **Liquid Clusteringの適用**
-   - customer テーブル: customer_id, region でクラスタリング
+   - catalog.schema.customer テーブル: customer_id, region でクラスタリング
    - 期待効果: スキャン時間50-70%削減
-
-3. **クエリ構造の最適化**
-   - WHERE句をJOINより前に配置
-   - 不要なカラムの除外
-   - パーティション剪定の活用
 
 📈 【期待される改善効果】
 - 実行時間: 84.2秒 → 35-45秒 (約50%削減)
@@ -304,18 +359,33 @@ dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
 - スピル解消: 100%削減見込み
 ```
 
-### 📄 optimized_query_YYYYMMDD-HHMISS.sql
+### 📄 output_optimization_report_YYYYMMDD-HHMISS.md
+
+```markdown
+# SQL最適化レポート
+
+**クエリID**: 01f0565c-48f6-1283-a782-14ed6494eee0
+**最適化日時**: 2024-01-15 14:30:22
+**オリジナルファイル**: output_original_query_20240115-143022.sql
+**最適化ファイル**: output_optimized_query_20240115-143022.sql
+
+## 最適化分析結果
+
+## 🤔 思考過程
+このクエリの最適化を検討します...
+まず、データソーススキャンが最も時間を消費していることがわかります...
+スピルを解消するためにはメモリ効率的なクエリ構造が必要です...
+============================================================
+
+## 📄 回答内容
+
+## 🚀 最適化されたSQLクエリ
 
 ```sql
--- 最適化されたSQLクエリ
--- 元クエリID: 01f0565c-48f6-1283-a782-14ed6494eee0
--- 最適化日時: 2024-01-15 14:30:22
--- ベースクエリ: original_query_20240115-143022.sql
-
 -- PHOTONエンジン最適化とLiquid Clustering対応
 WITH customer_filtered AS (
   SELECT customer_id, region, signup_date
-  FROM customer 
+  FROM catalog.schema.customer 
   WHERE region IN ('US', 'EU')  -- 早期フィルタリング
     AND signup_date >= '2023-01-01'
 ),
@@ -324,7 +394,7 @@ orders_summary AS (
     customer_id,
     SUM(amount) as total_amount,
     COUNT(*) as order_count
-  FROM orders 
+  FROM catalog.schema.orders 
   WHERE order_date >= '2023-01-01'  -- Liquid Clustering活用
   GROUP BY customer_id
 )
@@ -339,359 +409,184 @@ ORDER BY total_amount DESC
 LIMIT 100;
 ```
 
+## � 最適化のポイント
+
+1. **早期フィルタリング**: WHERE句を各CTEに配置してデータ量を削減
+2. **Liquid Clustering活用**: パーティション剪定による効率的スキャン
+3. **Broadcast JOIN**: 小さなテーブルをブロードキャストして性能向上
+
+## 📈 期待される効果
+
+- **実行時間**: 84.2秒 → 35-45秒 (改善率: 50%)
+- **メモリ使用量**: スピル解消により30%削減
+- **スピル削減**: 1GB → 0GB (100%削減)
+
+## パフォーマンスメトリクス参考情報
+
+- **実行時間**: 84,224 ms
+- **読み込みデータ**: 115.40 GB
+- **スピル**: 1.00 GB
+
+## � 最も時間がかかっている処理TOP10
+[TOP10の詳細分析が含まれます...]
+```
+
 ## 🔍 高度な機能
 
-### 📊 カスタム分析プロンプト
+### 📊 思考プロセス表示（thinking_enabled）
 
 ```python
-# analyze_bottlenecks_with_llm関数をカスタマイズ
-custom_prompt = f"""
-あなたは金融業界のSQLパフォーマンス専門家です。
-以下の観点で分析してください：
-- リアルタイム取引処理への影響
-- 規制要件への適合性
-- 災害復旧時の性能
-- コンプライアンス監査への対応
-
-{standard_analysis_content}
-
-業界特有の推奨事項:
-- SOX法対応のためのパフォーマンス要件
-- Basel III規制下でのリスク計算最適化
-- GDPR対応のデータアクセス最適化
-"""
-```
-
-### 🔄 一括分析・比較
-
-```python
-# 複数クエリの性能比較
-profiler_files = [
-    '/path/to/query1_profile.json',
-    '/path/to/query2_profile.json', 
-    '/path/to/query3_profile.json'
-]
-
-comparison_results = []
-for file_path in profiler_files:
-    profiler_data = load_profiler_json(file_path)
-    metrics = extract_performance_metrics(profiler_data)
-    comparison_results.append({
-        'query_id': metrics['query_info']['query_id'],
-        'execution_time': metrics['overall_metrics']['total_time_ms'],
-        'data_processed_gb': metrics['overall_metrics']['read_bytes'] / 1024**3,
-        'spill_detected': metrics['bottleneck_indicators']['has_spill'],
-        'cache_efficiency': metrics['bottleneck_indicators']['cache_hit_ratio']
-    })
-
-# DataFrame化して比較
-comparison_df = spark.createDataFrame(comparison_results)
-comparison_df.show()
-```
-
-### 📈 自動監視・アラート
-
-```python
-# パフォーマンス劣化の自動検出
-def monitor_query_performance():
-    """定期実行でのパフォーマンス監視"""
-    recent_queries = spark.sql("""
-        SELECT query_id, query_text, total_time_ms, read_bytes
-        FROM system.query.history 
-        WHERE query_start_time >= current_timestamp() - INTERVAL 1 HOUR
-        AND total_time_ms > 60000  -- 1分以上のクエリ
-    """)
-    
-    for row in recent_queries.collect():
-        # 閾値チェック
-        if row.total_time_ms > 300000:  # 5分以上
-            send_performance_alert(row.query_id, "Long execution time detected")
-        
-        if row.read_bytes > 100 * 1024**3:  # 100GB以上
-            send_performance_alert(row.query_id, "Large data scan detected")
-
-# Slack/Teams通知
-def send_performance_alert(query_id, message):
-    webhook_url = "YOUR_SLACK_WEBHOOK_URL"
-    payload = {
-        "text": f"🚨 Performance Alert: {message}\nQuery ID: {query_id}"
+# thinking_enabled: True の詳細設定
+LLM_CONFIG = {
+    "provider": "databricks",
+    "thinking_enabled": True,  # 思考プロセス表示を有効化
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet",
+        "max_tokens": 131072,  # 128K tokens（思考プロセス含む）
+        "temperature": 0.1
     }
-    requests.post(webhook_url, json=payload)
+}
+
+# 出力の構造化
+## 🤔 思考過程
+- AI分析プロセスの可視化
+- 段階的推論の表示
+- 仮説検証過程の詳細
+
+## 📋 要約
+- 主要な発見事項
+- 重要なポイントの整理
+
+## 📄 回答内容  
+- 最終的な分析結果
+- 具体的な推奨事項
+```
+
+### � Databricks Notebook専用実行
+
+```python
+# %sql マジックコマンドでの実行
+optimized_sql = open('output_optimized_query_20240115-143022.sql').read()
+
+# Spark SQLでの実行
+df = spark.sql(optimized_sql)
+df.show()
+
+# パフォーマンス測定
+import time
+start_time = time.time()
+result_count = df.count()
+execution_time = time.time() - start_time
+print(f'実行時間: {execution_time:.2f} 秒, 行数: {result_count:,}')
+
+# クエリプランの確認
+df.explain(True)
 ```
 
 ## 🛠️ トラブルシューティング
 
 ### ❌ よくあるエラーと解決方法
 
-#### 1. LLMエンドポイントエラー
+#### 1. thinking_enabled関連エラー
 
 ```bash
 # エラー例
-APIエラー: ステータスコード 404
-HTTP 404: Model serving endpoint 'databricks-claude-3-7-sonnet' not found
+AttributeError: 'list' object has no attribute 'startswith'
+TypeError: write() argument must be str, not list
 
 # 解決方法
-1. エンドポイント存在確認:
-   databricks serving-endpoints list
-
-2. エンドポイント状態確認: 
-   databricks serving-endpoints get databricks-claude-3-7-sonnet
-
-3. 権限確認:
-   - Model Servingへのアクセス権限
-   - Personal Access Tokenの有効性
+✅ 自動対応済み: format_thinking_response()関数で適切に処理
+- リスト形式のレスポンスを人間に読みやすい形式に変換
+- 改行コード(\n)を実際の改行に変換
+- thinking/summary_text/textを適切にセクション分け
 ```
 
-#### 2. メモリ不足エラー
+#### 2. LLMプロバイダー設定エラー
 
 ```python
 # エラー例  
-OutOfMemoryError: Java heap space
+動的プロバイダー表示でのKeyError
 
 # 解決方法
-# 1. クラスターメモリ増強
-spark.conf.set("spark.driver.memory", "16g")
-spark.conf.set("spark.executor.memory", "32g")
+✅ 動的表示機能: 設定されたプロバイダーに応じて自動表示
+# Databricks設定時
+"✅ Databricks (databricks-claude-3-7-sonnet)によるボトルネック分析完了"
 
-# 2. 大きなJSONファイルの分割処理
-def process_large_json(file_path, chunk_size=1000000):
-    """大きなJSONファイルの分割処理"""
-    with open(file_path, 'r') as f:
-        # ストリーミング処理で部分的に読み込み
-        pass
+# OpenAI設定時  
+"✅ OpenAI (gpt-4o)によるボトルネック分析完了"
 
-# 3. 不要なデータのフィルタリング
-def extract_essential_metrics_only(profiler_data):
-    """必要最小限のメトリクスのみ抽出"""
-    essential_data = {
-        'query': profiler_data.get('query', {}),
-        'graphs': profiler_data.get('graphs', [])[:1]  # 最初のグラフのみ
+# エラー時のフォールバック
+"✅ LLMによるボトルネック分析完了"
+```
+
+#### 3. ファイル出力の問題
+
+```python
+# 問題: 出力ファイルの識別が困難
+# 解決: output_接頭語の統一
+
+生成されるファイル:
+✅ output_extracted_metrics_20240115-143022.json
+✅ output_bottleneck_analysis_result_20240115-143022.txt  
+✅ output_original_query_20240115-143022.sql
+✅ output_optimized_query_20240115-143022.sql
+✅ output_optimization_report_20240115-143022.md
+
+# TOP10分析も自動でレポートに含まれます
+```
+
+### � 最適化のベストプラクティス
+
+#### 1. thinking_enabled使用時
+
+```python
+# 本格的な分析にはthinking_enabledを推奨
+LLM_CONFIG = {
+    "provider": "databricks",
+    "thinking_enabled": True,  # 詳細な分析プロセスを表示
+    "databricks": {
+        "endpoint_name": "databricks-claude-3-7-sonnet",
+        "max_tokens": 131072  # 128K tokens（思考プロセス込み）
     }
-    return essential_data
+}
+
+# 高速実行が必要な場合
+LLM_CONFIG = {
+    "provider": "databricks", 
+    "thinking_enabled": False,  # 結果のみ表示（高速）
+    "databricks": {
+        "max_tokens": 131072
+    }
+}
 ```
 
-#### 3. ファイルアクセスエラー
+#### 2. プロバイダー選択の指針
 
 ```python
-# エラー例
-FileNotFoundError: [Errno 2] No such file or directory
-
-# 解決方法とデバッグ
-# 1. ファイル存在確認
-def debug_file_access(file_path):
-    """ファイルアクセスのデバッグ"""
-    try:
-        # DBFS確認
-        if file_path.startswith('/dbfs/') or file_path.startswith('dbfs:/'):
-            dbfs_files = dbutils.fs.ls(file_path.replace('/dbfs', '').replace('dbfs:', ''))
-            print(f"DBFS files found: {len(dbfs_files)}")
-        
-        # ローカル確認
-        import os
-        if os.path.exists(file_path):
-            size = os.path.getsize(file_path)
-            print(f"Local file found, size: {size} bytes")
-        else:
-            print(f"File not found: {file_path}")
-            
-    except Exception as e:
-        print(f"Debug error: {e}")
-
-# 使用例
-debug_file_access('/dbfs/FileStore/shared_uploads/user/profiler.json')
+# 用途別推奨プロバイダー
+推奨設定:
+🥇 Databricks: 128K tokens、thinking対応、Unity Catalog統合
+🥈 Anthropic: 16K tokens、thinking対応、高品質分析  
+🥉 OpenAI: 16K tokens、安定性重視
+🥉 Azure OpenAI: 16K tokens、企業利用向け
 ```
 
-### 🔧 パフォーマンス最適化
+## � 今後の機能拡張
 
-```python
-# 大規模データ処理の最適化
-def optimize_large_scale_analysis():
-    """大規模データ分析の最適化設定"""
-    
-    # Spark設定の最適化
-    spark.conf.set("spark.sql.adaptive.enabled", "true")
-    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true") 
-    spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-    spark.conf.set("spark.sql.adaptive.localShuffleReader.enabled", "true")
-    
-    # メモリ設定
-    spark.conf.set("spark.driver.maxResultSize", "8g")
-    spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
-    
-    # 並列処理の最適化
-    num_cores = spark.sparkContext.defaultParallelism
-    optimal_partitions = num_cores * 2
-    spark.conf.set("spark.sql.shuffle.partitions", str(optimal_partitions))
-    
-    print(f"✅ 最適化設定完了: {num_cores} cores, {optimal_partitions} partitions")
+### � 計画中の機能
 
-# 実行前に最適化設定を適用
-optimize_large_scale_analysis()
-```
-
-## 📚 アドバンス活用
-
-### 🎯 業界特化カスタマイズ
-
-```python
-# 金融業界向けカスタマイズ例
-class FinancialSQLAnalyzer:
-    def __init__(self):
-        self.regulatory_keywords = ['risk', 'basel', 'var', 'stress_test']
-        self.performance_thresholds = {
-            'trading_queries': 1000,  # 1秒以内
-            'risk_calculations': 30000,  # 30秒以内
-            'reporting_queries': 300000  # 5分以内
-        }
-    
-    def analyze_regulatory_compliance(self, metrics):
-        """規制要件への適合性分析"""
-        query_text = metrics['query_info']['query_text'].lower()
-        execution_time = metrics['overall_metrics']['total_time_ms']
-        
-        # クエリタイプの判定
-        query_type = 'general'
-        for keyword in self.regulatory_keywords:
-            if keyword in query_text:
-                if keyword in ['risk', 'var']:
-                    query_type = 'risk_calculations'
-                elif keyword == 'stress_test':
-                    query_type = 'trading_queries'
-                break
-        
-        # 性能要件チェック
-        threshold = self.performance_thresholds.get(query_type, 60000)
-        compliance_status = "COMPLIANT" if execution_time <= threshold else "NON_COMPLIANT"
-        
-        return {
-            'query_type': query_type,
-            'compliance_status': compliance_status,
-            'threshold_ms': threshold,
-            'actual_ms': execution_time,
-            'deviation_pct': ((execution_time - threshold) / threshold) * 100
-        }
-
-# 使用例
-financial_analyzer = FinancialSQLAnalyzer()
-compliance_result = financial_analyzer.analyze_regulatory_compliance(extracted_metrics)
-print(f"Compliance Status: {compliance_result['compliance_status']}")
-```
-
-### 🔄 CI/CD統合
-
-```yaml
-# .github/workflows/sql-performance-check.yml
-name: SQL Performance Analysis
-
-on:
-  pull_request:
-    paths:
-      - 'sql/**'
-      - 'queries/**'
-
-jobs:
-  performance-analysis:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Databricks CLI
-        run: |
-          pip install databricks-cli
-          echo "${{ secrets.DATABRICKS_TOKEN }}" | databricks configure --token
-          
-      - name: Run SQL Performance Analysis
-        run: |
-          # 変更されたSQLファイルに対してプロファイル実行
-          for sql_file in $(git diff --name-only ${{ github.event.before }} HEAD | grep '\.sql$'); do
-            echo "Analyzing $sql_file"
-            
-            # SQLを実行してプロファイル取得
-            databricks sql-exec --file $sql_file --profile-output profile_$sql_file.json
-            
-            # 分析ツール実行
-            python sql_profiler_analysis.py --input profile_$sql_file.json --output analysis_$sql_file.txt
-            
-            # 性能劣化チェック
-            if [ $(grep "CRITICAL" analysis_$sql_file.txt | wc -l) -gt 0 ]; then
-              echo "❌ Performance issues detected in $sql_file"
-              exit 1
-            fi
-          done
-          
-      - name: Comment PR
-        uses: actions/github-script@v6
-        if: failure()
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '🚨 SQL performance issues detected. Please review the analysis results.'
-            })
-```
-
-## 📄 ライセンス・免責事項
-
-### 📜 利用条件
-
-- **用途**: 教育・研究・内部分析目的での使用を想定
-- **プロダクション環境**: 事前の十分なテストと検証が必要
-- **データプライバシー**: 機密性の高いクエリログの取り扱いに注意
-- **コスト管理**: LLM API使用料とコンピュートリソース利用料に注意
-
-### ⚠️ 免責事項
-
-- 本ツールの分析結果は参考情報であり、実際のパフォーマンス改善を保証するものではありません
-- AI生成の最適化SQLは本番環境での実行前に必ず検証してください
-- 大量データや複雑なクエリの分析には実行時間とコストが増大する可能性があります
-- Databricks Claude 3.7 Sonnetの利用には適切なライセンスと権限が必要です
-
-## 🤝 サポート・コミュニティ
-
-### 📞 技術サポート
-
-**問題報告時の情報:**
-```
-1. 環境情報
-   - Databricks Runtime version: __________
-   - Cluster configuration: _______________
-   - Python version: _____________________
-
-2. エラー詳細
-   - エラーメッセージ: ___________________
-   - 発生セル番号: _______________________
-   - スタックトレース: __________________
-
-3. 使用状況
-   - JSONファイルサイズ: ________________
-   - LLMプロバイダー: ___________________
-   - カスタマイズ内容: __________________
-```
-
-### 🚀 機能リクエスト・改善提案
-
-**歓迎する貢献:**
-- 新しいLLMプロバイダーの対応
-- 追加の分析メトリクス
-- 業界特化の分析テンプレート
-- 可視化機能の強化
-- パフォーマンス最適化
-
-### 📈 ロードマップ
-
-**近日実装予定:**
-- 🔄 リアルタイム分析機能
-- 📊 Databricks SQLダッシュボード統合
-- 🤖 自動SQL最適化の精度向上
-- 🎯 A/Bテスト機能
-- 📱 モバイル対応レポート
+- **リアルタイム監視**: クエリ実行時の自動分析
+- **比較分析**: 複数クエリの性能比較機能
+- **自動チューニング**: 推奨設定の自動適用
+- **ダッシュボード**: Grafana/Tableau連携
+- **アラート**: 性能劣化の自動検知・通知
 
 ---
 
-**🎉 このツールを使用して、SQLパフォーマンス改善の旅を始めましょう！**
+## 📞 サポート・コミュニティ
 
-📧 フィードバック・質問: [GitHub Issues](https://github.com/your-repo/databricks-sql-profiler-analysis/issues)  
-📖 詳細ドキュメント: [Wiki](https://github.com/your-repo/databricks-sql-profiler-analysis/wiki)  
-💬 コミュニティ: [Discussions](https://github.com/your-repo/databricks-sql-profiler-analysis/discussions)
+- **GitHub Issues**: バグレポート・機能要望
+- **Databricks Community**: 使用方法・ベストプラクティス
+- **技術ブログ**: 詳細な使用例・カスタマイズ方法
+
+**🎯 目標**: すべてのDatabricksユーザーが効率的なSQLパフォーマンス分析を実現すること
