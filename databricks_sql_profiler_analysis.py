@@ -2656,7 +2656,12 @@ if sorted_nodes:
         skew_details = []
         
         # ノードのmetricsから統計情報を取得
+        # 注意: node.get('metrics')は配列を返すことがあるため、辞書型チェックが必要
         node_metrics = node.get('metrics', {})
+        
+        # metrics が配列の場合は空の辞書に置き換え（統計データは詳細metricsから取得）
+        if isinstance(node_metrics, list):
+            node_metrics = {}
         
         # 1. taskDurationによるスキュー検出
         task_duration_stats = node_metrics.get('taskDuration', {})
@@ -2707,7 +2712,11 @@ if sorted_nodes:
         # 3. 他の統計メトリクスもチェック（拡張対応）
         other_metrics_to_check = ['shuffleWriteBytes', 'inputBytes', 'outputBytes']
         for metric_name in other_metrics_to_check:
-            metric_stats = node_metrics.get(metric_name, {})
+            # node_metricsが辞書型の場合のみメトリクス取得
+            if isinstance(node_metrics, dict):
+                metric_stats = node_metrics.get(metric_name, {})
+            else:
+                metric_stats = {}
             if isinstance(metric_stats, dict):
                 max_val = metric_stats.get('max', 0)
                 median_val = metric_stats.get('median', 0)
@@ -2884,8 +2893,11 @@ if sorted_nodes:
             if os.environ.get('DEBUG_SKEW_ANALYSIS', '').lower() in ['true', '1', 'yes']:
                 debug_info = []
                 
-                # taskDurationの統計チェック
-                task_duration_stats = node_metrics.get('taskDuration', {})
+                # taskDurationの統計チェック（node_metricsが辞書型の場合のみ）
+                if isinstance(node_metrics, dict):
+                    task_duration_stats = node_metrics.get('taskDuration', {})
+                else:
+                    task_duration_stats = {}
                 if isinstance(task_duration_stats, dict):
                     max_duration = task_duration_stats.get('max', 0)
                     median_duration = task_duration_stats.get('median', 0)
@@ -2895,8 +2907,11 @@ if sorted_nodes:
                     else:
                         debug_info.append("タスク実行時間統計: データなし")
                 
-                # shuffleReadBytesの統計チェック
-                shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
+                # shuffleReadBytesの統計チェック（node_metricsが辞書型の場合のみ）
+                if isinstance(node_metrics, dict):
+                    shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
+                else:
+                    shuffle_read_stats = {}
                 if isinstance(shuffle_read_stats, dict):
                     max_shuffle = shuffle_read_stats.get('max', 0)
                     median_shuffle = shuffle_read_stats.get('median', 0)
@@ -2906,8 +2921,8 @@ if sorted_nodes:
                     else:
                         debug_info.append("シャッフル読み込み統計: データなし")
                 
-                # 利用可能なメトリクス一覧
-                available_metrics = list(node_metrics.keys())
+                # 利用可能なメトリクス一覧（node_metricsが辞書型の場合のみ）
+                available_metrics = list(node_metrics.keys()) if isinstance(node_metrics, dict) else []
                 debug_info.append(f"利用可能な統計メトリクス: {', '.join(available_metrics) if available_metrics else 'なし'}")
                 
                 if debug_info:
