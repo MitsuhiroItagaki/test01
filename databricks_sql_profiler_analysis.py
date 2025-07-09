@@ -1776,19 +1776,28 @@ print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
 def format_thinking_response(response) -> str:
     """
     thinking_enabled: Trueの場合のレスポンスを人間に読みやすい形式に変換
-    思考過程は除外し、最終的な結論のみを表示
+    思考過程（thinking）とシグネチャ（signature）等の不要な情報は除外し、最終的な結論のみを表示
     """
     if not isinstance(response, list):
         # リストでない場合はそのまま文字列として返す
         return str(response).replace('\\n', '\n')
     
+    # 除外すべきキーのリスト（拡張可能）
+    excluded_keys = {
+        'thinking',     # 思考過程
+        'signature',    # シグネチャ情報
+        'metadata',     # メタデータ
+        'id',           # ID情報
+        'request_id',   # リクエストID
+        'timestamp',    # タイムスタンプ
+        'uuid'          # UUID
+    }
+    
     formatted_parts = []
     
     for item in response:
         if isinstance(item, dict):
-            # 思考過程（thinking）は除外し、結論部分のみを表示
-            
-            # 優先順位: text > summary_text > その他
+            # 優先順位: text > summary_text > その他（除外キー以外）
             if 'text' in item and item['text']:
                 main_content = str(item['text']).replace('\\n', '\n')
                 formatted_parts.append(main_content)
@@ -1796,9 +1805,9 @@ def format_thinking_response(response) -> str:
                 summary_content = str(item['summary_text']).replace('\\n', '\n')
                 formatted_parts.append(summary_content)
             else:
-                # その他のキーも処理（thinking以外）
+                # その他のキーも処理（除外キー以外）
                 for key, value in item.items():
-                    if key not in ['thinking'] and value:
+                    if key not in excluded_keys and value:
                         content = str(value).replace('\\n', '\n')
                         formatted_parts.append(content)
         else:
@@ -1811,19 +1820,20 @@ def format_thinking_response(response) -> str:
 def extract_main_content_from_thinking_response(response) -> str:
     """
     thinking形式のレスポンスから主要コンテンツ（textまたはsummary_text）のみを抽出
+    thinking、signature等の不要な情報は除外
     """
     if not isinstance(response, list):
         return str(response).replace('\\n', '\n')
     
     for item in response:
         if isinstance(item, dict):
-            # 優先順位: text > summary_text > その他
+            # 優先順位: text > summary_text > その他（thinking、signature以外）
             if 'text' in item and item['text']:
                 return str(item['text']).replace('\\n', '\n')
             elif 'summary_text' in item and item['summary_text']:
                 return str(item['summary_text']).replace('\\n', '\n')
     
-    # 主要コンテンツが見つからない場合は全体をフォーマット
+    # 主要コンテンツが見つからない場合は全体をフォーマット（thinking、signature除外済み）
     return format_thinking_response(response)
 
 def convert_sets_to_lists(obj):

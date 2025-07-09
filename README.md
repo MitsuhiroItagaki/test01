@@ -483,7 +483,7 @@ TypeError: write() argument must be str, not list
 ✅ 自動対応済み: format_thinking_response()関数で適切に処理
 - リスト形式のレスポンスを人間に読みやすい形式に変換
 - 改行コード(\n)を実際の改行に変換
-- 思考過程は除外し、結論のみを表示
+- 思考過程（thinking）、シグネチャ（signature）等の不要な情報は除外し、結論のみを表示
 ```
 
 #### 2. LLMプロバイダー設定エラー
