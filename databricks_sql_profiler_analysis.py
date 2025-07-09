@@ -4359,44 +4359,42 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                         spill_bytes = key_metric_value
                         break
             
-            # スキュー検出（修正版）
+            # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用
             skew_detected = False
+            skewed_partitions = 0
             
-            # 統計メトリクスは通常、別の構造に格納されているため、
-            # 現在のデータ構造では正確なスキュー検出は困難
-            # 基本的なスキュー検出として、実行時間とタスク数から推測
-            duration_ms = node['key_metrics'].get('durationMs', 0)
-            
-            # 簡易スキュー検出: 実行時間が非常に長く、並列度が高い場合
-            if duration_ms > 10000 and num_tasks > 100:  # 10秒以上かつ100タスク以上
-                # 統計情報が利用できない場合の代替手段
-                skew_detected = True
-            
-            # 将来的な拡張のため、統計メトリクス構造があれば詳細スキュー検出を実行
-            # 注意: 現在のDatabricksプロファイルデータには統計的なスキュー情報が含まれていない場合が多い
-            try:
-                # 統計メトリクス構造を探す（存在する場合）
-                stats_metrics = {}
-                
-                # detailed_metricsから統計情報を探す
-                detailed_metrics = node.get('detailed_metrics', {})
-                for metric_key, metric_info in detailed_metrics.items():
-                    if 'duration' in metric_key.lower() and 'max' in metric_key.lower():
-                        stats_metrics['max_duration'] = metric_info.get('value', 0)
-                    elif 'duration' in metric_key.lower() and 'median' in metric_key.lower():
-                        stats_metrics['median_duration'] = metric_info.get('value', 0)
-                
-                # 統計情報が見つかった場合のスキュー検出
-                if 'max_duration' in stats_metrics and 'median_duration' in stats_metrics:
-                    max_dur = stats_metrics['max_duration']
-                    median_dur = stats_metrics['median_duration']
-                    if median_dur > 0 and max_dur > 0:
-                        duration_ratio = max_dur / median_dur
-                        if duration_ratio >= 3.0:
+            # detailed_metricsからAQEShuffleReadのNumber of skewed partitionsを探す
+            detailed_metrics = node.get('detailed_metrics', {})
+            for metric_key, metric_info in detailed_metrics.items():
+                # AQEShuffleRead - Number of skewed partitions を探す
+                if ('aqeshuffleread' in metric_key.lower() and 
+                    'number of skewed partitions' in metric_key.lower()) or \
+                   ('shuffle read' in metric_key.lower() and 
+                    'skewed partitions' in metric_key.lower()) or \
+                   ('skewed partitions' in metric_key.lower()):
+                    try:
+                        skewed_partitions = int(metric_info.get('value', 0))
+                        if skewed_partitions > 0:
                             skew_detected = True
-            except Exception:
-                # エラーが発生した場合は、基本的なスキュー検出結果を使用
-                pass
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # key_metricsからもAQE skewed partitions情報を探す（フォールバック）
+            if not skew_detected:
+                key_metrics = node.get('key_metrics', {})
+                for key_metric_name, key_metric_value in key_metrics.items():
+                    if ('skewed' in key_metric_name.lower() and 
+                        'partition' in key_metric_name.lower()) or \
+                       ('aqe' in key_metric_name.lower() and 
+                        'skew' in key_metric_name.lower()):
+                        try:
+                            skewed_partitions = int(key_metric_value)
+                            if skewed_partitions > 0:
+                                skew_detected = True
+                            break
+                        except (ValueError, TypeError):
+                            continue
             
             # 並列度アイコン
             parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
@@ -4419,6 +4417,10 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             # スピル詳細情報
             if spill_detected and spill_bytes > 0:
                 report_lines.append(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
+            
+            # スキュー詳細情報
+            if skew_detected and skewed_partitions > 0:
+                report_lines.append(f"    ⚖️ スキュー詳細: {skewed_partitions} 個のスキューパーティション（AQE検出）")
             
             # ノードIDも表示
             report_lines.append(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
