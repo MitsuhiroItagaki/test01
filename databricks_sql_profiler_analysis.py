@@ -62,7 +62,7 @@
 # 
 # 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
 
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/simple0.json'  # デフォルト: サンプルファイル
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'  # デフォルト
 
 # 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
 OUTPUT_LANGUAGE = 'ja'  # デフォルト: 日本語
