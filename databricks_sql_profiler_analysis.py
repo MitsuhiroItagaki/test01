@@ -3849,6 +3849,10 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     # BROADCAST適用可能性の分析（プラン情報を含む）
     broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query, plan_info)
     
+    # プラン情報をメトリクスに追加（ファイル出力で使用）
+    if plan_info:
+        metrics['execution_plan_info'] = plan_info
+    
     # 最適化のためのコンテキスト情報を準備
     optimization_context = []
     
@@ -4169,6 +4173,372 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     
     return "\n".join(report_lines)
 
+def save_execution_plan_analysis(plan_info: Dict[str, Any], output_dir: str = "/tmp") -> Dict[str, str]:
+    """
+    実行プラン分析結果をファイルに保存
+    
+    Args:
+        plan_info: extract_execution_plan_info()の結果
+        output_dir: 出力ディレクトリ
+        
+    Returns:
+        Dict: 保存されたファイル名の辞書
+    """
+    from datetime import datetime
+    import json
+    
+    # タイムスタンプ生成
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    
+    # ファイル名定義
+    plan_json_filename = f"output_execution_plan_analysis_{timestamp}.json"
+    plan_report_filename = f"output_execution_plan_report_{timestamp}.md"
+    
+    # JSON形式でプラン情報を保存
+    with open(plan_json_filename, 'w', encoding='utf-8') as f:
+        json.dump(plan_info, f, ensure_ascii=False, indent=2)
+    
+    # Markdown形式でプラン分析レポートを保存
+    with open(plan_report_filename, 'w', encoding='utf-8') as f:
+        report_content = generate_execution_plan_markdown_report(plan_info)
+        f.write(report_content)
+    
+    return {
+        'plan_json_file': plan_json_filename,
+        'plan_report_file': plan_report_filename
+    }
+
+def generate_execution_plan_markdown_report(plan_info: Dict[str, Any]) -> str:
+    """
+    実行プラン分析結果のMarkdownレポートを生成
+    
+    Args:
+        plan_info: extract_execution_plan_info()の結果
+        
+    Returns:
+        str: Markdownレポート
+    """
+    if OUTPUT_LANGUAGE == 'ja':
+        return generate_execution_plan_markdown_report_ja(plan_info)
+    else:
+        return generate_execution_plan_markdown_report_en(plan_info)
+
+def generate_execution_plan_markdown_report_ja(plan_info: Dict[str, Any]) -> str:
+    """
+    実行プラン分析結果のMarkdownレポート（日本語版）
+    """
+    from datetime import datetime
+    
+    lines = []
+    lines.append("# Databricks SQL実行プラン分析レポート")
+    lines.append("")
+    lines.append(f"**生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}")
+    lines.append("")
+    
+    # プランサマリー
+    plan_summary = plan_info.get("plan_summary", {})
+    lines.append("## 📊 実行プランサマリー")
+    lines.append("")
+    lines.append(f"- **総ノード数**: {plan_summary.get('total_nodes', 0)}")
+    lines.append(f"- **BROADCASTノード数**: {plan_summary.get('broadcast_nodes_count', 0)}")
+    lines.append(f"- **JOINノード数**: {plan_summary.get('join_nodes_count', 0)}")
+    lines.append(f"- **スキャンノード数**: {plan_summary.get('scan_nodes_count', 0)}")
+    lines.append(f"- **シャッフルノード数**: {plan_summary.get('shuffle_nodes_count', 0)}")
+    lines.append(f"- **集約ノード数**: {plan_summary.get('aggregate_nodes_count', 0)}")
+    lines.append(f"- **BROADCASTが使用中**: {'はい' if plan_summary.get('has_broadcast_joins', False) else 'いいえ'}")
+    lines.append(f"- **スキャンされるテーブル数**: {plan_summary.get('tables_scanned', 0)}")
+    lines.append("")
+    
+    # JOIN戦略分析
+    unique_join_strategies = plan_summary.get('unique_join_strategies', [])
+    if unique_join_strategies:
+        lines.append("## 🔗 JOIN戦略分析")
+        lines.append("")
+        for strategy in unique_join_strategies:
+            strategy_jp = {
+                'broadcast_hash_join': 'ブロードキャストハッシュJOIN',
+                'sort_merge_join': 'ソートマージJOIN',
+                'shuffle_hash_join': 'シャッフルハッシュJOIN',
+                'broadcast_nested_loop_join': 'ブロードキャストネストループJOIN'
+            }.get(strategy, strategy)
+            lines.append(f"- **{strategy_jp}** (`{strategy}`)")
+        lines.append("")
+    
+    # BROADCASTノード詳細
+    broadcast_nodes = plan_info.get("broadcast_nodes", [])
+    if broadcast_nodes:
+        lines.append("## 📡 BROADCASTノード詳細")
+        lines.append("")
+        for i, node in enumerate(broadcast_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **ノードID**: {node['node_id']}")
+            lines.append(f"- **ノードタグ**: {node['node_tag']}")
+            
+            metadata = node.get('metadata', [])
+            if metadata:
+                lines.append("- **関連メタデータ**:")
+                for meta in metadata[:5]:  # 最大5個まで表示
+                    key = meta.get('key', '')
+                    value = meta.get('value', '')
+                    values = meta.get('values', [])
+                    if values:
+                        lines.append(f"  - **{key}**: {', '.join(map(str, values[:3]))}")
+                    elif value:
+                        lines.append(f"  - **{key}**: {value}")
+            lines.append("")
+    
+    # JOINノード詳細
+    join_nodes = plan_info.get("join_nodes", [])
+    if join_nodes:
+        lines.append("## 🔗 JOINノード詳細")
+        lines.append("")
+        for i, node in enumerate(join_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **ノードID**: {node['node_id']}")
+            lines.append(f"- **JOIN戦略**: {node['join_strategy']}")
+            lines.append(f"- **JOINタイプ**: {node['join_type']}")
+            
+            join_keys = node.get('join_keys', [])
+            if join_keys:
+                lines.append(f"- **JOINキー**: {', '.join(join_keys[:5])}")
+            lines.append("")
+    
+    # テーブルスキャン詳細
+    table_scan_details = plan_info.get("table_scan_details", {})
+    if table_scan_details:
+        lines.append("## 📋 テーブルスキャン詳細")
+        lines.append("")
+        for table_name, scan_detail in table_scan_details.items():
+            lines.append(f"### {table_name}")
+            lines.append("")
+            lines.append(f"- **ファイル形式**: {scan_detail.get('file_format', 'unknown')}")
+            lines.append(f"- **プッシュダウンフィルタ数**: {len(scan_detail.get('pushed_filters', []))}")
+            lines.append(f"- **出力カラム数**: {len(scan_detail.get('output_columns', []))}")
+            
+            pushed_filters = scan_detail.get('pushed_filters', [])
+            if pushed_filters:
+                lines.append("- **プッシュダウンフィルタ**:")
+                for filter_expr in pushed_filters[:3]:  # 最大3個まで表示
+                    lines.append(f"  - `{filter_expr}`")
+            lines.append("")
+    
+    # シャッフルノード詳細
+    shuffle_nodes = plan_info.get("shuffle_nodes", [])
+    if shuffle_nodes:
+        lines.append("## 🔄 シャッフルノード詳細")
+        lines.append("")
+        for i, node in enumerate(shuffle_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **ノードID**: {node['node_id']}")
+            
+            partition_keys = node.get('partition_keys', [])
+            if partition_keys:
+                lines.append(f"- **パーティションキー**: {', '.join(partition_keys)}")
+            lines.append("")
+    
+    # 集約ノード詳細
+    aggregate_nodes = plan_info.get("aggregate_nodes", [])
+    if aggregate_nodes:
+        lines.append("## 📊 集約ノード詳細")
+        lines.append("")
+        for i, node in enumerate(aggregate_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **ノードID**: {node['node_id']}")
+            
+            group_keys = node.get('group_keys', [])
+            if group_keys:
+                lines.append(f"- **グループ化キー**: {', '.join(group_keys[:5])}")
+            
+            agg_expressions = node.get('aggregate_expressions', [])
+            if agg_expressions:
+                lines.append(f"- **集約関数**: {', '.join(agg_expressions[:5])}")
+            lines.append("")
+    
+    # 最適化推奨事項
+    lines.append("## 💡 プランベース最適化推奨事項")
+    lines.append("")
+    
+    if plan_summary.get('has_broadcast_joins', False):
+        lines.append("✅ **既にBROADCAST JOINが適用されています**")
+        lines.append("- 現在の実行プランでBROADCAST最適化が有効")
+        lines.append("- 追加のBROADCAST適用機会を確認してください")
+    else:
+        lines.append("⚠️ **BROADCAST JOINが未適用です**")
+        lines.append("- 小テーブルにBROADCASTヒントの適用を検討")
+        lines.append("- 30MB閾値以下のテーブルを特定してください")
+    lines.append("")
+    
+    if plan_summary.get('shuffle_nodes_count', 0) > 3:
+        lines.append("⚠️ **多数のシャッフル操作が検出されました**")
+        lines.append("- データの分散とパーティショニング戦略を見直し")
+        lines.append("- Liquid Clusteringの適用を検討")
+    lines.append("")
+    
+    lines.append("---")
+    lines.append("")
+    lines.append("このレポートは、Databricks SQL実行プラン分析ツールによって自動生成されました。")
+    
+    return '\n'.join(lines)
+
+def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str:
+    """
+    実行プラン分析結果のMarkdownレポート（英語版）
+    """
+    from datetime import datetime
+    
+    lines = []
+    lines.append("# Databricks SQL Execution Plan Analysis Report")
+    lines.append("")
+    lines.append(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("")
+    
+    # Plan Summary
+    plan_summary = plan_info.get("plan_summary", {})
+    lines.append("## 📊 Execution Plan Summary")
+    lines.append("")
+    lines.append(f"- **Total Nodes**: {plan_summary.get('total_nodes', 0)}")
+    lines.append(f"- **BROADCAST Nodes**: {plan_summary.get('broadcast_nodes_count', 0)}")
+    lines.append(f"- **JOIN Nodes**: {plan_summary.get('join_nodes_count', 0)}")
+    lines.append(f"- **Scan Nodes**: {plan_summary.get('scan_nodes_count', 0)}")
+    lines.append(f"- **Shuffle Nodes**: {plan_summary.get('shuffle_nodes_count', 0)}")
+    lines.append(f"- **Aggregate Nodes**: {plan_summary.get('aggregate_nodes_count', 0)}")
+    lines.append(f"- **BROADCAST in Use**: {'Yes' if plan_summary.get('has_broadcast_joins', False) else 'No'}")
+    lines.append(f"- **Tables Scanned**: {plan_summary.get('tables_scanned', 0)}")
+    lines.append("")
+    
+    # JOIN Strategy Analysis
+    unique_join_strategies = plan_summary.get('unique_join_strategies', [])
+    if unique_join_strategies:
+        lines.append("## 🔗 JOIN Strategy Analysis")
+        lines.append("")
+        for strategy in unique_join_strategies:
+            lines.append(f"- **{strategy.replace('_', ' ').title()}** (`{strategy}`)")
+        lines.append("")
+    
+    # BROADCAST Node Details
+    broadcast_nodes = plan_info.get("broadcast_nodes", [])
+    if broadcast_nodes:
+        lines.append("## 📡 BROADCAST Node Details")
+        lines.append("")
+        for i, node in enumerate(broadcast_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **Node ID**: {node['node_id']}")
+            lines.append(f"- **Node Tag**: {node['node_tag']}")
+            
+            metadata = node.get('metadata', [])
+            if metadata:
+                lines.append("- **Related Metadata**:")
+                for meta in metadata[:5]:  # Show up to 5
+                    key = meta.get('key', '')
+                    value = meta.get('value', '')
+                    values = meta.get('values', [])
+                    if values:
+                        lines.append(f"  - **{key}**: {', '.join(map(str, values[:3]))}")
+                    elif value:
+                        lines.append(f"  - **{key}**: {value}")
+            lines.append("")
+    
+    # JOIN Node Details
+    join_nodes = plan_info.get("join_nodes", [])
+    if join_nodes:
+        lines.append("## 🔗 JOIN Node Details")
+        lines.append("")
+        for i, node in enumerate(join_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **Node ID**: {node['node_id']}")
+            lines.append(f"- **JOIN Strategy**: {node['join_strategy']}")
+            lines.append(f"- **JOIN Type**: {node['join_type']}")
+            
+            join_keys = node.get('join_keys', [])
+            if join_keys:
+                lines.append(f"- **JOIN Keys**: {', '.join(join_keys[:5])}")
+            lines.append("")
+    
+    # Table Scan Details
+    table_scan_details = plan_info.get("table_scan_details", {})
+    if table_scan_details:
+        lines.append("## 📋 Table Scan Details")
+        lines.append("")
+        for table_name, scan_detail in table_scan_details.items():
+            lines.append(f"### {table_name}")
+            lines.append("")
+            lines.append(f"- **File Format**: {scan_detail.get('file_format', 'unknown')}")
+            lines.append(f"- **Pushed Filters**: {len(scan_detail.get('pushed_filters', []))}")
+            lines.append(f"- **Output Columns**: {len(scan_detail.get('output_columns', []))}")
+            
+            pushed_filters = scan_detail.get('pushed_filters', [])
+            if pushed_filters:
+                lines.append("- **Pushed Down Filters**:")
+                for filter_expr in pushed_filters[:3]:  # Show up to 3
+                    lines.append(f"  - `{filter_expr}`")
+            lines.append("")
+    
+    # Shuffle Node Details
+    shuffle_nodes = plan_info.get("shuffle_nodes", [])
+    if shuffle_nodes:
+        lines.append("## 🔄 Shuffle Node Details")
+        lines.append("")
+        for i, node in enumerate(shuffle_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **Node ID**: {node['node_id']}")
+            
+            partition_keys = node.get('partition_keys', [])
+            if partition_keys:
+                lines.append(f"- **Partition Keys**: {', '.join(partition_keys)}")
+            lines.append("")
+    
+    # Aggregate Node Details
+    aggregate_nodes = plan_info.get("aggregate_nodes", [])
+    if aggregate_nodes:
+        lines.append("## 📊 Aggregate Node Details")
+        lines.append("")
+        for i, node in enumerate(aggregate_nodes, 1):
+            lines.append(f"### {i}. {node['node_name']}")
+            lines.append("")
+            lines.append(f"- **Node ID**: {node['node_id']}")
+            
+            group_keys = node.get('group_keys', [])
+            if group_keys:
+                lines.append(f"- **Group Keys**: {', '.join(group_keys[:5])}")
+            
+            agg_expressions = node.get('aggregate_expressions', [])
+            if agg_expressions:
+                lines.append(f"- **Aggregate Functions**: {', '.join(agg_expressions[:5])}")
+            lines.append("")
+    
+    # Plan-based Optimization Recommendations
+    lines.append("## 💡 Plan-based Optimization Recommendations")
+    lines.append("")
+    
+    if plan_summary.get('has_broadcast_joins', False):
+        lines.append("✅ **BROADCAST JOIN is already applied**")
+        lines.append("- Current execution plan has BROADCAST optimization enabled")
+        lines.append("- Check for additional BROADCAST application opportunities")
+    else:
+        lines.append("⚠️ **BROADCAST JOIN is not applied**")
+        lines.append("- Consider applying BROADCAST hints to small tables")
+        lines.append("- Identify tables under 30MB threshold")
+    lines.append("")
+    
+    if plan_summary.get('shuffle_nodes_count', 0) > 3:
+        lines.append("⚠️ **Multiple shuffle operations detected**")
+        lines.append("- Review data distribution and partitioning strategy")
+        lines.append("- Consider applying Liquid Clustering")
+    lines.append("")
+    
+    lines.append("---")
+    lines.append("")
+    lines.append("This report was automatically generated by the Databricks SQL Execution Plan Analysis Tool.")
+    
+    return '\n'.join(lines)
+
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any]) -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
@@ -4280,9 +4650,27 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write(f"- **Data Read**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
             f.write(f"- **Spill**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
         
+        # プラン情報の抽出と保存
+        plan_files = {}
+        execution_plan_info = metrics.get('execution_plan_info')
+        if execution_plan_info:
+            try:
+                plan_files = save_execution_plan_analysis(execution_plan_info)
+                print(f"✅ 実行プラン分析ファイルを保存しました:")
+                for file_type, filename in plan_files.items():
+                    print(f"   📄 {filename}")
+            except Exception as e:
+                print(f"⚠️ 実行プラン分析ファイルの保存でエラーが発生しました: {str(e)}")
+        
         # BROADCAST分析結果の追加
         try:
-            broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query)
+            # プラン情報を含むBROADCAST分析
+            profiler_data = metrics.get('raw_profiler_data', {})
+            plan_info = None
+            if profiler_data:
+                plan_info = extract_execution_plan_info(profiler_data)
+            
+            broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query, plan_info)
             if OUTPUT_LANGUAGE == 'ja':
                 f.write(f"\n\n## BROADCASTヒント分析結果（30MB閾値基準）\n\n")
                 f.write(f"- **JOINクエリ**: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}\n")
@@ -4385,11 +4773,18 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             error_msg = f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
             f.write(error_msg)
     
-    return {
+    # プラン分析ファイルの結果も統合
+    result = {
         'original_file': original_filename,
         'optimized_file': optimized_filename,
         'report_file': report_filename
     }
+    
+    # プラン分析ファイルが生成されている場合は結果に追加
+    if plan_files:
+        result.update(plan_files)
+    
+    return result
 
 print("✅ 関数定義完了: SQL最適化関連関数（30MB BROADCAST閾値対応）")
 
