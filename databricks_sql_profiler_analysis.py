@@ -5850,6 +5850,74 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
     
     return report
 
+def refine_report_with_llm(raw_report: str, query_id: str) -> str:
+    """
+    LLMを使ってレポートを推敲し、読みやすい最終レポートを生成
+    
+    Args:
+        raw_report: 初期生成されたレポート
+        query_id: クエリID
+        
+    Returns:
+        str: LLMで推敲された読みやすいレポート
+    """
+    
+    refinement_prompt = f"""
+あなたは技術文書の編集者として、Databricks SQLパフォーマンス分析レポートを読みやすく推敲してください。
+
+【推敲の方針】
+1. **重複内容の統合**: 同じ情報が複数箇所に記載されている場合は統合し、一箇所にまとめる
+2. **構成の最適化**: 情報の優先度に基づいて論理的な順序で再配置
+3. **読みやすさの向上**: 技術的内容を保持しつつ、読みやすい文章に改善
+4. **具体性の追加**: 可能な場合は具体的な数値や改善提案を強調
+5. **アクションアイテムの明確化**: 実装すべき対策を明確に提示
+
+【現在のレポート】
+```
+{raw_report}
+```
+
+【出力要件】
+- Markdownフォーマットを維持
+- 技術的な正確性を保持
+- エグゼクティブサマリーを冒頭に追加
+- 重複を削除し、情報を論理的に整理
+- 実装のためのアクションプランを追加
+- 読みやすい構成で統合された最終レポートを出力
+
+推敲後の読みやすいレポートを出力してください。
+"""
+    
+    try:
+        provider = LLM_CONFIG.get("provider", "databricks")
+        
+        if provider == "databricks":
+            refined_report = _call_databricks_llm(refinement_prompt)
+        elif provider == "openai":
+            refined_report = _call_openai_llm(refinement_prompt)
+        elif provider == "azure_openai":
+            refined_report = _call_azure_openai_llm(refinement_prompt)
+        elif provider == "anthropic":
+            refined_report = _call_anthropic_llm(refinement_prompt)
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+        
+        # thinking_enabled対応
+        if isinstance(refined_report, list):
+            refined_report = format_thinking_response(refined_report)
+        
+        # signature情報の除去
+        import re
+        signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
+        refined_report = re.sub(signature_pattern, "'signature': '[REMOVED]'", refined_report)
+        
+        return refined_report
+        
+    except Exception as e:
+        print(f"⚠️ LLMによるレポート推敲中にエラーが発生しました: {str(e)}")
+        print("📄 元のレポートを返します")
+        return raw_report
+
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
@@ -5858,6 +5926,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     - SQLファイルの末尾に自動でセミコロン(;)を付与
     - そのままDatabricks Notebookで実行可能
     - %sql マジックコマンドでも直接実行可能
+    - LLMによるレポート推敲で読みやすい最終レポートを生成
     """
     
     import re
@@ -5926,14 +5995,23 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write("-- 以下は最適化分析の全結果です:\n\n")
             f.write(f"/*\n{optimized_result_main_content}\n*/")
     
-    # 分析レポートファイルの保存（多言語対応）
+    # 分析レポートファイルの保存（LLMで推敲された読みやすいレポート）
     report_filename = f"output_optimization_report_{timestamp}.md"
+    
+    print("🤖 LLMによるレポート推敲を実行中...")
+    
+    # 初期レポートの生成
+    initial_report = generate_comprehensive_optimization_report(
+        query_id, optimized_result_for_file, metrics, analysis_result
+    )
+    
+    # LLMでレポートを推敲
+    refined_report = refine_report_with_llm(initial_report, query_id)
+    
     with open(report_filename, 'w', encoding='utf-8') as f:
-        # LLMで再構成されたレポート作成
-        report_content = generate_comprehensive_optimization_report(
-            query_id, optimized_result_for_file, metrics, analysis_result
-        )
-        f.write(report_content)
+        f.write(refined_report)
+    
+    print("✅ LLMによるレポート推敲完了")
         
         # オリジナルのメトリクス情報も保持
         overall_metrics = metrics.get('overall_metrics', {})
