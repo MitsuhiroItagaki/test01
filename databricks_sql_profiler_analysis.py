@@ -3152,174 +3152,37 @@ if sorted_nodes:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
         
-        # スピル詳細情報（デバッグ表示付き強化版）
-        if spill_detected:
-            if spill_bytes > 0:
-                print(f"    💿 スピル詳細: {spill_bytes/1024/1024:.1f} MB")
-            
-            # スピル判定根拠の詳細表示（特定メトリクスベース）
-            print(f"    🔍 スピル判定根拠:")
-            for detail in spill_details:
-                metric_name = detail['metric_name']
-                value = detail['value']
-                label = detail['label']
-                source = detail['source']
-                matched_field = detail.get('matched_field', 'unknown')
-                
-                if value >= 1024 * 1024 * 1024:  # GB単位
-                    value_display = f"{value/1024/1024/1024:.2f} GB"
-                elif value >= 1024 * 1024:  # MB単位
-                    value_display = f"{value/1024/1024:.1f} MB"
-                elif value >= 1024:  # KB単位
-                    value_display = f"{value/1024:.1f} KB"
-                else:
-                    value_display = f"{value} bytes"
-                
-                # 正確なスピル値を適切な単位で表示
-                if value >= 1024 * 1024 * 1024:  # GB単位
-                    value_display = f"{value/1024/1024/1024:.2f} GB"
-                elif value >= 1024 * 1024:  # MB単位
-                    value_display = f"{value/1024/1024:.1f} MB"
-                elif value >= 1024:  # KB単位
-                    value_display = f"{value/1024:.1f} KB"
-                else:
-                    value_display = f"{value} bytes"
-                
-                print(f"       🎯 ターゲットメトリクス: 'Num bytes spilled to disk due to memory pressure' または 'Sink - Num bytes spilled to disk due to memory pressure'")
-                print(f"       📊 検出値: {value_display}")
-                print(f"       🔍 検出されたメトリクス名: {metric_name}")
-                if label and label != metric_name:
-                    print(f"       🏷️  ラベル: {label}")
-                print(f"       ✅ 判定: スピルあり (値 > 0)")
-        else:
-            # スピルが検出されなかった場合のデバッグ情報（詳細表示時のみ）
-            import os
-            if os.environ.get('DEBUG_SPILL_ANALYSIS', '').lower() in ['true', '1', 'yes']:
-                print(f"    🔍 スピル未検出:")
-                print(f"       🎯 ターゲットメトリクス: 'Num bytes spilled to disk due to memory pressure' または 'Sink - Num bytes spilled to disk due to memory pressure'")
-                print(f"       ❌ 検出結果: メトリクスが見つからないか、値が0")
-                
-                # 各ソースでの検索結果を表示
-                detailed_metrics = node.get('detailed_metrics', {})
-                raw_metrics = node.get('metrics', [])
-                key_metrics = node.get('key_metrics', {})
-                
-                target_spill_metrics = [
-                    "Sink - Num bytes spilled to disk due to memory pressure",
-                    "Num bytes spilled to disk due to memory pressure"
-                ]
-                
-                # detailed_metricsでの検索結果
-                found_in_detailed = False
-                for metric_key, metric_info in detailed_metrics.items():
-                    if metric_key in target_spill_metrics or metric_info.get('label', '') in target_spill_metrics:
-                        found_in_detailed = True
-                        value = metric_info.get('value', 0)
-                        matched_metric = metric_key if metric_key in target_spill_metrics else metric_info.get('label', '')
-                        print(f"       📊 detailed_metrics: {matched_metric} 見つかったが値={value} (≤ 0)")
-                        break
-                if not found_in_detailed:
-                    print(f"       📊 detailed_metrics: ターゲットメトリクス未発見 ({len(detailed_metrics)}個中)")
-                
-                # raw_metricsでの検索結果
-                found_in_raw = False
-                for metric in raw_metrics:
-                    metric_key = metric.get('key', '')
-                    metric_label = metric.get('label', '')
-                    if metric_key in target_spill_metrics or metric_label in target_spill_metrics:
-                        found_in_raw = True
-                        value = metric.get('value', 0)
-                        matched_metric = metric_key if metric_key in target_spill_metrics else metric_label
-                        print(f"       📊 raw_metrics: {matched_metric} 見つかったが値={value} (≤ 0)")
-                        break
-                if not found_in_raw:
-                    print(f"       📊 raw_metrics: ターゲットメトリクス未発見 ({len(raw_metrics)}個中)")
-                
-                # key_metricsでの検索結果
-                found_in_key = False
-                for target_metric in target_spill_metrics:
-                    if target_metric in key_metrics:
-                        found_in_key = True
-                        value = key_metrics[target_metric]
-                        print(f"       📊 key_metrics: {target_metric} 見つかったが値={value} (≤ 0)")
-                        break
-                if not found_in_key:
-                    print(f"       📊 key_metrics: ターゲットメトリクス未発見 ({len(key_metrics)}個中)")
-                
-                # 利用可能なスピル関連メトリクス一覧（参考）
-                spill_related = []
-                for key in detailed_metrics.keys():
-                    if key in target_spill_metrics:
-                        spill_related.append(f"detailed_metrics.{key}")
-                for metric in raw_metrics:
-                    key = metric.get('key', '')
-                    label = metric.get('label', '')
-                    if key in target_spill_metrics or label in target_spill_metrics:
-                        spill_related.append(f"raw_metrics.{key}")
-                for key in key_metrics.keys():
-                    if key in target_spill_metrics:
-                        spill_related.append(f"key_metrics.{key}")
-                
-                if spill_related:
-                    print(f"       🔍 参考: その他のスピル関連メトリクス {len(spill_related)}個")
-                    for related in spill_related[:3]:  # 最大3個表示
-                        print(f"           - {related}")
-                    if len(spill_related) > 3:
-                        print(f"           ... 他{len(spill_related) - 3}個")
-                else:
-                    print(f"       🔍 参考: その他のスピル関連メトリクスは発見されませんでした")
+        # スピル詳細情報（シンプル表示）
+        if spill_detected and spill_bytes > 0:
+            spill_mb = spill_bytes / 1024 / 1024
+            if spill_mb >= 1024:  # GB単位
+                spill_display = f"{spill_mb/1024:.2f} GB"
+            else:  # MB単位
+                spill_display = f"{spill_mb:.1f} MB"
+            print(f"    💿 スピル: {spill_display}")
         
-        # スキュー詳細情報（AQEベースのデバッグ表示付き）
-        if skew_detected:
-            print(f"    🔍 スキュー判定根拠:")
-            for detail in skew_details:
-                description = detail['description']
-                print(f"       ⚖️ {description}")
+        # Shuffleノードの場合は常にShuffle attributesを表示
+        if "shuffle" in short_name.lower():
+            shuffle_attributes = extract_shuffle_attributes(node)
+            if shuffle_attributes:
+                print(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
                 
-                # より詳細なAQE情報の表示
-                if detail['type'] == 'aqe_skew':
-                    aqe_value = detail['value']
-                    aqe_split_value = detail.get('split_value', 0)
-                    metric_name = detail['metric_name']
-                    split_metric_name = detail.get('split_metric_name', '')
-                    
-                    print(f"           📊 AQEベース検出: {metric_name} = {aqe_value}")
-                    print(f"           🎯 AQE検出詳細: Sparkが自動的に{aqe_value}個のスキューパーティションを検出")
-                    
-                    # パーティション分割情報がある場合
-                    if aqe_split_value > 0 and split_metric_name:
-                        print(f"           ⚡ AQE自動対応: Sparkが自動的に{aqe_split_value}個のパーティションに分割")
-                        print(f"           🔄 分割メトリクス: {split_metric_name} = {aqe_split_value}")
-                    
-                    severity = detail.get('severity', '中')
-                    severity_emoji = "🚨" if severity == "高" else "⚠️"
-                    print(f"           {severity_emoji} 重要度: {severity} ({'5個以上' if severity == '高' else '1-4個'}のスキューパーティション)")
-        else:
-            # スキューが検出されなかった場合のデバッグ情報（詳細表示時のみ）
-            import os
-            if os.environ.get('DEBUG_SKEW_ANALYSIS', '').lower() in ['true', '1', 'yes']:
-                debug_info = []
+                # REPARTITIONヒントの提案
+                suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
+                main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                 
-                # AQEメトリクスの検索結果
-                debug_info.append(f"AQEメトリクス検索結果: {aqe_metric_name if aqe_metric_name else 'ターゲットメトリクス未発見'}")
-                if aqe_metric_name:
-                    debug_info.append(f"AQEメトリクス値: {aqe_skew_value} ≤ 基準値: 0")
+                print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                if spill_detected and spill_bytes > 0:
+                    print(f"       理由: スピル({spill_display})を改善するため")
                 else:
-                    debug_info.append("AQEメトリクス: 'AQEShuffleRead - Number of skewed partitions' 未発見")
-                
-                # 各ソースでの検索結果を表示
-                detailed_metrics = node.get('detailed_metrics', {})
-                raw_metrics = node.get('metrics', [])
-                key_metrics = node.get('key_metrics', {})
-                
-                debug_info.append(f"detailed_metrics: {len(detailed_metrics)}個のメトリクス")
-                debug_info.append(f"raw_metrics: {len(raw_metrics) if isinstance(raw_metrics, list) else 0}個のメトリクス")
-                debug_info.append(f"key_metrics: {len(key_metrics)}個のメトリクス")
-                
-                if debug_info:
-                    print(f"    🔍 スキュー未検出理由:")
-                    for info in debug_info:
-                        print(f"       ✅ {info}")
+                    print(f"       理由: Shuffle効率を改善するため")
+            else:
+                print(f"    🔄 Shuffle属性: 検出されませんでした")
+
+        
+        # スキュー詳細情報（簡略表示）
+        if skew_detected and skewed_partitions > 0:
+            print(f"    ⚖️ スキュー詳細: {skewed_partitions} 個のスキューパーティション")
         
         # ノードIDも表示
         print(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
@@ -4788,17 +4651,32 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     metadata = node.get('metadata', [])
     if isinstance(metadata, list):
         for item in metadata:
-            if isinstance(item, dict) and item.get('key') == 'SHUFFLE_ATTRIBUTES':
-                values = item.get('values', [])
-                if isinstance(values, list):
-                    shuffle_attributes.extend(values)
+            if isinstance(item, dict):
+                # keyとlabelの両方をチェック
+                if (item.get('key') == 'SHUFFLE_ATTRIBUTES' or 
+                    item.get('label') == 'Shuffle attributes'):
+                    values = item.get('values', [])
+                    if isinstance(values, list):
+                        shuffle_attributes.extend(values)
     
-    # raw_metricsからも検索
+    # raw_metricsからも検索（labelもチェック）
     raw_metrics = node.get('metrics', [])
     if isinstance(raw_metrics, list):
         for metric in raw_metrics:
-            if isinstance(metric, dict) and metric.get('key') == 'SHUFFLE_ATTRIBUTES':
-                values = metric.get('values', [])
+            if isinstance(metric, dict):
+                if (metric.get('key') == 'SHUFFLE_ATTRIBUTES' or 
+                    metric.get('label') == 'Shuffle attributes'):
+                    values = metric.get('values', [])
+                    if isinstance(values, list):
+                        shuffle_attributes.extend(values)
+    
+    # detailed_metricsからも検索
+    detailed_metrics = node.get('detailed_metrics', {})
+    if isinstance(detailed_metrics, dict):
+        for key, info in detailed_metrics.items():
+            if (key == 'SHUFFLE_ATTRIBUTES' or 
+                info.get('label') == 'Shuffle attributes'):
+                values = info.get('values', [])
                 if isinstance(values, list):
                     shuffle_attributes.extend(values)
     
