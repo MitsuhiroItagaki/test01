@@ -3572,37 +3572,7 @@ print("=" * 80)
 
 # 💾 分析結果の保存と完了サマリー
 from datetime import datetime
-result_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-result_output_path = f'output_bottleneck_analysis_result_{result_timestamp}.txt'
-with open(result_output_path, 'w', encoding='utf-8') as file:
-    # 多言語対応タイトル
-    file.write(f"{get_message('bottleneck_title')}\n")
-    file.write("=" * 60 + "\n\n")
-    file.write(f"{get_message('query_id')}: {extracted_metrics['query_info']['query_id']}\n")
-    file.write(f"{get_message('analysis_time')}: {datetime.now()}\n")
-    file.write(f"{get_message('execution_time')}: {extracted_metrics['overall_metrics']['total_time_ms']:,} ms\n")
-    file.write("=" * 60 + "\n\n")
-    
-    # thinking_enabled: Trueの場合にanalysis_resultがリストになることがあるため対応
-    # signature等の不要な情報を確実に除外
-    if isinstance(analysis_result, list):
-        # リストの場合は人間に読みやすい形式に変換（signature等除外済み）
-        analysis_result_str = format_thinking_response(analysis_result)
-    else:
-        analysis_result_str = str(analysis_result)
-    
-    # 念のため、文字列からもsignature情報を除外
-    import re
-    # signatureパターンを除去（Base64のような長い文字列）
-    signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
-    analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
-    
-    file.write(analysis_result_str)
-
-if OUTPUT_LANGUAGE == 'ja':
-    print(f"✅ 分析結果を保存しました: {result_output_path}")
-else:
-    print(f"✅ Analysis results saved: {result_output_path}")
+# output_bottleneck_analysis_result_XXX.txtファイルの出力は廃止（optimization_reportに統合）
 
 # 最終的なサマリー
 print("\n" + "🎉" * 20)
@@ -3625,10 +3595,7 @@ try:
 except Exception as e:
     print("✅ LLMによるボトルネック分析完了")
 
-print(f"✅ 分析結果保存完了 ({result_output_path})")
-print()
-print("📁 出力ファイル:")
-print(f"   📄 {result_output_path}")
+print("✅ 分析結果は後でoptimization_reportに統合されます")
 print()
 print("🚀 分析完了！結果を確認してクエリ最適化にお役立てください。")
 print("🎉" * 20)
@@ -5572,6 +5539,317 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
     
     return '\n'.join(lines)
 
+def generate_comprehensive_optimization_report(query_id: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> str:
+    """
+    包括的な最適化レポートを生成
+    
+    Args:
+        query_id: クエリID
+        optimized_result: 最適化結果
+        metrics: メトリクス情報
+        analysis_result: ボトルネック分析結果
+    
+    Returns:
+        str: 読みやすく構成されたレポート
+    """
+    from datetime import datetime
+    
+    # 基本情報の取得
+    overall_metrics = metrics.get('overall_metrics', {})
+    bottleneck_indicators = metrics.get('bottleneck_indicators', {})
+    liquid_analysis = metrics.get('liquid_clustering_analysis', {})
+    
+    # thinking_enabled対応: analysis_resultがリストの場合の処理
+    if isinstance(analysis_result, list):
+        analysis_result_str = format_thinking_response(analysis_result)
+    else:
+        analysis_result_str = str(analysis_result)
+    
+    # signature情報の除去
+    import re
+    signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
+    analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
+    
+    # レポートの構成
+    if OUTPUT_LANGUAGE == 'ja':
+        report = f"""# 📊 SQL最適化レポート
+
+**クエリID**: {query_id}  
+**レポート生成日時**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## 🎯 1. ボトルネック分析結果
+
+### 🤖 AIによる詳細分析
+
+{analysis_result_str}
+
+### 📊 主要パフォーマンス指標
+
+| 指標 | 値 | 評価 |
+|------|-----|------|
+| 実行時間 | {overall_metrics.get('total_time_ms', 0):,} ms | {'✅ 良好' if overall_metrics.get('total_time_ms', 0) < 60000 else '⚠️ 改善必要'} |
+| Photon有効 | {'はい' if overall_metrics.get('photon_enabled', False) else 'いいえ'} | {'✅ 良好' if overall_metrics.get('photon_enabled', False) else '❌ 未有効'} |
+| キャッシュ効率 | {bottleneck_indicators.get('cache_hit_ratio', 0) * 100:.1f}% | {'✅ 良好' if bottleneck_indicators.get('cache_hit_ratio', 0) > 0.8 else '⚠️ 改善必要'} |
+| データ選択性 | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ 良好' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ 改善必要'} |
+| シャッフル操作 | {bottleneck_indicators.get('shuffle_operations_count', 0)}回 | {'✅ 良好' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ 多数'} |
+| スピル発生 | {'はい' if bottleneck_indicators.get('has_spill', False) else 'いいえ'} | {'❌ 問題あり' if bottleneck_indicators.get('has_spill', False) else '✅ 良好'} |
+
+### 🚨 主要ボトルネック
+
+"""
+        
+        # 主要ボトルネックの詳細
+        bottlenecks = []
+        
+        if bottleneck_indicators.get('has_spill', False):
+            spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
+            bottlenecks.append(f"**メモリスピル**: {spill_gb:.2f}GB - メモリ不足による性能低下")
+        
+        if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+            bottlenecks.append("**シャッフルボトルネック**: JOIN/GROUP BY処理での大量データ転送")
+        
+        if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
+            bottlenecks.append("**キャッシュ効率低下**: データ再利用効率が低い")
+        
+        if not overall_metrics.get('photon_enabled', False):
+            bottlenecks.append("**Photon未有効**: 高速処理エンジンが利用されていない")
+        
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
+            bottlenecks.append("**データ選択性低下**: 必要以上のデータを読み込んでいる")
+        
+        if bottlenecks:
+            for i, bottleneck in enumerate(bottlenecks, 1):
+                report += f"{i}. {bottleneck}\n"
+        else:
+            report += "主要なボトルネックは検出されませんでした。\n"
+        
+        report += "\n"
+        
+        # Liquid Clustering分析結果の追加
+        if liquid_analysis:
+            performance_context = liquid_analysis.get('performance_context', {})
+            llm_analysis = liquid_analysis.get('llm_analysis', '')
+            
+            report += f"""
+## 🗂️ 2. Liquid Clustering分析結果
+
+### 📊 パフォーマンス概要
+
+| 項目 | 値 |
+|------|-----|
+| 実行時間 | {performance_context.get('total_time_sec', 0):.1f}秒 |
+| データ読み込み | {performance_context.get('read_gb', 0):.2f}GB |
+| 出力行数 | {performance_context.get('rows_produced', 0):,}行 |
+| 読み込み行数 | {performance_context.get('rows_read', 0):,}行 |
+| データ選択性 | {performance_context.get('data_selectivity', 0):.4f} |
+
+### 🤖 AI分析結果
+
+{llm_analysis}
+
+"""
+        
+        # SQL最適化分析結果の追加
+        report += f"""
+## 🚀 3. SQL最適化分析結果
+
+### 💡 最適化提案
+
+{optimized_result}
+
+### 📈 4. 期待されるパフォーマンス改善効果
+
+#### 🎯 予想される改善点
+
+"""
+        
+        # 期待される改善効果を計算
+        expected_improvements = []
+        
+        if bottleneck_indicators.get('has_spill', False):
+            expected_improvements.append("**メモリスピル解消**: 最大50-80%の性能改善が期待されます")
+        
+        if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+            expected_improvements.append("**シャッフル最適化**: 20-60%の実行時間短縮が期待されます")
+        
+        if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
+            expected_improvements.append("**キャッシュ効率向上**: 30-70%の読み込み時間短縮が期待されます")
+        
+        if not overall_metrics.get('photon_enabled', False):
+            expected_improvements.append("**Photon有効化**: 2-10倍の処理速度向上が期待されます")
+        
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
+            expected_improvements.append("**データ選択性改善**: 40-90%のデータ読み込み量削減が期待されます")
+        
+        if expected_improvements:
+            for i, improvement in enumerate(expected_improvements, 1):
+                report += f"{i}. {improvement}\n"
+            
+            # 総合的な改善効果
+            total_time_ms = overall_metrics.get('total_time_ms', 0)
+            if total_time_ms > 0:
+                improvement_ratio = min(0.8, len(expected_improvements) * 0.15)  # 最大80%改善
+                expected_time = total_time_ms * (1 - improvement_ratio)
+                report += f"\n**総合改善効果**: 実行時間 {total_time_ms:,}ms → {expected_time:,.0f}ms（約{improvement_ratio*100:.0f}%改善）\n"
+        else:
+            report += "現在のクエリは既に最適化されています。大幅な改善は期待されません。\n"
+        
+        report += f"""
+
+#### 🔧 実装優先度
+
+1. **高優先度**: Photon有効化、メモリスピル解消
+2. **中優先度**: インデックス最適化、パーティション戦略
+3. **低優先度**: 統計情報更新、キャッシュ戦略
+
+---
+
+*レポート生成時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+        
+    else:
+        # 英語版（同様の構成）
+        report = f"""# 📊 SQL Optimization Report
+
+**Query ID**: {query_id}  
+**Report Generation Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## 🎯 1. Bottleneck Analysis Results
+
+### 🤖 AI-Powered Analysis
+
+{analysis_result_str}
+
+### 📊 Key Performance Indicators
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Execution Time | {overall_metrics.get('total_time_ms', 0):,} ms | {'✅ Good' if overall_metrics.get('total_time_ms', 0) < 60000 else '⚠️ Needs Improvement'} |
+| Photon Enabled | {'Yes' if overall_metrics.get('photon_enabled', False) else 'No'} | {'✅ Good' if overall_metrics.get('photon_enabled', False) else '❌ Not Enabled'} |
+| Cache Efficiency | {bottleneck_indicators.get('cache_hit_ratio', 0) * 100:.1f}% | {'✅ Good' if bottleneck_indicators.get('cache_hit_ratio', 0) > 0.8 else '⚠️ Needs Improvement'} |
+| Data Selectivity | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ Good' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ Needs Improvement'} |
+| Shuffle Operations | {bottleneck_indicators.get('shuffle_operations_count', 0)} times | {'✅ Good' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ High'} |
+| Spill Occurrence | {'Yes' if bottleneck_indicators.get('has_spill', False) else 'No'} | {'❌ Issues' if bottleneck_indicators.get('has_spill', False) else '✅ Good'} |
+
+### 🚨 Key Bottlenecks
+
+"""
+        
+        # 主要ボトルネックの詳細（英語版）
+        bottlenecks = []
+        
+        if bottleneck_indicators.get('has_spill', False):
+            spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
+            bottlenecks.append(f"**Memory Spill**: {spill_gb:.2f}GB - Performance degradation due to memory shortage")
+        
+        if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+            bottlenecks.append("**Shuffle Bottleneck**: Large data transfer in JOIN/GROUP BY operations")
+        
+        if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
+            bottlenecks.append("**Cache Inefficiency**: Low data reuse efficiency")
+        
+        if not overall_metrics.get('photon_enabled', False):
+            bottlenecks.append("**Photon Not Enabled**: High-speed processing engine not utilized")
+        
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
+            bottlenecks.append("**Poor Data Selectivity**: Reading more data than necessary")
+        
+        if bottlenecks:
+            for i, bottleneck in enumerate(bottlenecks, 1):
+                report += f"{i}. {bottleneck}\n"
+        else:
+            report += "No major bottlenecks detected.\n"
+        
+        report += "\n"
+        
+        # Liquid Clustering分析結果の追加（英語版）
+        if liquid_analysis:
+            performance_context = liquid_analysis.get('performance_context', {})
+            llm_analysis = liquid_analysis.get('llm_analysis', '')
+            
+            report += f"""
+## 🗂️ 2. Liquid Clustering Analysis Results
+
+### 📊 Performance Overview
+
+| Item | Value |
+|------|-------|
+| Execution Time | {performance_context.get('total_time_sec', 0):.1f}s |
+| Data Read | {performance_context.get('read_gb', 0):.2f}GB |
+| Output Rows | {performance_context.get('rows_produced', 0):,} |
+| Read Rows | {performance_context.get('rows_read', 0):,} |
+| Data Selectivity | {performance_context.get('data_selectivity', 0):.4f} |
+
+### 🤖 AI Analysis Results
+
+{llm_analysis}
+
+"""
+        
+        # SQL最適化分析結果の追加（英語版）
+        report += f"""
+## 🚀 3. SQL Optimization Analysis Results
+
+### 💡 Optimization Recommendations
+
+{optimized_result}
+
+### 📈 4. Expected Performance Improvement
+
+#### 🎯 Anticipated Improvements
+
+"""
+        
+        # 期待される改善効果を計算（英語版）
+        expected_improvements = []
+        
+        if bottleneck_indicators.get('has_spill', False):
+            expected_improvements.append("**Memory Spill Resolution**: Up to 50-80% performance improvement expected")
+        
+        if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+            expected_improvements.append("**Shuffle Optimization**: 20-60% execution time reduction expected")
+        
+        if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
+            expected_improvements.append("**Cache Efficiency**: 30-70% read time reduction expected")
+        
+        if not overall_metrics.get('photon_enabled', False):
+            expected_improvements.append("**Photon Enablement**: 2-10x processing speed improvement expected")
+        
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
+            expected_improvements.append("**Data Selectivity**: 40-90% data read volume reduction expected")
+        
+        if expected_improvements:
+            for i, improvement in enumerate(expected_improvements, 1):
+                report += f"{i}. {improvement}\n"
+            
+            # 総合的な改善効果
+            total_time_ms = overall_metrics.get('total_time_ms', 0)
+            if total_time_ms > 0:
+                improvement_ratio = min(0.8, len(expected_improvements) * 0.15)  # 最大80%改善
+                expected_time = total_time_ms * (1 - improvement_ratio)
+                report += f"\n**Overall Improvement**: Execution time {total_time_ms:,}ms → {expected_time:,.0f}ms (approx. {improvement_ratio*100:.0f}% improvement)\n"
+        else:
+            report += "Current query is already optimized. No significant improvements expected.\n"
+        
+        report += f"""
+
+#### 🔧 Implementation Priority
+
+1. **High Priority**: Photon enablement, Memory spill resolution
+2. **Medium Priority**: Index optimization, Partitioning strategy
+3. **Low Priority**: Statistics update, Cache strategy
+
+---
+
+*Report generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+    
+    return report
+
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
@@ -5651,15 +5929,13 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     # 分析レポートファイルの保存（多言語対応）
     report_filename = f"output_optimization_report_{timestamp}.md"
     with open(report_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# {get_message('sql_optimization_report')}\n\n")
-        f.write(f"**{get_message('query_id')}**: {query_id}\n")
-        f.write(f"**{get_message('optimization_time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"**{get_message('optimized_file')}**: {optimized_filename}\n\n")
-        f.write(f"## {get_message('optimization_analysis')}\n\n")
-        f.write(optimized_result_for_file)
-        f.write(f"\n\n## {get_message('performance_metrics')}\n\n")
+        # LLMで再構成されたレポート作成
+        report_content = generate_comprehensive_optimization_report(
+            query_id, optimized_result_for_file, metrics, analysis_result
+        )
+        f.write(report_content)
         
-        # 主要メトリクスの追加（多言語対応）
+        # オリジナルのメトリクス情報も保持
         overall_metrics = metrics.get('overall_metrics', {})
         bottleneck_indicators = metrics.get('bottleneck_indicators', {})
         spill_details = bottleneck_indicators.get('spill_details', [])
@@ -5696,319 +5972,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                 if len(spill_details) > 3:
                     f.write(f"    - ... {len(spill_details) - 3} more nodes\n")
         
-        # プラン情報の抽出と保存は除外（最適化レポートとTOP10ファイルのみ出力）
-        
-        # Liquid Clustering分析結果の追加（セル35からマージ）
-        try:
-            liquid_analysis = metrics.get('liquid_clustering_analysis', {})
-            if liquid_analysis:
-                if OUTPUT_LANGUAGE == 'ja':
-                    f.write(f"\n\n## 🗂️ Liquid Clustering分析結果\n\n")
-                    
-                    # パフォーマンス概要
-                    performance_context = liquid_analysis.get('performance_context', {})
-                    f.write(f"### 📊 パフォーマンス概要\n\n")
-                    f.write(f"| 項目 | 値 |\n")
-                    f.write(f"|------|-----|\n")
-                    f.write(f"| 実行時間 | {performance_context.get('total_time_sec', 0):.1f}秒 |\n")
-                    f.write(f"| データ読み込み | {performance_context.get('read_gb', 0):.2f}GB |\n")
-                    f.write(f"| 出力行数 | {performance_context.get('rows_produced', 0):,}行 |\n")
-                    f.write(f"| 読み込み行数 | {performance_context.get('rows_read', 0):,}行 |\n")
-                    f.write(f"| データ選択性 | {performance_context.get('data_selectivity', 0):.4f} |\n\n")
-                    
-                    # LLM分析結果
-                    llm_analysis = liquid_analysis.get('llm_analysis', '')
-                    if llm_analysis:
-                        f.write(f"### 🤖 LLM分析結果\n\n")
-                        f.write(f"{llm_analysis}\n\n")
-                    
-                    # 抽出されたメタデータ
-                    extracted_data = liquid_analysis.get('extracted_data', {})
-                    summary = liquid_analysis.get('summary', {})
-                    
-                    f.write(f"### 🔍 抽出されたメタデータ\n\n")
-                    f.write(f"- **フィルター条件**: {summary.get('total_filter_columns', 0)}個\n")
-                    f.write(f"- **JOIN条件**: {summary.get('total_join_columns', 0)}個\n")
-                    f.write(f"- **GROUP BY条件**: {summary.get('total_groupby_columns', 0)}個\n")
-                    f.write(f"- **集約関数**: {summary.get('total_aggregate_columns', 0)}個\n")
-                    f.write(f"- **識別テーブル**: {summary.get('tables_identified', 0)}個\n")
-                    f.write(f"- **スキャンノード**: {summary.get('scan_nodes_count', 0)}個\n\n")
-                    
-                    # 主要なフィルター条件（上位5個）
-                    filter_columns = extracted_data.get('filter_columns', [])
-                    if filter_columns:
-                        f.write(f"#### フィルター条件 (上位5個)\n\n")
-                        for i, filter_item in enumerate(filter_columns[:5], 1):
-                            f.write(f"{i}. `{filter_item.get('expression', '')}` (ノード: {filter_item.get('node_name', '')})\n")
-                        if len(filter_columns) > 5:
-                            f.write(f"... 他 {len(filter_columns) - 5}個\n")
-                        f.write("\n")
-                    
-                    # 主要なJOIN条件（上位5個）
-                    join_columns = extracted_data.get('join_columns', [])
-                    if join_columns:
-                        f.write(f"#### JOIN条件 (上位5個)\n\n")
-                        for i, join_item in enumerate(join_columns[:5], 1):
-                            f.write(f"{i}. `{join_item.get('expression', '')}` ({join_item.get('key_type', '')})\n")
-                        if len(join_columns) > 5:
-                            f.write(f"... 他 {len(join_columns) - 5}個\n")
-                        f.write("\n")
-                    
-                    # テーブル情報
-                    table_info = extracted_data.get('table_info', {})
-                    if table_info:
-                        f.write(f"#### 🏷️ 識別されたテーブル ({len(table_info)}個)\n\n")
-                        for table_name, table_details in table_info.items():
-                            f.write(f"- **{table_name}** (ノード: {table_details.get('node_name', '')})\n")
-                        f.write("\n")
-                    
-                    # 分析サマリー
-                    f.write(f"### 📋 分析サマリー\n\n")
-                    f.write(f"- **分析方法**: {summary.get('analysis_method', 'Unknown')}\n")
-                    f.write(f"- **LLMプロバイダー**: {summary.get('llm_provider', 'Unknown')}\n")
-                    f.write(f"- **分析対象テーブル数**: {summary.get('tables_identified', 0)}\n")
-                    f.write(f"- **抽出カラム数**: フィルター({summary.get('total_filter_columns', 0)}) + JOIN({summary.get('total_join_columns', 0)}) + GROUP BY({summary.get('total_groupby_columns', 0)})\n\n")
-                    
-                else:
-                    # 英語版
-                    f.write(f"\n\n## 🗂️ Liquid Clustering Analysis Results\n\n")
-                    
-                    # Performance overview
-                    performance_context = liquid_analysis.get('performance_context', {})
-                    f.write(f"### 📊 Performance Overview\n\n")
-                    f.write(f"| Item | Value |\n")
-                    f.write(f"|------|-------|\n")
-                    f.write(f"| Execution Time | {performance_context.get('total_time_sec', 0):.1f}s |\n")
-                    f.write(f"| Data Read | {performance_context.get('read_gb', 0):.2f}GB |\n")
-                    f.write(f"| Rows Produced | {performance_context.get('rows_produced', 0):,} |\n")
-                    f.write(f"| Rows Read | {performance_context.get('rows_read', 0):,} |\n")
-                    f.write(f"| Data Selectivity | {performance_context.get('data_selectivity', 0):.4f} |\n\n")
-                    
-                    # LLM analysis results
-                    llm_analysis = liquid_analysis.get('llm_analysis', '')
-                    if llm_analysis:
-                        f.write(f"### 🤖 LLM Analysis Results\n\n")
-                        f.write(f"{llm_analysis}\n\n")
-                    
-                    # Extracted metadata
-                    extracted_data = liquid_analysis.get('extracted_data', {})
-                    summary = liquid_analysis.get('summary', {})
-                    
-                    f.write(f"### 🔍 Extracted Metadata\n\n")
-                    f.write(f"- **Filter Conditions**: {summary.get('total_filter_columns', 0)}\n")
-                    f.write(f"- **JOIN Conditions**: {summary.get('total_join_columns', 0)}\n")
-                    f.write(f"- **GROUP BY Conditions**: {summary.get('total_groupby_columns', 0)}\n")
-                    f.write(f"- **Aggregate Functions**: {summary.get('total_aggregate_columns', 0)}\n")
-                    f.write(f"- **Identified Tables**: {summary.get('tables_identified', 0)}\n")
-                    f.write(f"- **Scan Nodes**: {summary.get('scan_nodes_count', 0)}\n\n")
-                    
-                    # Main filter conditions (top 5)
-                    filter_columns = extracted_data.get('filter_columns', [])
-                    if filter_columns:
-                        f.write(f"#### Filter Conditions (Top 5)\n\n")
-                        for i, filter_item in enumerate(filter_columns[:5], 1):
-                            f.write(f"{i}. `{filter_item.get('expression', '')}` (Node: {filter_item.get('node_name', '')})\n")
-                        if len(filter_columns) > 5:
-                            f.write(f"... {len(filter_columns) - 5} more\n")
-                        f.write("\n")
-                    
-                    # Main JOIN conditions (top 5)
-                    join_columns = extracted_data.get('join_columns', [])
-                    if join_columns:
-                        f.write(f"#### JOIN Conditions (Top 5)\n\n")
-                        for i, join_item in enumerate(join_columns[:5], 1):
-                            f.write(f"{i}. `{join_item.get('expression', '')}` ({join_item.get('key_type', '')})\n")
-                        if len(join_columns) > 5:
-                            f.write(f"... {len(join_columns) - 5} more\n")
-                        f.write("\n")
-                    
-                    # Table information
-                    table_info = extracted_data.get('table_info', {})
-                    if table_info:
-                        f.write(f"#### 🏷️ Identified Tables ({len(table_info)})\n\n")
-                        for table_name, table_details in table_info.items():
-                            f.write(f"- **{table_name}** (Node: {table_details.get('node_name', '')})\n")
-                        f.write("\n")
-                    
-                    # Analysis summary
-                    f.write(f"### 📋 Analysis Summary\n\n")
-                    f.write(f"- **Analysis Method**: {summary.get('analysis_method', 'Unknown')}\n")
-                    f.write(f"- **LLM Provider**: {summary.get('llm_provider', 'Unknown')}\n")
-                    f.write(f"- **Target Tables**: {summary.get('tables_identified', 0)}\n")
-                    f.write(f"- **Extracted Columns**: Filter({summary.get('total_filter_columns', 0)}) + JOIN({summary.get('total_join_columns', 0)}) + GROUP BY({summary.get('total_groupby_columns', 0)})\n\n")
-                        
-        except Exception as e:
-            error_msg = f"⚠️ Liquid Clustering分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating Liquid Clustering analysis: {str(e)}\n"
-            f.write(error_msg)
-        
-        # ボトルネック分析結果の追加（output_bottleneck_analysis_resultからマージ）
-        try:
-            if OUTPUT_LANGUAGE == 'ja':
-                f.write(f"\n\n## 🎯 ボトルネック分析結果\n\n")
-                f.write(f"### 🤖 LLMによる詳細分析\n\n")
-                
-                # thinking_enabled対応: analysis_resultがリストの場合の処理
-                if isinstance(analysis_result, list):
-                    analysis_result_str = format_thinking_response(analysis_result)
-                else:
-                    analysis_result_str = str(analysis_result)
-                
-                # signature情報の除去
-                import re
-                signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
-                analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
-                
-                f.write(f"{analysis_result_str}\n\n")
-                
-                # 主要メトリクスの概要
-                f.write(f"### 📊 主要パフォーマンス指標\n\n")
-                f.write(f"| 指標 | 値 | 評価 |\n")
-                f.write(f"|------|-----|------|\n")
-                
-                # Photon利用状況
-                photon_enabled = overall_metrics.get('photon_enabled', False)
-                photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
-                photon_status = "✅ 良好" if photon_enabled and photon_utilization > 80 else "⚠️ 改善必要" if photon_enabled else "❌ 未有効"
-                f.write(f"| Photon有効 | {'はい' if photon_enabled else 'いいえ'} | {photon_status} |\n")
-                f.write(f"| Photon利用率 | {min(photon_utilization, 100.0):.1f}% | {photon_status} |\n")
-                
-                # キャッシュ効率
-                cache_ratio = bottleneck_indicators.get('cache_hit_ratio', 0) * 100
-                cache_status = "✅ 良好" if cache_ratio > 80 else "⚠️ 改善必要" if cache_ratio > 50 else "❌ 低効率"
-                f.write(f"| キャッシュ効率 | {cache_ratio:.1f}% | {cache_status} |\n")
-                
-                # データ選択性
-                data_selectivity = bottleneck_indicators.get('data_selectivity', 0) * 100
-                selectivity_status = "✅ 良好" if data_selectivity > 10 else "⚠️ 改善必要" if data_selectivity > 1 else "❌ 非効率"
-                f.write(f"| データ選択性 | {data_selectivity:.2f}% | {selectivity_status} |\n")
-                
-                # シャッフル操作
-                shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
-                shuffle_status = "✅ 良好" if shuffle_count < 5 else "⚠️ 注意" if shuffle_count < 10 else "❌ 多数"
-                f.write(f"| シャッフル操作 | {shuffle_count}回 | {shuffle_status} |\n")
-                
-                # 並列度
-                parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
-                parallelism_status = "✅ 良好" if parallelism_count == 0 else "⚠️ 改善必要" if parallelism_count < 3 else "❌ 問題あり"
-                f.write(f"| 低並列度ステージ | {parallelism_count}個 | {parallelism_status} |\n")
-                
-                f.write("\n")
-                
-                # 主要ボトルネック
-                f.write(f"### 🚨 主要ボトルネック\n\n")
-                bottlenecks = []
-                
-                if bottleneck_indicators.get('has_spill', False):
-                    spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
-                    bottlenecks.append(f"**メモリスピル**: {spill_gb:.2f}GB - メモリ不足による性能低下")
-                
-                if bottleneck_indicators.get('has_shuffle_bottleneck', False):
-                    bottlenecks.append("**シャッフルボトルネック**: JOIN/GROUP BY処理での大量データ転送")
-                
-                if cache_ratio < 50:
-                    bottlenecks.append("**キャッシュ効率低下**: データ再利用効率が低い")
-                
-                if not photon_enabled:
-                    bottlenecks.append("**Photon未有効**: 高速処理エンジンが利用されていない")
-                elif photon_utilization < 50:
-                    bottlenecks.append("**Photon利用率低下**: 処理がPhotonエンジンを十分活用していない")
-                
-                if data_selectivity < 1:
-                    bottlenecks.append("**データ選択性低下**: 必要以上のデータを読み込んでいる")
-                
-                if bottlenecks:
-                    for i, bottleneck in enumerate(bottlenecks, 1):
-                        f.write(f"{i}. {bottleneck}\n")
-                else:
-                    f.write("主要なボトルネックは検出されませんでした。\n")
-                
-                f.write("\n")
-                
-            else:
-                # 英語版
-                f.write(f"\n\n## 🎯 Bottleneck Analysis Results\n\n")
-                f.write(f"### 🤖 Detailed LLM Analysis\n\n")
-                
-                # thinking_enabled対応: analysis_resultがリストの場合の処理
-                if isinstance(analysis_result, list):
-                    analysis_result_str = format_thinking_response(analysis_result)
-                else:
-                    analysis_result_str = str(analysis_result)
-                
-                # signature情報の除去
-                import re
-                signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
-                analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
-                
-                f.write(f"{analysis_result_str}\n\n")
-                
-                # 主要メトリクスの概要
-                f.write(f"### 📊 Key Performance Indicators\n\n")
-                f.write(f"| Metric | Value | Status |\n")
-                f.write(f"|--------|-------|--------|\n")
-                
-                # Photon利用状況
-                photon_enabled = overall_metrics.get('photon_enabled', False)
-                photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
-                photon_status = "✅ Good" if photon_enabled and photon_utilization > 80 else "⚠️ Needs Improvement" if photon_enabled else "❌ Not Enabled"
-                f.write(f"| Photon Enabled | {'Yes' if photon_enabled else 'No'} | {photon_status} |\n")
-                f.write(f"| Photon Utilization | {min(photon_utilization, 100.0):.1f}% | {photon_status} |\n")
-                
-                # キャッシュ効率
-                cache_ratio = bottleneck_indicators.get('cache_hit_ratio', 0) * 100
-                cache_status = "✅ Good" if cache_ratio > 80 else "⚠️ Needs Improvement" if cache_ratio > 50 else "❌ Poor"
-                f.write(f"| Cache Efficiency | {cache_ratio:.1f}% | {cache_status} |\n")
-                
-                # データ選択性
-                data_selectivity = bottleneck_indicators.get('data_selectivity', 0) * 100
-                selectivity_status = "✅ Good" if data_selectivity > 10 else "⚠️ Needs Improvement" if data_selectivity > 1 else "❌ Poor"
-                f.write(f"| Data Selectivity | {data_selectivity:.2f}% | {selectivity_status} |\n")
-                
-                # シャッフル操作
-                shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
-                shuffle_status = "✅ Good" if shuffle_count < 5 else "⚠️ Moderate" if shuffle_count < 10 else "❌ High"
-                f.write(f"| Shuffle Operations | {shuffle_count} times | {shuffle_status} |\n")
-                
-                # 並列度
-                parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
-                parallelism_status = "✅ Good" if parallelism_count == 0 else "⚠️ Needs Improvement" if parallelism_count < 3 else "❌ Poor"
-                f.write(f"| Low Parallelism Stages | {parallelism_count} stages | {parallelism_status} |\n")
-                
-                f.write("\n")
-                
-                # 主要ボトルネック
-                f.write(f"### 🚨 Key Bottlenecks\n\n")
-                bottlenecks = []
-                
-                if bottleneck_indicators.get('has_spill', False):
-                    spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
-                    bottlenecks.append(f"**Memory Spill**: {spill_gb:.2f}GB - Performance degradation due to memory shortage")
-                
-                if bottleneck_indicators.get('has_shuffle_bottleneck', False):
-                    bottlenecks.append("**Shuffle Bottleneck**: Large data transfer in JOIN/GROUP BY operations")
-                
-                if cache_ratio < 50:
-                    bottlenecks.append("**Cache Inefficiency**: Low data reuse efficiency")
-                
-                if not photon_enabled:
-                    bottlenecks.append("**Photon Not Enabled**: High-speed processing engine not utilized")
-                elif photon_utilization < 50:
-                    bottlenecks.append("**Low Photon Utilization**: Processing not fully utilizing Photon engine")
-                
-                if data_selectivity < 1:
-                    bottlenecks.append("**Poor Data Selectivity**: Reading more data than necessary")
-                
-                if bottlenecks:
-                    for i, bottleneck in enumerate(bottlenecks, 1):
-                        f.write(f"{i}. {bottleneck}\n")
-                else:
-                    f.write("No major bottlenecks detected.\n")
-                
-                f.write("\n")
-                
-        except Exception as e:
-            error_msg = f"⚠️ ボトルネック分析結果の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating bottleneck analysis results: {str(e)}\n"
-            f.write(error_msg)
+        # 旧レポート生成コードは削除（新しいgenerate_comprehensive_optimization_reportに統合済み）
         
         # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
     
