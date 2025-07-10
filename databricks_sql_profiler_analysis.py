@@ -4772,6 +4772,39 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     except Exception as e:
         return f"⚠️ SQL最適化の生成中にエラーが発生しました: {str(e)}"
 
+def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
+    """
+    ShuffleノードからSHUFFLE_ATTRIBUTESを抽出
+    
+    Args:
+        node: ノード情報
+        
+    Returns:
+        list: 検出されたShuffle attributes
+    """
+    shuffle_attributes = []
+    
+    # metadataからSHUFFLE_ATTRIBUTESを検索
+    metadata = node.get('metadata', [])
+    if isinstance(metadata, list):
+        for item in metadata:
+            if isinstance(item, dict) and item.get('key') == 'SHUFFLE_ATTRIBUTES':
+                values = item.get('values', [])
+                if isinstance(values, list):
+                    shuffle_attributes.extend(values)
+    
+    # raw_metricsからも検索
+    raw_metrics = node.get('metrics', [])
+    if isinstance(raw_metrics, list):
+        for metric in raw_metrics:
+            if isinstance(metric, dict) and metric.get('key') == 'SHUFFLE_ATTRIBUTES':
+                values = metric.get('values', [])
+                if isinstance(values, list):
+                    shuffle_attributes.extend(values)
+    
+    # 重複を削除
+    return list(set(shuffle_attributes))
+
 def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, Any]) -> str:
     """
     最も時間がかかっている処理TOP10のレポートを文字列として生成
@@ -5005,6 +5038,24 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     # メトリクス名の表示形式を統一
                     formatted_display = f"{metric_name}: {spill_display}"
                     report_lines.append(f"    💿 スピル詳細: {formatted_display}")
+                    
+                    # Shuffleノードでスピル発生時にShuffle attributesを検出して表示
+                    if "shuffle" in raw_node_name.lower():
+                        shuffle_attributes = extract_shuffle_attributes(node)
+                        if shuffle_attributes:
+                            report_lines.append(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
+                            
+                            # REPARTITIONヒントの提案
+                            if len(shuffle_attributes) > 0:
+                                # 適切な並列度を提案（現在の並列度の1.5倍を推奨）
+                                suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
+                                main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
+                                
+                                report_lines.append(f"    💡 最適化提案: REPARTITIONヒント")
+                                report_lines.append(f"       REPARTITION({suggested_partitions}, {main_attribute})")
+                                report_lines.append(f"       理由: スピル({spill_display})を改善するため")
+                        else:
+                            report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
                 else:
                     report_lines.append(f"    💿 スピル詳細: 検出済み ({spill_detection_method})")
             else:
