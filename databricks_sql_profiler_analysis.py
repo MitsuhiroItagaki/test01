@@ -3171,23 +3171,19 @@ if sorted_nodes:
                 else:
                     value_display = f"{value} bytes"
                 
-                # 全体のスピル値を取得（bottleneck_indicatorsから）
-                bottleneck_indicators = extracted_metrics.get('bottleneck_indicators', {})
-                total_spill_bytes = bottleneck_indicators.get('spill_bytes', value)
-                
-                # 全体のスピル値を適切な単位で表示
-                if total_spill_bytes >= 1024 * 1024 * 1024:  # GB単位
-                    total_value_display = f"{total_spill_bytes/1024/1024/1024:.1f} GB"
-                elif total_spill_bytes >= 1024 * 1024:  # MB単位
-                    total_value_display = f"{total_spill_bytes/1024/1024:.1f} MB"
-                elif total_spill_bytes >= 1024:  # KB単位
-                    total_value_display = f"{total_spill_bytes/1024:.1f} KB"
+                # 正確なスピル値を適切な単位で表示
+                if value >= 1024 * 1024 * 1024:  # GB単位
+                    value_display = f"{value/1024/1024/1024:.2f} GB"
+                elif value >= 1024 * 1024:  # MB単位
+                    value_display = f"{value/1024/1024:.1f} MB"
+                elif value >= 1024:  # KB単位
+                    value_display = f"{value/1024:.1f} KB"
                 else:
-                    total_value_display = f"{total_spill_bytes} bytes"
+                    value_display = f"{value} bytes"
                 
-                print(f"       🎯 ターゲットメトリクス: 'Sink/Num bytes spilled to disk due to memory pressure'")
-                print(f"       📊 検出値: {total_value_display} (exact_match_detailed (Num bytes spilled to disk due to memory pressure))")
-                print(f"       🔍 メトリクス名: Num bytes spilled to disk due to memory pressure")
+                print(f"       🎯 ターゲットメトリクス: '{metric_name}'")
+                print(f"       📊 検出値: {value_display}")
+                print(f"       🔍 メトリクス名: {metric_name}")
                 if label and label != metric_name:
                     print(f"       🏷️  ラベル: {label}")
                 print(f"       ✅ 判定: スピルあり (値 > 0)")
@@ -4865,7 +4861,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     report_lines.append("## 🐌 最も時間がかかっている処理TOP10")
     report_lines.append("=" * 80)
     report_lines.append("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
-    report_lines.append('💿 スピル判定: "Sink/Num bytes spilled to disk due to memory pressure" > 0')
+    report_lines.append('💿 スピル判定: "Num bytes spilled to disk due to memory pressure" または "Sink - Num bytes spilled to disk due to memory pressure" > 0')
     report_lines.append("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
     report_lines.append("")
 
@@ -5103,10 +5099,22 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if spill_bytes > 0:
                     spill_mb = spill_bytes / 1024 / 1024
                     if spill_mb >= 1024:  # GB単位
-                        spill_display = f"{spill_mb/1024:.1f} GB"
+                        spill_display = f"{spill_mb/1024:.2f} GB"
                     else:  # MB単位
                         spill_display = f"{spill_mb:.1f} MB"
-                    report_lines.append(f"    💿 スピル詳細: {spill_display} ({spill_detection_method})")
+                    
+                    # メトリクス名を抽出してフォーマット
+                    metric_name = "Unknown"
+                    if "exact_match_detailed" in spill_detection_method or "exact_match_raw" in spill_detection_method:
+                        # カッコの中のメトリクス名を抽出
+                        start = spill_detection_method.find("(") + 1
+                        end = spill_detection_method.find(")")
+                        if start > 0 and end > start:
+                            metric_name = spill_detection_method[start:end]
+                    
+                    # メトリクス名の表示形式を統一
+                    formatted_display = f"{metric_name}: {spill_display}"
+                    report_lines.append(f"    💿 スピル詳細: {formatted_display}")
                 else:
                     report_lines.append(f"    💿 スピル詳細: 検出済み ({spill_detection_method})")
             else:
@@ -5745,14 +5753,40 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         
         # 主要メトリクスの追加（多言語対応）
         overall_metrics = metrics.get('overall_metrics', {})
+        bottleneck_indicators = metrics.get('bottleneck_indicators', {})
+        spill_details = bottleneck_indicators.get('spill_details', [])
+        total_spill_bytes = bottleneck_indicators.get('spill_bytes', 0)
+        
         if OUTPUT_LANGUAGE == 'ja':
             f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
             f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
-            f.write(f"- **スピル**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"- **スピル合計**: {total_spill_bytes / 1024 / 1024 / 1024:.2f} GB\n")
+            
+            # スピル詳細情報を追加
+            if spill_details:
+                f.write("  - **スピル詳細**:\n")
+                for detail in spill_details[:3]:  # 上位3つのスピルを表示
+                    spill_gb = detail['spill_bytes'] / 1024 / 1024 / 1024
+                    node_name = detail['node_name'][:50] + "..." if len(detail['node_name']) > 50 else detail['node_name']
+                    spill_metric = detail['spill_metric']
+                    f.write(f"    - {node_name}: {spill_gb:.2f} GB ({spill_metric})\n")
+                if len(spill_details) > 3:
+                    f.write(f"    - ... 他{len(spill_details) - 3}個のノード\n")
         else:
             f.write(f"- **Execution Time**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
             f.write(f"- **Data Read**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
-            f.write(f"- **Spill**: {metrics.get('bottleneck_indicators', {}).get('spill_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"- **Total Spill**: {total_spill_bytes / 1024 / 1024 / 1024:.2f} GB\n")
+            
+            # スピル詳細情報を追加（英語版）
+            if spill_details:
+                f.write("  - **Spill Details**:\n")
+                for detail in spill_details[:3]:  # Show top 3 spills
+                    spill_gb = detail['spill_bytes'] / 1024 / 1024 / 1024
+                    node_name = detail['node_name'][:50] + "..." if len(detail['node_name']) > 50 else detail['node_name']
+                    spill_metric = detail['spill_metric']
+                    f.write(f"    - {node_name}: {spill_gb:.2f} GB ({spill_metric})\n")
+                if len(spill_details) > 3:
+                    f.write(f"    - ... {len(spill_details) - 3} more nodes\n")
         
         # プラン情報の抽出と保存
         plan_files = {}
