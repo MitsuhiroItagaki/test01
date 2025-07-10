@@ -2585,33 +2585,42 @@ if sorted_nodes:
             if duration_ms > 0:  # このノードに関連するステージを推定
                 num_tasks = max(num_tasks, stage.get('num_tasks', 0))
         
-        # ディスクスピルアウトの検出（Sink - Num bytes spilled to disk due to memory pressure ベース）
+        # ディスクスピルアウトの検出（メモリプレッシャーによるスピルメトリクス対応改善版）
         spill_detected = False
         spill_bytes = 0
         spill_details = []
         
-        # スピル検出ターゲットメトリクス名
-        target_spill_metric = "Sink - Num bytes spilled to disk due to memory pressure"
+        # スピル検出ターゲットメトリクス名リスト（複数パターン対応）
+        target_spill_metrics = [
+            "Sink - Num bytes spilled to disk due to memory pressure",
+            "Num bytes spilled to disk due to memory pressure",
+            "bytes spilled to disk due to memory pressure",
+            "spilled to disk due to memory pressure"
+        ]
         
-        # 1. detailed_metricsから「Sink - Num bytes spilled to disk due to memory pressure」を検索
+        # 1. detailed_metricsからスピルメトリクスを検索（柔軟検索）
         detailed_metrics = node.get('detailed_metrics', {})
         for metric_key, metric_info in detailed_metrics.items():
             metric_value = metric_info.get('value', 0)
             metric_label = metric_info.get('label', '')
             
-            # ターゲットメトリクスの完全一致またはlabelでの一致をチェック
-            if (metric_key == target_spill_metric or 
-                metric_label == target_spill_metric) and metric_value > 0:
+            # 部分文字列マッチングでスピルメトリクスを検索
+            key_matches = any(target in metric_key for target in target_spill_metrics)
+            label_matches = any(target in metric_label for target in target_spill_metrics)
+            
+            if (key_matches or label_matches) and metric_value > 0:
                 spill_detected = True
                 spill_bytes = metric_value
+                matched_target = next((target for target in target_spill_metrics if target in metric_key or target in metric_label), "unknown")
                 spill_details.append({
                     'metric_name': metric_key,
                     'value': metric_value,
                     'label': metric_label,
                     'source': 'detailed_metrics',
-                    'matched_field': 'key' if metric_key == target_spill_metric else 'label'
+                    'matched_field': 'key' if key_matches else 'label',
+                    'matched_pattern': matched_target
                 })
-                break  # ターゲットメトリクスが見つかったら他は無視
+                break  # 最初に見つかったスピルメトリクスを使用
         
         # 2. detailed_metricsで見つからない場合、生メトリクスから検索
         if not spill_detected:
@@ -2621,33 +2630,40 @@ if sorted_nodes:
                 metric_label = metric.get('label', '')
                 metric_value = metric.get('value', 0)
                 
-                # ターゲットメトリクスの完全一致をチェック
-                if (metric_key == target_spill_metric or 
-                    metric_label == target_spill_metric) and metric_value > 0:
+                # 部分文字列マッチングでスピルメトリクスを検索
+                key_matches = any(target in metric_key for target in target_spill_metrics)
+                label_matches = any(target in metric_label for target in target_spill_metrics)
+                
+                if (key_matches or label_matches) and metric_value > 0:
                     spill_detected = True
                     spill_bytes = metric_value
+                    matched_target = next((target for target in target_spill_metrics if target in metric_key or target in metric_label), "unknown")
                     spill_details.append({
                         'metric_name': metric_key,
                         'value': metric_value,
                         'label': metric_label,
                         'source': 'raw_metrics',
-                        'matched_field': 'key' if metric_key == target_spill_metric else 'label'
+                        'matched_field': 'key' if key_matches else 'label',
+                        'matched_pattern': matched_target
                     })
-                    break  # ターゲットメトリクスが見つかったら他は無視
+                    break  # 最初に見つかったスピルメトリクスを使用
         
         # 3. key_metricsでも検索（フォールバック）
         if not spill_detected:
             key_metrics = node.get('key_metrics', {})
             for key_metric_name, key_metric_value in key_metrics.items():
-                if key_metric_name == target_spill_metric and key_metric_value > 0:
+                key_matches = any(target in key_metric_name for target in target_spill_metrics)
+                if key_matches and key_metric_value > 0:
                     spill_detected = True
                     spill_bytes = key_metric_value
+                    matched_target = next((target for target in target_spill_metrics if target in key_metric_name), "unknown")
                     spill_details.append({
                         'metric_name': f"key_metrics.{key_metric_name}",
                         'value': key_metric_value,
                         'label': f"Key metric: {key_metric_name}",
                         'source': 'key_metrics',
-                        'matched_field': 'key'
+                        'matched_field': 'key',
+                        'matched_pattern': matched_target
                     })
                     break
         
@@ -2735,6 +2751,41 @@ if sorted_nodes:
                             'severity': severity_level,
                             'description': f'{metric_name}スキュー: max({max_val:,})/median({median_val:,}) = {ratio:.1f} > 基準値 4.0 [重要度:{severity_level}]'
                         })
+        
+        # 4. スピルメトリクスに基づくスキュー検出（メモリプレッシャーによるスピルの不均等を検出）
+        if spill_detected and spill_bytes > 0:
+            # スピルが検出された場合、それ自体がスキューの可能性を示す
+            # 特に大きなスピルが発生している場合はスキューの可能性が高い
+            spill_mb = spill_bytes / 1024 / 1024
+            if spill_mb > 100:  # 100MB以上のスピルがある場合
+                skew_detected = True
+                severity_level = "高" if spill_mb > 1000 else "中"  # 1GB以上は高重要度
+                skew_details.append({
+                    'type': 'memory_pressure_spill_skew',
+                    'spill_bytes': spill_bytes,
+                    'spill_mb': spill_mb,
+                    'threshold': 100,
+                    'severity': severity_level,
+                    'description': f'メモリプレッシャーによるスピルスキュー: {spill_mb:.1f}MB スピル発生（基準値: 100MB） [重要度:{severity_level}]'
+                })
+        
+        # 5. タスク数とスピルの関係によるスキュー検出の強化
+        if spill_detected and num_tasks > 10:
+            # 多数のタスクがあるのにスピルが発生している場合、データの不均等分散の可能性
+            # タスクあたりのスピル量を計算
+            spill_per_task_mb = (spill_bytes / num_tasks) / 1024 / 1024
+            if spill_per_task_mb > 10:  # タスクあたり10MB以上のスピル
+                skew_detected = True
+                severity_level = "高" if spill_per_task_mb > 50 else "中"
+                skew_details.append({
+                    'type': 'task_spill_distribution_skew',
+                    'spill_per_task_mb': spill_per_task_mb,
+                    'num_tasks': num_tasks,
+                    'total_spill_mb': spill_bytes / 1024 / 1024,
+                    'threshold': 10,
+                    'severity': severity_level,
+                    'description': f'タスクあたりスピル量スキュー: {spill_per_task_mb:.1f}MB/タスク ({num_tasks}タスク中) [重要度:{severity_level}]'
+                })
         
         # 並列度アイコン
         parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
