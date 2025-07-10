@@ -972,9 +972,16 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     if isinstance(detailed_metrics, dict):
         if debug_mode:
             print(f"    🔍 DEBUG: detailed_metrics検索 - {len(detailed_metrics)}個のキー")
+            # 最初の10個のキーを表示
+            key_list = list(detailed_metrics.keys())[:10]
+            print(f"    🔍 DEBUG: detailed_metrics キー例: {key_list}")
+        
         for key, info in detailed_metrics.items():
-            if debug_mode and len(detailed_metrics) < 10:  # 少ない場合のみ全て表示
-                print(f"    🔍 DEBUG: detailed_metrics['{key}'] = {info}")
+            if debug_mode:
+                # SHUFFLE_ATTRIBUTESまたはShuffle attributesに関連するキーを特別に表示
+                if ('SHUFFLE' in key.upper() or 'ATTRIBUTE' in key.upper() or 
+                    (isinstance(info, dict) and 'shuffle' in info.get('label', '').lower())):
+                    print(f"    🔍 DEBUG: 関連キー '{key}' = {info}")
             
             if (key == 'SHUFFLE_ATTRIBUTES' or 
                 (isinstance(info, dict) and info.get('label') == 'Shuffle attributes')):
