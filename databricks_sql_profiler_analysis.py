@@ -3181,9 +3181,9 @@ if sorted_nodes:
                 else:
                     value_display = f"{value} bytes"
                 
-                print(f"       🎯 ターゲットメトリクス: '{metric_name}'")
+                print(f"       🎯 ターゲットメトリクス: 'Num bytes spilled to disk due to memory pressure' または 'Sink - Num bytes spilled to disk due to memory pressure'")
                 print(f"       📊 検出値: {value_display}")
-                print(f"       🔍 メトリクス名: {metric_name}")
+                print(f"       🔍 検出されたメトリクス名: {metric_name}")
                 if label and label != metric_name:
                     print(f"       🏷️  ラベル: {label}")
                 print(f"       ✅ 判定: スピルあり (値 > 0)")
@@ -3192,7 +3192,7 @@ if sorted_nodes:
             import os
             if os.environ.get('DEBUG_SPILL_ANALYSIS', '').lower() in ['true', '1', 'yes']:
                 print(f"    🔍 スピル未検出:")
-                print(f"       🎯 ターゲットメトリクス: 'Sink/Num bytes spilled to disk due to memory pressure'")
+                print(f"       🎯 ターゲットメトリクス: 'Num bytes spilled to disk due to memory pressure' または 'Sink - Num bytes spilled to disk due to memory pressure'")
                 print(f"       ❌ 検出結果: メトリクスが見つからないか、値が0")
                 
                 # 各ソースでの検索結果を表示
