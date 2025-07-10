@@ -898,7 +898,55 @@ def get_most_specific_process_name_from_list(node_names: list) -> str:
     
     return ""
 
-print("✅ 関数定義完了: get_meaningful_node_name")
+def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
+    """
+    ShuffleノードからSHUFFLE_ATTRIBUTESを抽出
+    
+    Args:
+        node: ノード情報
+        
+    Returns:
+        list: 検出されたShuffle attributes
+    """
+    shuffle_attributes = []
+    
+    # metadataからSHUFFLE_ATTRIBUTESを検索
+    metadata = node.get('metadata', [])
+    if isinstance(metadata, list):
+        for item in metadata:
+            if isinstance(item, dict):
+                # keyとlabelの両方をチェック
+                if (item.get('key') == 'SHUFFLE_ATTRIBUTES' or 
+                    item.get('label') == 'Shuffle attributes'):
+                    values = item.get('values', [])
+                    if isinstance(values, list):
+                        shuffle_attributes.extend(values)
+    
+    # raw_metricsからも検索（labelもチェック）
+    raw_metrics = node.get('metrics', [])
+    if isinstance(raw_metrics, list):
+        for metric in raw_metrics:
+            if isinstance(metric, dict):
+                if (metric.get('key') == 'SHUFFLE_ATTRIBUTES' or 
+                    metric.get('label') == 'Shuffle attributes'):
+                    values = metric.get('values', [])
+                    if isinstance(values, list):
+                        shuffle_attributes.extend(values)
+    
+    # detailed_metricsからも検索
+    detailed_metrics = node.get('detailed_metrics', {})
+    if isinstance(detailed_metrics, dict):
+        for key, info in detailed_metrics.items():
+            if (key == 'SHUFFLE_ATTRIBUTES' or 
+                info.get('label') == 'Shuffle attributes'):
+                values = info.get('values', [])
+                if isinstance(values, list):
+                    shuffle_attributes.extend(values)
+    
+    # 重複を削除
+    return list(set(shuffle_attributes))
+
+print("✅ 関数定義完了: get_meaningful_node_name, extract_shuffle_attributes")
 
 # COMMAND ----------
 
@@ -4638,53 +4686,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     except Exception as e:
         return f"⚠️ SQL最適化の生成中にエラーが発生しました: {str(e)}"
 
-def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
-    """
-    ShuffleノードからSHUFFLE_ATTRIBUTESを抽出
-    
-    Args:
-        node: ノード情報
-        
-    Returns:
-        list: 検出されたShuffle attributes
-    """
-    shuffle_attributes = []
-    
-    # metadataからSHUFFLE_ATTRIBUTESを検索
-    metadata = node.get('metadata', [])
-    if isinstance(metadata, list):
-        for item in metadata:
-            if isinstance(item, dict):
-                # keyとlabelの両方をチェック
-                if (item.get('key') == 'SHUFFLE_ATTRIBUTES' or 
-                    item.get('label') == 'Shuffle attributes'):
-                    values = item.get('values', [])
-                    if isinstance(values, list):
-                        shuffle_attributes.extend(values)
-    
-    # raw_metricsからも検索（labelもチェック）
-    raw_metrics = node.get('metrics', [])
-    if isinstance(raw_metrics, list):
-        for metric in raw_metrics:
-            if isinstance(metric, dict):
-                if (metric.get('key') == 'SHUFFLE_ATTRIBUTES' or 
-                    metric.get('label') == 'Shuffle attributes'):
-                    values = metric.get('values', [])
-                    if isinstance(values, list):
-                        shuffle_attributes.extend(values)
-    
-    # detailed_metricsからも検索
-    detailed_metrics = node.get('detailed_metrics', {})
-    if isinstance(detailed_metrics, dict):
-        for key, info in detailed_metrics.items():
-            if (key == 'SHUFFLE_ATTRIBUTES' or 
-                info.get('label') == 'Shuffle attributes'):
-                values = info.get('values', [])
-                if isinstance(values, list):
-                    shuffle_attributes.extend(values)
-    
-    # 重複を削除
-    return list(set(shuffle_attributes))
+
 
 def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, Any]) -> str:
     """
@@ -4899,6 +4901,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
             
             # スピル詳細情報（シンプル表示）
+            spill_display = ""
             if spill_detected and spill_bytes > 0:
                 spill_mb = spill_bytes / 1024 / 1024
                 if spill_mb >= 1024:  # GB単位
@@ -4918,7 +4921,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                     
                     report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
-                    if spill_detected and spill_bytes > 0:
+                    if spill_detected and spill_bytes > 0 and spill_display:
                         report_lines.append(f"       理由: スピル({spill_display})を改善するため")
                     else:
                         report_lines.append(f"       理由: Shuffle効率を改善するため")
