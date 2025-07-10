@@ -3017,69 +3017,97 @@ if sorted_nodes:
         
         # AQEベーススキュー検出: "AQEShuffleRead - Number of skewed partitions" > 0
         target_aqe_metrics = [
-            "AQEShuffleRead - Number of skewed partitions"
+            "AQEShuffleRead - Number of skewed partitions",
+            "AQEShuffleRead - Number of skewed partition splits"
         ]
         
         aqe_skew_value = 0
+        aqe_split_value = 0
         aqe_metric_name = ""
+        aqe_split_metric_name = ""
         
         # 1. detailed_metricsで検索
         detailed_metrics = node.get('detailed_metrics', {})
         for metric_key, metric_info in detailed_metrics.items():
-            if metric_key in target_aqe_metrics:
+            if metric_key == "AQEShuffleRead - Number of skewed partitions":
                 aqe_skew_value = metric_info.get('value', 0)
                 aqe_metric_name = metric_key
-                break
-            elif metric_info.get('label', '') in target_aqe_metrics:
+            elif metric_key == "AQEShuffleRead - Number of skewed partition splits":
+                aqe_split_value = metric_info.get('value', 0)
+                aqe_split_metric_name = metric_key
+            elif metric_info.get('label', '') == "AQEShuffleRead - Number of skewed partitions":
                 aqe_skew_value = metric_info.get('value', 0)
                 aqe_metric_name = metric_info.get('label', '')
-                break
+            elif metric_info.get('label', '') == "AQEShuffleRead - Number of skewed partition splits":
+                aqe_split_value = metric_info.get('value', 0)
+                aqe_split_metric_name = metric_info.get('label', '')
         
         # 2. raw_metricsで検索（フォールバック）
-        if aqe_skew_value == 0:
+        if aqe_skew_value == 0 or aqe_split_value == 0:
             raw_metrics = node.get('metrics', [])
             if isinstance(raw_metrics, list):
                 for raw_metric in raw_metrics:
                     if isinstance(raw_metric, dict):
                         # 'label'フィールドを最初にチェック
                         raw_metric_label = raw_metric.get('label', '')
-                        if raw_metric_label in target_aqe_metrics:
+                        if raw_metric_label == "AQEShuffleRead - Number of skewed partitions" and aqe_skew_value == 0:
                             aqe_skew_value = raw_metric.get('value', 0)
                             aqe_metric_name = raw_metric_label
-                            break
+                        elif raw_metric_label == "AQEShuffleRead - Number of skewed partition splits" and aqe_split_value == 0:
+                            aqe_split_value = raw_metric.get('value', 0)
+                            aqe_split_metric_name = raw_metric_label
+                        
                         # 'key'フィールドもチェック
                         raw_metric_key = raw_metric.get('key', '')
-                        if raw_metric_key in target_aqe_metrics:
+                        if raw_metric_key == "AQEShuffleRead - Number of skewed partitions" and aqe_skew_value == 0:
                             aqe_skew_value = raw_metric.get('value', 0)
                             aqe_metric_name = raw_metric_key
-                            break
+                        elif raw_metric_key == "AQEShuffleRead - Number of skewed partition splits" and aqe_split_value == 0:
+                            aqe_split_value = raw_metric.get('value', 0)
+                            aqe_split_metric_name = raw_metric_key
+                        
                         # 'metricName'フィールドもチェック（従来の互換性）
                         raw_metric_name = raw_metric.get('metricName', '')
-                        if raw_metric_name in target_aqe_metrics:
+                        if raw_metric_name == "AQEShuffleRead - Number of skewed partitions" and aqe_skew_value == 0:
                             aqe_skew_value = raw_metric.get('value', 0)
                             aqe_metric_name = raw_metric_name
-                            break
+                        elif raw_metric_name == "AQEShuffleRead - Number of skewed partition splits" and aqe_split_value == 0:
+                            aqe_split_value = raw_metric.get('value', 0)
+                            aqe_split_metric_name = raw_metric_name
         
         # 3. key_metricsで検索（フォールバック）
-        if aqe_skew_value == 0:
+        if aqe_skew_value == 0 or aqe_split_value == 0:
             key_metrics = node.get('key_metrics', {})
             for key_metric_name, key_metric_value in key_metrics.items():
-                if any(target in key_metric_name for target in target_aqe_metrics):
+                if "AQEShuffleRead - Number of skewed partitions" in key_metric_name and aqe_skew_value == 0:
                     aqe_skew_value = key_metric_value
                     aqe_metric_name = key_metric_name
-                    break
+                elif "AQEShuffleRead - Number of skewed partition splits" in key_metric_name and aqe_split_value == 0:
+                    aqe_split_value = key_metric_value
+                    aqe_split_metric_name = key_metric_name
         
         # AQEスキュー判定
         if aqe_skew_value > 0:
             skew_detected = True
             severity_level = "高" if aqe_skew_value >= 5 else "中"
+            
+            # 基本的なAQEスキュー検出情報
+            description = f'AQEスキュー検出: {aqe_metric_name} = {aqe_skew_value} > 基準値 0 [重要度:{severity_level}]'
+            
+            # split値も取得できた場合、詳細情報を追加
+            if aqe_split_value > 0:
+                description += f' | AQE検出詳細: Sparkが自動的に{aqe_skew_value}個のスキューパーティションを検出'
+                description += f' | AQE自動対応: Sparkが自動的に{aqe_split_value}個のパーティションに分割'
+            
             skew_details.append({
                 'type': 'aqe_skew',
                 'value': aqe_skew_value,
+                'split_value': aqe_split_value,
                 'threshold': 0,
                 'metric_name': aqe_metric_name,
+                'split_metric_name': aqe_split_metric_name,
                 'severity': severity_level,
-                'description': f'AQEスキュー検出: {aqe_metric_name} = {aqe_skew_value} > 基準値 0 [重要度:{severity_level}]'
+                'description': description
             })
         
         # 4. スピルメトリクスに基づくスキュー検出（メモリプレッシャーによるスピルの不均等を検出）
@@ -3262,9 +3290,17 @@ if sorted_nodes:
                 # より詳細なAQE情報の表示
                 if detail['type'] == 'aqe_skew':
                     aqe_value = detail['value']
+                    aqe_split_value = detail.get('split_value', 0)
                     metric_name = detail['metric_name']
+                    split_metric_name = detail.get('split_metric_name', '')
+                    
                     print(f"           📊 AQEベース検出: {metric_name} = {aqe_value}")
                     print(f"           🎯 AQE検出詳細: Sparkが自動的に{aqe_value}個のスキューパーティションを検出")
+                    
+                    # パーティション分割情報がある場合
+                    if aqe_split_value > 0 and split_metric_name:
+                        print(f"           ⚡ AQE自動対応: Sparkが自動的に{aqe_split_value}個のパーティションに分割")
+                        print(f"           🔄 分割メトリクス: {split_metric_name} = {aqe_split_value}")
                     
                     severity = detail.get('severity', '中')
                     severity_emoji = "🚨" if severity == "高" else "⚠️"
