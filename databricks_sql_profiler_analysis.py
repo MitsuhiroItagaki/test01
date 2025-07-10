@@ -2877,7 +2877,7 @@ print(f"\n🐌 最も時間がかかっている処理TOP10")
 print("=" * 80)
 print("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
 print('💿 スピル判定: "Sink - Num bytes spilled to disk due to memory pressure" > 0')
-print("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
+print("🎯 スキュー判定: 'AQEShuffleRead - Number of skewed partitions' > 0")
 
 # ノードを実行時間でソート
 sorted_nodes = sorted(extracted_metrics['node_metrics'], 
@@ -4862,7 +4862,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     report_lines.append("=" * 80)
     report_lines.append("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
     report_lines.append('💿 スピル判定: "Num bytes spilled to disk due to memory pressure" または "Sink - Num bytes spilled to disk due to memory pressure" > 0')
-    report_lines.append("🎯 スキュー判定: taskDuration・shuffleReadBytesの max/median比率 ≥ 3.0")
+    report_lines.append("🎯 スキュー判定: 'AQEShuffleRead - Number of skewed partitions' > 0")
     report_lines.append("")
 
     # ノードを実行時間でソート
@@ -5019,19 +5019,15 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 # メモリの10%がスピルしたと仮定（保守的な見積もり）
                 spill_bytes = int(memory_mb * 1024 * 1024 * 0.1)
             
-            # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用
+            # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用（正確なメトリクス名のみ）
             skew_detected = False
             skewed_partitions = 0
+            target_skew_metric = "AQEShuffleRead - Number of skewed partitions"
             
-            # detailed_metricsからAQEShuffleReadのNumber of skewed partitionsを探す
+            # detailed_metricsから正確なメトリクス名で検索
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
-                # AQEShuffleRead - Number of skewed partitions を探す
-                if ('aqeshuffleread' in metric_key.lower() and 
-                    'number of skewed partitions' in metric_key.lower()) or \
-                   ('shuffle read' in metric_key.lower() and 
-                    'skewed partitions' in metric_key.lower()) or \
-                   ('skewed partitions' in metric_key.lower()):
+                if metric_key == target_skew_metric:
                     try:
                         skewed_partitions = int(metric_info.get('value', 0))
                         if skewed_partitions > 0:
@@ -5040,21 +5036,16 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     except (ValueError, TypeError):
                         continue
             
-            # key_metricsからもAQE skewed partitions情報を探す（フォールバック）
+            # key_metricsから正確なメトリクス名で検索（フォールバック）
             if not skew_detected:
                 key_metrics = node.get('key_metrics', {})
-                for key_metric_name, key_metric_value in key_metrics.items():
-                    if ('skewed' in key_metric_name.lower() and 
-                        'partition' in key_metric_name.lower()) or \
-                       ('aqe' in key_metric_name.lower() and 
-                        'skew' in key_metric_name.lower()):
-                        try:
-                            skewed_partitions = int(key_metric_value)
-                            if skewed_partitions > 0:
-                                skew_detected = True
-                            break
-                        except (ValueError, TypeError):
-                            continue
+                if target_skew_metric in key_metrics:
+                    try:
+                        skewed_partitions = int(key_metrics[target_skew_metric])
+                        if skewed_partitions > 0:
+                            skew_detected = True
+                    except (ValueError, TypeError):
+                        pass
             
             # 並列度アイコン
             parallelism_icon = "🔥" if num_tasks >= 10 else "⚠️" if num_tasks >= 5 else "🐌"
@@ -5067,7 +5058,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             report_lines.append(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
             report_lines.append(f"    📊 処理行数: {rows_num:>8,} 行")
             report_lines.append(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'あり' if skew_detected else 'なし'}")
+            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'検出' if skew_detected else 'なし'}")
             
             # 効率性指標（行/秒）を計算
             if duration_ms > 0:
@@ -5144,7 +5135,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
-                report_lines.append(f"    ⚖️ スキュー詳細: {skewed_partitions} 個のスキューパーティション（AQE検出）")
+                report_lines.append(f"    ⚖️ スキュー詳細: {skewed_partitions} 個のスキューパーティション（AQEShuffleRead検出）")
             
             # ノードIDも表示
             report_lines.append(f"    🆔 ノードID: {node.get('node_id', node.get('id', 'N/A'))}")
