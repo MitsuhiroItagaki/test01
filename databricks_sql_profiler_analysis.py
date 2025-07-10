@@ -953,7 +953,187 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     # 重複を削除
     return list(set(shuffle_attributes))
 
-print("✅ 関数定義完了: get_meaningful_node_name, extract_shuffle_attributes")
+def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    セル33スタイルの詳細ボトルネック分析を実行し、構造化されたデータを返す
+    
+    Args:
+        extracted_metrics: 抽出されたメトリクス
+        
+    Returns:
+        dict: 詳細なボトルネック分析結果
+    """
+    detailed_analysis = {
+        "top_bottleneck_nodes": [],
+        "shuffle_optimization_hints": [],
+        "spill_analysis": {
+            "total_spill_gb": 0,
+            "spill_nodes": [],
+            "critical_spill_nodes": []
+        },
+        "skew_analysis": {
+            "skewed_nodes": [],
+            "total_skewed_partitions": 0
+        },
+        "performance_recommendations": []
+    }
+    
+    # ノードを実行時間でソート（TOP10）
+    sorted_nodes = sorted(extracted_metrics.get('node_metrics', []), 
+                         key=lambda x: x.get('key_metrics', {}).get('durationMs', 0), 
+                         reverse=True)
+    
+    total_duration = sum(node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes)
+    
+    for i, node in enumerate(sorted_nodes[:10]):
+        duration_ms = node.get('key_metrics', {}).get('durationMs', 0)
+        memory_mb = node.get('key_metrics', {}).get('peakMemoryBytes', 0) / 1024 / 1024
+        rows_num = node.get('key_metrics', {}).get('rowsNum', 0)
+        
+        # 並列度情報の取得
+        num_tasks = 0
+        for stage in extracted_metrics.get('stage_metrics', []):
+            if duration_ms > 0:
+                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+        
+        # スピル検出（セル33と同じロジック）
+        spill_detected = False
+        spill_bytes = 0
+        exact_spill_metrics = [
+            "Num bytes spilled to disk due to memory pressure",
+            "Sink - Num bytes spilled to disk due to memory pressure",
+            "Sink/Num bytes spilled to disk due to memory pressure"
+        ]
+        
+        # detailed_metricsから検索
+        detailed_metrics = node.get('detailed_metrics', {})
+        for metric_key, metric_info in detailed_metrics.items():
+            metric_value = metric_info.get('value', 0)
+            metric_label = metric_info.get('label', '')
+            
+            if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
+                spill_detected = True
+                spill_bytes = max(spill_bytes, metric_value)
+                break
+        
+        # raw_metricsから検索（フォールバック）
+        if not spill_detected:
+            raw_metrics = node.get('metrics', [])
+            for metric in raw_metrics:
+                metric_key = metric.get('key', '')
+                metric_label = metric.get('label', '')
+                metric_value = metric.get('value', 0)
+                
+                if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
+                    spill_detected = True
+                    spill_bytes = max(spill_bytes, metric_value)
+                    break
+        
+        # スキュー検出（AQEベース）
+        skew_detected = False
+        skewed_partitions = 0
+        target_skew_metric = "AQEShuffleRead - Number of skewed partitions"
+        
+        for metric_key, metric_info in detailed_metrics.items():
+            if metric_key == target_skew_metric:
+                try:
+                    skewed_partitions = int(metric_info.get('value', 0))
+                    if skewed_partitions > 0:
+                        skew_detected = True
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        node_name = get_meaningful_node_name(node, extracted_metrics)
+        time_percentage = (duration_ms / max(total_duration, 1)) * 100
+        
+        # ノード分析結果を構造化
+        node_analysis = {
+            "rank": i + 1,
+            "node_id": node.get('node_id', node.get('id', 'N/A')),
+            "node_name": node_name,
+            "duration_ms": duration_ms,
+            "time_percentage": time_percentage,
+            "memory_mb": memory_mb,
+            "rows_processed": rows_num,
+            "num_tasks": num_tasks,
+            "spill_detected": spill_detected,
+            "spill_bytes": spill_bytes,
+            "spill_gb": spill_bytes / 1024 / 1024 / 1024 if spill_bytes > 0 else 0,
+            "skew_detected": skew_detected,
+            "skewed_partitions": skewed_partitions,
+            "is_shuffle_node": "shuffle" in node_name.lower(),
+            "severity": "CRITICAL" if duration_ms >= 10000 else "HIGH" if duration_ms >= 5000 else "MEDIUM" if duration_ms >= 1000 else "LOW"
+        }
+        
+        # Shuffleノードの場合、attributesとREPARTITIONヒントを追加
+        if node_analysis["is_shuffle_node"]:
+            shuffle_attributes = extract_shuffle_attributes(node)
+            if shuffle_attributes:
+                suggested_partitions = max(num_tasks * 2, 200)
+                main_attribute = shuffle_attributes[0]
+                
+                repartition_hint = {
+                    "node_id": node_analysis["node_id"],
+                    "attributes": shuffle_attributes,
+                    "suggested_sql": f"REPARTITION({suggested_partitions}, {main_attribute})",
+                    "reason": f"スピル({node_analysis['spill_gb']:.2f}GB)改善" if spill_detected and spill_bytes > 0 else "Shuffle効率改善",
+                    "priority": "HIGH" if spill_detected else "MEDIUM",
+                    "estimated_improvement": "大幅な性能改善が期待" if spill_detected else "Shuffle効率向上が期待"
+                }
+                detailed_analysis["shuffle_optimization_hints"].append(repartition_hint)
+                node_analysis["repartition_hint"] = repartition_hint
+        
+        detailed_analysis["top_bottleneck_nodes"].append(node_analysis)
+        
+        # スピル分析への追加
+        if spill_detected:
+            detailed_analysis["spill_analysis"]["total_spill_gb"] += node_analysis["spill_gb"]
+            detailed_analysis["spill_analysis"]["spill_nodes"].append({
+                "node_id": node_analysis["node_id"],
+                "node_name": node_name,
+                "spill_gb": node_analysis["spill_gb"],
+                "rank": i + 1
+            })
+            
+            if node_analysis["spill_gb"] > 1.0:  # 1GB以上は重要
+                detailed_analysis["spill_analysis"]["critical_spill_nodes"].append(node_analysis["node_id"])
+        
+        # スキュー分析への追加
+        if skew_detected:
+            detailed_analysis["skew_analysis"]["total_skewed_partitions"] += skewed_partitions
+            detailed_analysis["skew_analysis"]["skewed_nodes"].append({
+                "node_id": node_analysis["node_id"],
+                "node_name": node_name,
+                "skewed_partitions": skewed_partitions,
+                "rank": i + 1
+            })
+    
+    # 全体的な推奨事項の生成
+    if detailed_analysis["spill_analysis"]["total_spill_gb"] > 5.0:
+        detailed_analysis["performance_recommendations"].append({
+            "type": "memory_optimization",
+            "priority": "CRITICAL",
+            "description": f"大量スピル({detailed_analysis['spill_analysis']['total_spill_gb']:.1f}GB)検出: メモリ設定とパーティショニング戦略の見直しが必要"
+        })
+    
+    if len(detailed_analysis["shuffle_optimization_hints"]) > 0:
+        detailed_analysis["performance_recommendations"].append({
+            "type": "shuffle_optimization", 
+            "priority": "HIGH",
+            "description": f"{len(detailed_analysis['shuffle_optimization_hints'])}個のShuffleノードでREPARTITION最適化が可能"
+        })
+    
+    if detailed_analysis["skew_analysis"]["total_skewed_partitions"] > 10:
+        detailed_analysis["performance_recommendations"].append({
+            "type": "skew_optimization",
+            "priority": "HIGH", 
+            "description": f"データスキュー({detailed_analysis['skew_analysis']['total_skewed_partitions']}パーティション)検出: データ分散の見直しが必要"
+        })
+    
+    return detailed_analysis
+
+print("✅ 関数定義完了: get_meaningful_node_name, extract_shuffle_attributes, extract_detailed_bottleneck_analysis")
 
 # COMMAND ----------
 
@@ -4429,7 +4609,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
 
 def generate_optimized_query_with_llm(original_query: str, analysis_result: str, metrics: Dict[str, Any]) -> str:
     """
-    LLM分析結果に基づいてSQLクエリを最適化（BROADCAST分析を含む）
+    セル33の詳細ボトルネック分析結果に基づいてSQLクエリを最適化（処理速度重視）
     """
     
     # 実行プラン情報の抽出（メトリクスから）
@@ -4445,10 +4625,14 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     if plan_info:
         metrics['execution_plan_info'] = plan_info
     
-    # 最適化のためのコンテキスト情報を準備
-    optimization_context = []
+    # 🚀 セル33スタイルの詳細ボトルネック分析を実行
+    detailed_bottleneck = extract_detailed_bottleneck_analysis(metrics)
     
-    # ボトルネック情報の抽出
+    # 最適化のためのコンテキスト情報を準備（詳細版）
+    optimization_context = []
+    performance_critical_issues = []
+    
+    # 基本的なボトルネック情報の抽出
     bottlenecks = metrics.get('bottleneck_indicators', {})
     
     if bottlenecks.get('has_spill', False):
@@ -4460,6 +4644,58 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     
     if bottlenecks.get('cache_hit_ratio', 0) < 0.5:
         optimization_context.append("キャッシュ効率低下 - データアクセスパターンの最適化が必要")
+    
+    # 🎯 詳細ボトルネック分析結果からの追加情報
+    if detailed_bottleneck["spill_analysis"]["total_spill_gb"] > 0:
+        total_spill = detailed_bottleneck["spill_analysis"]["total_spill_gb"]
+        spill_nodes_count = len(detailed_bottleneck["spill_analysis"]["spill_nodes"])
+        performance_critical_issues.append(f"🚨 CRITICAL: 合計{total_spill:.1f}GBのスピルが{spill_nodes_count}個のノードで発生")
+        
+        # 最も重要なスピルノードを特定
+        if detailed_bottleneck["spill_analysis"]["spill_nodes"]:
+            top_spill_node = max(detailed_bottleneck["spill_analysis"]["spill_nodes"], key=lambda x: x["spill_gb"])
+            performance_critical_issues.append(f"   最大スピルノード: {top_spill_node['node_name']} ({top_spill_node['spill_gb']:.2f}GB)")
+    
+    if detailed_bottleneck["skew_analysis"]["total_skewed_partitions"] > 0:
+        total_skew = detailed_bottleneck["skew_analysis"]["total_skewed_partitions"]
+        skewed_nodes_count = len(detailed_bottleneck["skew_analysis"]["skewed_nodes"])
+        performance_critical_issues.append(f"⚖️ データスキュー: {total_skew}個のスキューパーティションが{skewed_nodes_count}個のノードで検出")
+    
+    # TOP3ボトルネックノードの詳細分析
+    top3_bottlenecks = detailed_bottleneck["top_bottleneck_nodes"][:3]
+    performance_critical_issues.append("📊 TOP3処理時間ボトルネック:")
+    for node in top3_bottlenecks:
+        severity_icon = "🔴" if node["severity"] == "CRITICAL" else "🟠" if node["severity"] == "HIGH" else "🟡"
+        performance_critical_issues.append(f"   {severity_icon} #{node['rank']}: {node['node_name'][:60]}...")
+        performance_critical_issues.append(f"      実行時間: {node['duration_ms']:,}ms ({node['time_percentage']:.1f}%) | メモリ: {node['memory_mb']:.1f}MB")
+        if node["spill_detected"]:
+            performance_critical_issues.append(f"      💿 スピル: {node['spill_gb']:.2f}GB - 緊急対応必要")
+        if node["skew_detected"]:
+            performance_critical_issues.append(f"      ⚖️ スキュー: {node['skewed_partitions']}パーティション - データ分散改善必要")
+    
+    # 🔄 REPARTITIONヒントの詳細生成（Shuffle attributes活用）
+    repartition_hints = []
+    if detailed_bottleneck["shuffle_optimization_hints"]:
+        repartition_hints.append("🔄 REPARTITIONヒント（Shuffle attributes基準）:")
+        for hint in detailed_bottleneck["shuffle_optimization_hints"]:
+            priority_icon = "🚨" if hint["priority"] == "HIGH" else "📈"
+            repartition_hints.append(f"   {priority_icon} ノードID {hint['node_id']}: {hint['suggested_sql']}")
+            repartition_hints.append(f"      属性: {', '.join(hint['attributes'])}")
+            repartition_hints.append(f"      理由: {hint['reason']}")
+            repartition_hints.append(f"      効果: {hint['estimated_improvement']}")
+            
+            # クエリへの適用方法の具体的な提案
+            main_attr = hint['attributes'][0]
+            if 'GROUP BY' in original_query.upper():
+                repartition_hints.append(f"      適用提案: GROUP BY前にREPARTITION({hint['suggested_sql'].split('(')[1]}")
+            elif 'JOIN' in original_query.upper():
+                repartition_hints.append(f"      適用提案: JOIN前のテーブルを{hint['suggested_sql']}でリパーティション")
+    
+    # 📊 処理速度重視の最適化推奨事項
+    speed_optimization_recommendations = []
+    for rec in detailed_bottleneck["performance_recommendations"]:
+        priority_icon = "🚨" if rec["priority"] == "CRITICAL" else "⚠️" if rec["priority"] == "HIGH" else "📝"
+        speed_optimization_recommendations.append(f"{priority_icon} {rec['type'].upper()}: {rec['description']}")
     
     # Liquid Clustering推奨情報（LLMベース対応）
     liquid_analysis = metrics.get('liquid_clustering_analysis', {})
@@ -4564,7 +4800,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         broadcast_summary.append("❌ JOINクエリではないため、BROADCASTヒント適用対象外")
     
     optimization_prompt = f"""
-あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の情報を基にSQLクエリを最適化してください。
+あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の**詳細なボトルネック分析結果**を基に、**処理速度重視**でSQLクエリを最適化してください。
 
 【重要な処理方針】
 - 一回の出力で完全なSQLクエリを生成してください
@@ -4576,10 +4812,16 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 {original_query}
 ```
 
-【パフォーマンス分析結果】
-{analysis_summary}
+【📊 セル33詳細ボトルネック分析結果】
+{chr(10).join(performance_critical_issues) if performance_critical_issues else "特別な重要課題は検出されませんでした"}
 
-【特定されたボトルネック】
+【🔄 REPARTITIONヒント（Shuffle attributes基準）】
+{chr(10).join(repartition_hints) if repartition_hints else "REPARTITIONヒントは検出されませんでした"}
+
+【🚀 処理速度重視の最適化推奨事項】
+{chr(10).join(speed_optimization_recommendations) if speed_optimization_recommendations else "特別な推奨事項はありません"}
+
+【基本的なボトルネック情報】
 {chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
 
 【BROADCAST分析結果】
@@ -4588,37 +4830,51 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 【Liquid Clustering推奨】
 {chr(10).join(clustering_recommendations) if clustering_recommendations else "特別な推奨事項はありません"}
 
-【最適化要求】
-1. 上記の分析結果に基づいて、元のSQLクエリを最適化してください
-2. 最適化のポイントを具体的に説明してください
-3. パフォーマンス向上の見込みを定量的に示してください
-4. 実行可能なSQLコードとして出力してください
-5. 必ず同じ結果セットを返却するクエリにしてください
-6. PHOTONエンジンの利用を優先してください
-7. Where句でLiquidClusteringが利用できる場合は利用できる書式を優先してください
-8. 同一データを繰り返し参照する場合はCTEで共通データセットとして定義してください
-9. Liquid Clustering実装時は正しいDatabricks SQL構文を使用してください（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
-10. **BROADCAST分析結果を厳密に反映してください（30MB閾値）**：
-    - Spark標準の30MB閾値（非圧縮）を厳格に適用
-    - BROADCAST適用推奨（recommended/all_small）の場合のみBROADCASTヒント（/*+ BROADCAST(table_name) */）を適用
-    - **重要: BROADCASTヒント句は必ずSELECT文の直後に配置してください**
-      ```sql
-      SELECT /*+ BROADCAST(table_name) */
-        column1, column2, ...
-      FROM table1
-        JOIN table2 ON ...
-      ```
-    - **絶対に避けるべき誤った配置:**
-      ```sql
-      -- ❌ 間違い: JOIN句の中にヒントを配置
-      JOIN /*+ BROADCAST(table_name) */ table2 ON ...
-      ```
-    - 非圧縮サイズが30MB以下の小テーブルのみBROADCAST対象
-    - 30MB超過の大テーブルには絶対にBROADCASTヒントを適用しない
-    - 条件付き推奨（24-30MB）の場合は要注意として明記
-    - BROADCAST適用時は必ず推定非圧縮サイズ、圧縮サイズ、圧縮率を説明に記載
-    - JOINクエリでない場合はBROADCASTヒントを使用しない
-    - 30MB閾値ヒットがない場合は代替最適化手法を提案
+【パフォーマンス分析結果（サマリー）】
+{analysis_summary}
+
+【🎯 処理速度重視の最適化要求】
+**最重要**: 以下の順序で処理速度の改善を優先してください
+
+1. **🚨 CRITICAL優先度**: スピル対策（メモリ効率改善）
+   - 大量スピル（5GB以上）が検出された場合は最優先で対処
+   - メモリ効率的なJOIN順序の検討
+   - 中間結果のサイズ削減
+
+2. **🔄 REPARTITIONヒント適用**（Shuffle attributes基準）
+   - 検出されたShuffle attributesを基に具体的なREPARTITIONヒントを適用
+   - GROUP BY前またはJOIN前の適切な位置にREPARTITIONを配置
+   - 推奨パーティション数を使用
+
+3. **⚖️ データスキュー対策**
+   - スキューパーティション（10個以上）検出時は分散改善を優先
+   - 適切なパーティションキーの選択
+   - データ分散の均等化
+
+4. **📈 シャッフル最適化**
+   - シャッフル量の最小化
+   - 適切なJOIN戦略の選択
+   - データ局所性の向上
+
+5. **🎯 BROADCAST最適化**（30MB閾値厳守）
+   - 30MB以下の小テーブルのみBROADCAST適用
+   - BROADCASTヒント句は必ずSELECT文の直後に配置
+
+6. **💾 メモリ効率化**
+   - 不要なカラムの除去
+   - 適切なフィルタリング順序
+   - 中間結果のキャッシュ活用
+
+7. **🔧 実行プラン最適化**
+   - PHOTONエンジン最適化
+   - Liquid Clustering活用
+   - CTE活用による共通化
+
+【🔄 REPARTITIONヒント適用ルール】
+- GROUP BYクエリの場合: GROUP BY前にREPARTITION(推奨数, group_by_column)
+- JOINクエリの場合: JOIN前にREPARTITION(推奨数, join_key)
+- 複数テーブルの場合: 最も大きなテーブルをリパーティション
+- 推奨パーティション数: 検出されたタスク数の2倍以上、最低200
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
@@ -4629,10 +4885,13 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - 実際に実行できる完全なSQLクエリのみを出力してください
 - **BROADCASTヒントは必ずSELECT文の直後に配置し、JOIN句内には絶対に配置しないでください**
 
-【出力形式】（簡潔版）
-## 最適化されたSQL
+【出力形式】
+## 🚀 処理速度重視の最適化されたSQL
 
-**絶対条件: 省略・プレースホルダー禁止**
+**適用した最適化手法**:
+- [具体的な最適化手法のリスト]
+- [REPARTITIONヒントの適用詳細]
+- [推定される性能改善効果]
 
 ```sql
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
