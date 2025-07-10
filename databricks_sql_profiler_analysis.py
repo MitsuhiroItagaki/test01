@@ -1234,11 +1234,11 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
         query_text = query_info.get('query_text', '')
         
         # メトリクス情報のみから基本的なテーブル情報を生成
-        # 複雑なSQL解析は行わず、シンプルにメトリクス重視の分析を行う
+        # test2.json形式では planMetadatas が空のため、graphs metadata は利用不可
+        # メトリクス重視のアプローチでボトルネック分析を行う
         
-        # 基本的なテーブル情報（メトリクス重視）
-        extracted_data["table_info"]["query_summary"] = {
-            "node_name": "Query Summary Analysis",
+        extracted_data["table_info"]["metrics_summary"] = {
+            "node_name": "Metrics-Based Analysis",
             "node_tag": "QUERY_SUMMARY", 
             "node_id": "summary",
             "files_count": overall_metrics.get('read_files_count', 0),
@@ -1246,7 +1246,10 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             "data_size_gb": overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024,
             "rows_read": overall_metrics.get('rows_read_count', 0),
             "rows_produced": overall_metrics.get('rows_produced_count', 0),
-            "data_selectivity": overall_metrics.get('rows_produced_count', 0) / max(overall_metrics.get('rows_read_count', 1), 1)
+            "data_selectivity": overall_metrics.get('rows_produced_count', 0) / max(overall_metrics.get('rows_read_count', 1), 1),
+            "avg_file_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_files_count', 1), 1),
+            "avg_partition_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_partitions_count', 1), 1),
+            "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。"
         }
         
         # サマリーノードの情報を使用
