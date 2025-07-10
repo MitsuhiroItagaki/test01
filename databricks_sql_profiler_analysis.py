@@ -3153,6 +3153,7 @@ if sorted_nodes:
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
         
         # スピル詳細情報（シンプル表示）
+        spill_display = ""
         if spill_detected and spill_bytes > 0:
             spill_mb = spill_bytes / 1024 / 1024
             if spill_mb >= 1024:  # GB単位
@@ -3172,7 +3173,7 @@ if sorted_nodes:
                 main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                 
                 print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
-                if spill_detected and spill_bytes > 0:
+                if spill_detected and spill_bytes > 0 and spill_display:
                     print(f"       理由: スピル({spill_display})を改善するため")
                 else:
                     print(f"       理由: Shuffle効率を改善するため")
