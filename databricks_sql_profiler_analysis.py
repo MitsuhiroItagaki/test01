@@ -3003,6 +3003,7 @@ if sorted_nodes:
         # データスキューの検出（AQEベースの精密判定）
         skew_detected = False
         skew_details = []
+        skewed_partitions = 0  # スキューパーティション数
         
         # AQEベーススキュー検出: "AQEShuffleRead - Number of skewed partitions" > 0
         target_aqe_metrics = [
@@ -3078,6 +3079,7 @@ if sorted_nodes:
         # AQEスキュー判定
         if aqe_skew_value > 0:
             skew_detected = True
+            skewed_partitions = aqe_skew_value  # スキューパーティション数を設定
             severity_level = "高" if aqe_skew_value >= 5 else "中"
             
             # 基本的なAQEスキュー検出情報
