@@ -900,7 +900,7 @@ def get_most_specific_process_name_from_list(node_names: list) -> str:
 
 def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     """
-    ShuffleノードからSHUFFLE_ATTRIBUTESを抽出
+    ShuffleノードからSHUFFLE_ATTRIBUTESを抽出（デバッグ版）
     
     Args:
         node: ノード情報
@@ -909,39 +909,86 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
         list: 検出されたShuffle attributes
     """
     shuffle_attributes = []
+    node_id = node.get('node_id', node.get('id', 'N/A'))
+    node_name = node.get('name', 'Unknown')
+    
+    # デバッグ情報（ノードID 6132の場合のみ表示）
+    debug_mode = (str(node_id) == '6132')
+    
+    if debug_mode:
+        print(f"    🔍 DEBUG: ノード {node_id} ({node_name}) のShuffle属性検索中...")
     
     # metadataからSHUFFLE_ATTRIBUTESを検索
     metadata = node.get('metadata', [])
     if isinstance(metadata, list):
-        for item in metadata:
+        if debug_mode:
+            print(f"    🔍 DEBUG: metadata検索 - {len(metadata)}個のアイテム")
+        for i, item in enumerate(metadata):
             if isinstance(item, dict):
+                item_key = item.get('key', '')
+                item_label = item.get('label', '')
+                item_values = item.get('values', [])
+                
+                if debug_mode:
+                    print(f"    🔍 DEBUG: metadata[{i}] - key: '{item_key}', label: '{item_label}', values: {item_values}")
+                
                 # keyとlabelの両方をチェック
-                if (item.get('key') == 'SHUFFLE_ATTRIBUTES' or 
-                    item.get('label') == 'Shuffle attributes'):
-                    values = item.get('values', [])
-                    if isinstance(values, list):
-                        shuffle_attributes.extend(values)
+                if (item_key == 'SHUFFLE_ATTRIBUTES' or 
+                    item_label == 'Shuffle attributes'):
+                    if isinstance(item_values, list):
+                        shuffle_attributes.extend(item_values)
+                        if debug_mode:
+                            print(f"    ✅ DEBUG: metadata からShuffle attributes発見: {item_values}")
+    else:
+        if debug_mode:
+            print(f"    🔍 DEBUG: metadata は list ではありません: {type(metadata)}")
     
     # raw_metricsからも検索（labelもチェック）
     raw_metrics = node.get('metrics', [])
     if isinstance(raw_metrics, list):
-        for metric in raw_metrics:
+        if debug_mode:
+            print(f"    🔍 DEBUG: raw_metrics検索 - {len(raw_metrics)}個のメトリクス")
+        for i, metric in enumerate(raw_metrics):
             if isinstance(metric, dict):
-                if (metric.get('key') == 'SHUFFLE_ATTRIBUTES' or 
-                    metric.get('label') == 'Shuffle attributes'):
-                    values = metric.get('values', [])
-                    if isinstance(values, list):
-                        shuffle_attributes.extend(values)
+                metric_key = metric.get('key', '')
+                metric_label = metric.get('label', '')
+                metric_values = metric.get('values', [])
+                
+                if debug_mode and i < 5:  # 最初の5個のみ表示
+                    print(f"    🔍 DEBUG: metrics[{i}] - key: '{metric_key}', label: '{metric_label}', values: {metric_values}")
+                
+                if (metric_key == 'SHUFFLE_ATTRIBUTES' or 
+                    metric_label == 'Shuffle attributes'):
+                    if isinstance(metric_values, list):
+                        shuffle_attributes.extend(metric_values)
+                        if debug_mode:
+                            print(f"    ✅ DEBUG: raw_metrics からShuffle attributes発見: {metric_values}")
+    else:
+        if debug_mode:
+            print(f"    🔍 DEBUG: raw_metrics は list ではありません: {type(raw_metrics)}")
     
     # detailed_metricsからも検索
     detailed_metrics = node.get('detailed_metrics', {})
     if isinstance(detailed_metrics, dict):
+        if debug_mode:
+            print(f"    🔍 DEBUG: detailed_metrics検索 - {len(detailed_metrics)}個のキー")
         for key, info in detailed_metrics.items():
+            if debug_mode and len(detailed_metrics) < 10:  # 少ない場合のみ全て表示
+                print(f"    🔍 DEBUG: detailed_metrics['{key}'] = {info}")
+            
             if (key == 'SHUFFLE_ATTRIBUTES' or 
-                info.get('label') == 'Shuffle attributes'):
-                values = info.get('values', [])
+                (isinstance(info, dict) and info.get('label') == 'Shuffle attributes')):
+                values = info.get('values', []) if isinstance(info, dict) else []
                 if isinstance(values, list):
                     shuffle_attributes.extend(values)
+                    if debug_mode:
+                        print(f"    ✅ DEBUG: detailed_metrics からShuffle attributes発見: {values}")
+    else:
+        if debug_mode:
+            print(f"    🔍 DEBUG: detailed_metrics は dict ではありません: {type(detailed_metrics)}")
+    
+    if debug_mode:
+        print(f"    🔍 DEBUG: 最終結果 - 検出されたShuffle attributes: {shuffle_attributes}")
     
     # 重複を削除
     return list(set(shuffle_attributes))
