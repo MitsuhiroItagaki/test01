@@ -5572,7 +5572,7 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
     
     return '\n'.join(lines)
 
-def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any]) -> Dict[str, str]:
+def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
     
@@ -5839,6 +5839,175 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                         
         except Exception as e:
             error_msg = f"⚠️ Liquid Clustering分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating Liquid Clustering analysis: {str(e)}\n"
+            f.write(error_msg)
+        
+        # ボトルネック分析結果の追加（output_bottleneck_analysis_resultからマージ）
+        try:
+            if OUTPUT_LANGUAGE == 'ja':
+                f.write(f"\n\n## 🎯 ボトルネック分析結果\n\n")
+                f.write(f"### 🤖 LLMによる詳細分析\n\n")
+                
+                # thinking_enabled対応: analysis_resultがリストの場合の処理
+                if isinstance(analysis_result, list):
+                    analysis_result_str = format_thinking_response(analysis_result)
+                else:
+                    analysis_result_str = str(analysis_result)
+                
+                # signature情報の除去
+                import re
+                signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
+                analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
+                
+                f.write(f"{analysis_result_str}\n\n")
+                
+                # 主要メトリクスの概要
+                f.write(f"### 📊 主要パフォーマンス指標\n\n")
+                f.write(f"| 指標 | 値 | 評価 |\n")
+                f.write(f"|------|-----|------|\n")
+                
+                # Photon利用状況
+                photon_enabled = overall_metrics.get('photon_enabled', False)
+                photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
+                photon_status = "✅ 良好" if photon_enabled and photon_utilization > 80 else "⚠️ 改善必要" if photon_enabled else "❌ 未有効"
+                f.write(f"| Photon有効 | {'はい' if photon_enabled else 'いいえ'} | {photon_status} |\n")
+                f.write(f"| Photon利用率 | {min(photon_utilization, 100.0):.1f}% | {photon_status} |\n")
+                
+                # キャッシュ効率
+                cache_ratio = bottleneck_indicators.get('cache_hit_ratio', 0) * 100
+                cache_status = "✅ 良好" if cache_ratio > 80 else "⚠️ 改善必要" if cache_ratio > 50 else "❌ 低効率"
+                f.write(f"| キャッシュ効率 | {cache_ratio:.1f}% | {cache_status} |\n")
+                
+                # データ選択性
+                data_selectivity = bottleneck_indicators.get('data_selectivity', 0) * 100
+                selectivity_status = "✅ 良好" if data_selectivity > 10 else "⚠️ 改善必要" if data_selectivity > 1 else "❌ 非効率"
+                f.write(f"| データ選択性 | {data_selectivity:.2f}% | {selectivity_status} |\n")
+                
+                # シャッフル操作
+                shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
+                shuffle_status = "✅ 良好" if shuffle_count < 5 else "⚠️ 注意" if shuffle_count < 10 else "❌ 多数"
+                f.write(f"| シャッフル操作 | {shuffle_count}回 | {shuffle_status} |\n")
+                
+                # 並列度
+                parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
+                parallelism_status = "✅ 良好" if parallelism_count == 0 else "⚠️ 改善必要" if parallelism_count < 3 else "❌ 問題あり"
+                f.write(f"| 低並列度ステージ | {parallelism_count}個 | {parallelism_status} |\n")
+                
+                f.write("\n")
+                
+                # 主要ボトルネック
+                f.write(f"### 🚨 主要ボトルネック\n\n")
+                bottlenecks = []
+                
+                if bottleneck_indicators.get('has_spill', False):
+                    spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
+                    bottlenecks.append(f"**メモリスピル**: {spill_gb:.2f}GB - メモリ不足による性能低下")
+                
+                if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+                    bottlenecks.append("**シャッフルボトルネック**: JOIN/GROUP BY処理での大量データ転送")
+                
+                if cache_ratio < 50:
+                    bottlenecks.append("**キャッシュ効率低下**: データ再利用効率が低い")
+                
+                if not photon_enabled:
+                    bottlenecks.append("**Photon未有効**: 高速処理エンジンが利用されていない")
+                elif photon_utilization < 50:
+                    bottlenecks.append("**Photon利用率低下**: 処理がPhotonエンジンを十分活用していない")
+                
+                if data_selectivity < 1:
+                    bottlenecks.append("**データ選択性低下**: 必要以上のデータを読み込んでいる")
+                
+                if bottlenecks:
+                    for i, bottleneck in enumerate(bottlenecks, 1):
+                        f.write(f"{i}. {bottleneck}\n")
+                else:
+                    f.write("主要なボトルネックは検出されませんでした。\n")
+                
+                f.write("\n")
+                
+            else:
+                # 英語版
+                f.write(f"\n\n## 🎯 Bottleneck Analysis Results\n\n")
+                f.write(f"### 🤖 Detailed LLM Analysis\n\n")
+                
+                # thinking_enabled対応: analysis_resultがリストの場合の処理
+                if isinstance(analysis_result, list):
+                    analysis_result_str = format_thinking_response(analysis_result)
+                else:
+                    analysis_result_str = str(analysis_result)
+                
+                # signature情報の除去
+                import re
+                signature_pattern = r"'signature':\s*'[A-Za-z0-9+/=]{100,}'"
+                analysis_result_str = re.sub(signature_pattern, "'signature': '[REMOVED]'", analysis_result_str)
+                
+                f.write(f"{analysis_result_str}\n\n")
+                
+                # 主要メトリクスの概要
+                f.write(f"### 📊 Key Performance Indicators\n\n")
+                f.write(f"| Metric | Value | Status |\n")
+                f.write(f"|--------|-------|--------|\n")
+                
+                # Photon利用状況
+                photon_enabled = overall_metrics.get('photon_enabled', False)
+                photon_utilization = overall_metrics.get('photon_utilization_ratio', 0) * 100
+                photon_status = "✅ Good" if photon_enabled and photon_utilization > 80 else "⚠️ Needs Improvement" if photon_enabled else "❌ Not Enabled"
+                f.write(f"| Photon Enabled | {'Yes' if photon_enabled else 'No'} | {photon_status} |\n")
+                f.write(f"| Photon Utilization | {min(photon_utilization, 100.0):.1f}% | {photon_status} |\n")
+                
+                # キャッシュ効率
+                cache_ratio = bottleneck_indicators.get('cache_hit_ratio', 0) * 100
+                cache_status = "✅ Good" if cache_ratio > 80 else "⚠️ Needs Improvement" if cache_ratio > 50 else "❌ Poor"
+                f.write(f"| Cache Efficiency | {cache_ratio:.1f}% | {cache_status} |\n")
+                
+                # データ選択性
+                data_selectivity = bottleneck_indicators.get('data_selectivity', 0) * 100
+                selectivity_status = "✅ Good" if data_selectivity > 10 else "⚠️ Needs Improvement" if data_selectivity > 1 else "❌ Poor"
+                f.write(f"| Data Selectivity | {data_selectivity:.2f}% | {selectivity_status} |\n")
+                
+                # シャッフル操作
+                shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
+                shuffle_status = "✅ Good" if shuffle_count < 5 else "⚠️ Moderate" if shuffle_count < 10 else "❌ High"
+                f.write(f"| Shuffle Operations | {shuffle_count} times | {shuffle_status} |\n")
+                
+                # 並列度
+                parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
+                parallelism_status = "✅ Good" if parallelism_count == 0 else "⚠️ Needs Improvement" if parallelism_count < 3 else "❌ Poor"
+                f.write(f"| Low Parallelism Stages | {parallelism_count} stages | {parallelism_status} |\n")
+                
+                f.write("\n")
+                
+                # 主要ボトルネック
+                f.write(f"### 🚨 Key Bottlenecks\n\n")
+                bottlenecks = []
+                
+                if bottleneck_indicators.get('has_spill', False):
+                    spill_gb = bottleneck_indicators.get('spill_bytes', 0) / 1024 / 1024 / 1024
+                    bottlenecks.append(f"**Memory Spill**: {spill_gb:.2f}GB - Performance degradation due to memory shortage")
+                
+                if bottleneck_indicators.get('has_shuffle_bottleneck', False):
+                    bottlenecks.append("**Shuffle Bottleneck**: Large data transfer in JOIN/GROUP BY operations")
+                
+                if cache_ratio < 50:
+                    bottlenecks.append("**Cache Inefficiency**: Low data reuse efficiency")
+                
+                if not photon_enabled:
+                    bottlenecks.append("**Photon Not Enabled**: High-speed processing engine not utilized")
+                elif photon_utilization < 50:
+                    bottlenecks.append("**Low Photon Utilization**: Processing not fully utilizing Photon engine")
+                
+                if data_selectivity < 1:
+                    bottlenecks.append("**Poor Data Selectivity**: Reading more data than necessary")
+                
+                if bottlenecks:
+                    for i, bottleneck in enumerate(bottlenecks, 1):
+                        f.write(f"{i}. {bottleneck}\n")
+                else:
+                    f.write("No major bottlenecks detected.\n")
+                
+                f.write("\n")
+                
+        except Exception as e:
+            error_msg = f"⚠️ ボトルネック分析結果の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating bottleneck analysis results: {str(e)}\n"
             f.write(error_msg)
         
         # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
@@ -6109,6 +6278,13 @@ except NameError:
         'bottleneck_indicators': {}
     }
 
+# analysis_result のチェック
+try:
+    analysis_result
+except NameError:
+    missing_variables.append("analysis_result (セル16を実行してください)")
+    analysis_result = ""
+
 if missing_variables:
     print("❌ 必要な変数が定義されていません:")
     for var in missing_variables:
@@ -6125,7 +6301,8 @@ if original_query.strip() and str(optimized_result).strip():
         saved_files = save_optimized_sql_files(
             original_query,
             optimized_result,
-            extracted_metrics
+            extracted_metrics,
+            analysis_result
         )
         
         print("✅ 以下のファイルを生成しました:")
