@@ -975,6 +975,12 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
             # 最初の10個のキーを表示
             key_list = list(detailed_metrics.keys())[:10]
             print(f"    🔍 DEBUG: detailed_metrics キー例: {key_list}")
+            
+            # 強制的にすべてのキーをチェック（最初の20個まで）
+            for i, (key, info) in enumerate(detailed_metrics.items()):
+                if i >= 20:
+                    break
+                print(f"    🔍 DEBUG: [{i}] key='{key}', info_type={type(info)}, info={str(info)[:100]}...")
         
         for key, info in detailed_metrics.items():
             if debug_mode:
