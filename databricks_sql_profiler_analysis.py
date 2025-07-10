@@ -2978,39 +2978,34 @@ if sorted_nodes:
         spill_bytes = 0
         spill_details = []
         
-        # スピル検出ターゲットメトリクス名リスト（複数パターン対応）
-        target_spill_metrics = [
-            "Sink - Num bytes spilled to disk due to memory pressure",
+        # スピル検出ターゲットメトリクス名リスト（正確なメトリクス名のみ）
+        exact_spill_metrics = [
             "Num bytes spilled to disk due to memory pressure",
-            "bytes spilled to disk due to memory pressure",
-            "spilled to disk due to memory pressure"
+            "Sink - Num bytes spilled to disk due to memory pressure",
+            "Sink/Num bytes spilled to disk due to memory pressure"
         ]
         
-        # 1. detailed_metricsからスピルメトリクスを検索（柔軟検索）
+        # 1. detailed_metricsから正確なメトリクス名で検索
         detailed_metrics = node.get('detailed_metrics', {})
         for metric_key, metric_info in detailed_metrics.items():
             metric_value = metric_info.get('value', 0)
             metric_label = metric_info.get('label', '')
             
-            # 部分文字列マッチングでスピルメトリクスを検索
-            key_matches = any(target in metric_key for target in target_spill_metrics)
-            label_matches = any(target in metric_label for target in target_spill_metrics)
-            
-            if (key_matches or label_matches) and metric_value > 0:
+            # 正確なメトリクス名でのみマッチング
+            if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
                 spill_detected = True
-                spill_bytes = metric_value
-                matched_target = next((target for target in target_spill_metrics if target in metric_key or target in metric_label), "unknown")
+                spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
                 spill_details.append({
                     'metric_name': metric_key,
                     'value': metric_value,
                     'label': metric_label,
                     'source': 'detailed_metrics',
-                    'matched_field': 'key' if key_matches else 'label',
-                    'matched_pattern': matched_target
+                    'matched_field': 'key' if metric_key in exact_spill_metrics else 'label',
+                    'matched_pattern': metric_key if metric_key in exact_spill_metrics else metric_label
                 })
                 break  # 最初に見つかったスピルメトリクスを使用
         
-        # 2. detailed_metricsで見つからない場合、生メトリクスから検索
+        # 2. detailed_metricsで見つからない場合、生メトリクスから正確なメトリクス名で検索
         if not spill_detected:
             raw_metrics = node.get('metrics', [])
             for metric in raw_metrics:
@@ -3018,40 +3013,34 @@ if sorted_nodes:
                 metric_label = metric.get('label', '')
                 metric_value = metric.get('value', 0)
                 
-                # 部分文字列マッチングでスピルメトリクスを検索
-                key_matches = any(target in metric_key for target in target_spill_metrics)
-                label_matches = any(target in metric_label for target in target_spill_metrics)
-                
-                if (key_matches or label_matches) and metric_value > 0:
+                # 正確なメトリクス名でのみマッチング
+                if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
                     spill_detected = True
-                    spill_bytes = metric_value
-                    matched_target = next((target for target in target_spill_metrics if target in metric_key or target in metric_label), "unknown")
+                    spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
                     spill_details.append({
                         'metric_name': metric_key,
                         'value': metric_value,
                         'label': metric_label,
                         'source': 'raw_metrics',
-                        'matched_field': 'key' if key_matches else 'label',
-                        'matched_pattern': matched_target
+                        'matched_field': 'key' if metric_key in exact_spill_metrics else 'label',
+                        'matched_pattern': metric_key if metric_key in exact_spill_metrics else metric_label
                     })
                     break  # 最初に見つかったスピルメトリクスを使用
         
-        # 3. key_metricsでも検索（フォールバック）
+        # 3. key_metricsから正確なメトリクス名で検索
         if not spill_detected:
             key_metrics = node.get('key_metrics', {})
-            for key_metric_name, key_metric_value in key_metrics.items():
-                key_matches = any(target in key_metric_name for target in target_spill_metrics)
-                if key_matches and key_metric_value > 0:
+            for exact_metric in exact_spill_metrics:
+                if exact_metric in key_metrics and key_metrics[exact_metric] > 0:
                     spill_detected = True
-                    spill_bytes = key_metric_value
-                    matched_target = next((target for target in target_spill_metrics if target in key_metric_name), "unknown")
+                    spill_bytes = max(spill_bytes, key_metrics[exact_metric])  # 最大値を使用
                     spill_details.append({
-                        'metric_name': f"key_metrics.{key_metric_name}",
-                        'value': key_metric_value,
-                        'label': f"Key metric: {key_metric_name}",
+                        'metric_name': f"key_metrics.{exact_metric}",
+                        'value': key_metrics[exact_metric],
+                        'label': f"Key metric: {exact_metric}",
                         'source': 'key_metrics',
                         'matched_field': 'key',
-                        'matched_pattern': matched_target
+                        'matched_pattern': exact_metric
                     })
                     break
         
