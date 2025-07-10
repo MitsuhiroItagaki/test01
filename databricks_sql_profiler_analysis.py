@@ -6012,47 +6012,6 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(refined_report)
     
     print("✅ LLMによるレポート推敲完了")
-        
-        # オリジナルのメトリクス情報も保持
-        overall_metrics = metrics.get('overall_metrics', {})
-        bottleneck_indicators = metrics.get('bottleneck_indicators', {})
-        spill_details = bottleneck_indicators.get('spill_details', [])
-        total_spill_bytes = bottleneck_indicators.get('spill_bytes', 0)
-        
-        if OUTPUT_LANGUAGE == 'ja':
-            f.write(f"- **実行時間**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
-            f.write(f"- **読み込みデータ**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
-            f.write(f"- **スピル合計**: {total_spill_bytes / 1024 / 1024 / 1024:.2f} GB\n")
-            
-            # スピル詳細情報を追加
-            if spill_details:
-                f.write("  - **スピル詳細**:\n")
-                for detail in spill_details[:3]:  # 上位3つのスピルを表示
-                    spill_gb = detail['spill_bytes'] / 1024 / 1024 / 1024
-                    node_name = detail['node_name'][:50] + "..." if len(detail['node_name']) > 50 else detail['node_name']
-                    spill_metric = detail['spill_metric']
-                    f.write(f"    - {node_name}: {spill_gb:.2f} GB ({spill_metric})\n")
-                if len(spill_details) > 3:
-                    f.write(f"    - ... 他{len(spill_details) - 3}個のノード\n")
-        else:
-            f.write(f"- **Execution Time**: {overall_metrics.get('total_time_ms', 0):,} ms\n")
-            f.write(f"- **Data Read**: {overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024:.2f} GB\n")
-            f.write(f"- **Total Spill**: {total_spill_bytes / 1024 / 1024 / 1024:.2f} GB\n")
-            
-            # スピル詳細情報を追加（英語版）
-            if spill_details:
-                f.write("  - **Spill Details**:\n")
-                for detail in spill_details[:3]:  # Show top 3 spills
-                    spill_gb = detail['spill_bytes'] / 1024 / 1024 / 1024
-                    node_name = detail['node_name'][:50] + "..." if len(detail['node_name']) > 50 else detail['node_name']
-                    spill_metric = detail['spill_metric']
-                    f.write(f"    - {node_name}: {spill_gb:.2f} GB ({spill_metric})\n")
-                if len(spill_details) > 3:
-                    f.write(f"    - ... {len(spill_details) - 3} more nodes\n")
-        
-        # 旧レポート生成コードは削除（新しいgenerate_comprehensive_optimization_reportに統合済み）
-        
-        # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
     
     # 最も時間がかかっている処理TOP10を独立したファイルとして出力
     top10_filename = f"output_top10_processes_{timestamp}.md"
