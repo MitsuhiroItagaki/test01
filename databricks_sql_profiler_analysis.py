@@ -2519,7 +2519,7 @@ print()
 # MAGIC - 抽出したメトリクスのJSON形式での保存
 # MAGIC - set型からlist型への変換処理
 # MAGIC - 最も時間がかかっている処理TOP10の詳細分析
-# MAGIC - 特定メトリクスベーススピル検出と統計ベーススキュー分析
+# MAGIC - 特定メトリクスベーススピル検出とAQEベーススキュー分析
 # MAGIC
 # MAGIC 💿 **スピル検出ロジック**:
 # MAGIC - ターゲットメトリクス: `"Sink - Num bytes spilled to disk due to memory pressure"`
@@ -2527,16 +2527,16 @@ print()
 # MAGIC - 検索対象: detailed_metrics → raw_metrics → key_metrics の順序で検索
 # MAGIC
 # MAGIC 🎯 **スキュー検出ロジック**:
-# MAGIC - `taskDuration`: max/median比率 ≥ 3.0 でスキュー判定
-# MAGIC - `shuffleReadBytes`: max/median比率 ≥ 3.0 でスキュー判定  
-# MAGIC - 比率が5.0以上の場合は「高」重要度、3.0-5.0は「中」重要度
-# MAGIC - その他統計メトリクス（shuffleWriteBytes等）は基準値4.0で判定
+# MAGIC - `AQEShuffleRead - Number of skewed partitions`: AQEベーススキュー検出
+# MAGIC - 判定条件: メトリクス値 > 0 でスキュー判定
+# MAGIC - 重要度: 検出値に基づいた判定
+# MAGIC - 統計ベース判定は非推奨（AQEベース判定を推奨）
 # MAGIC
 # MAGIC 💡 **デバッグモード**: スピル・スキューの判定根拠を詳細表示したい場合
 # MAGIC ```python
 # MAGIC import os
 # MAGIC os.environ['DEBUG_SPILL_ANALYSIS'] = 'true'   # 特定メトリクススピル判定の詳細表示
-# MAGIC os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'    # 統計ベーススキュー判定の詳細表示
+# MAGIC os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'    # AQEベーススキュー判定の詳細表示
 # MAGIC ```
 
 # COMMAND ----------
@@ -2547,7 +2547,7 @@ print()
 # 
 # 📋 設定内容:
 # - DEBUG_SPILL_ANALYSIS=true: 特定メトリクススピル判定の詳細根拠を表示
-# - DEBUG_SKEW_ANALYSIS=true: 統計ベーススキュー判定の詳細根拠を表示
+# - DEBUG_SKEW_ANALYSIS=true: AQEベーススキュー判定の詳細根拠を表示
 # 
 # 💿 スピルデバッグ表示内容:
 # - ターゲットメトリクス: "Sink - Num bytes spilled to disk due to memory pressure"
@@ -2556,32 +2556,32 @@ print()
 # - その他のスピル関連メトリクス一覧（参考情報）
 # 
 # 🎯 スキューデバッグ表示内容:
-# - タスク実行時間・シャッフル読み込みの統計分布 (min/median/max)
-# - max/median比率と基準値の比較
-# - 最大/最小比率による分散度合い
-# - 重要度レベル (高: ≥5倍, 中: 3-5倍)
+# - AQEShuffleRead - Number of skewed partitions メトリクス値
+# - AQEベーススキュー検出の判定根拠
+# - 検出されたスキュー数と重要度レベル
+# - 統計ベース判定は非推奨（AQEベース判定を推奨）
 
 import os
 
 # 特定メトリクススピル分析のデバッグ表示を有効にする場合はコメントアウトを解除
 # os.environ['DEBUG_SPILL_ANALYSIS'] = 'true'
 
-# 統計ベーススキュー分析のデバッグ表示を有効にする場合はコメントアウトを解除  
+# AQEベーススキュー分析のデバッグ表示を有効にする場合はコメントアウトを解除  
 # os.environ['DEBUG_SKEW_ANALYSIS'] = 'true'
 
 print("🐛 デバッグモード設定:")
 print(f"   特定メトリクススピル分析デバッグ: {os.environ.get('DEBUG_SPILL_ANALYSIS', 'false')}")
-print(f"   統計ベーススキュー分析デバッグ: {os.environ.get('DEBUG_SKEW_ANALYSIS', 'false')}")
+print(f"   AQEベーススキュー分析デバッグ: {os.environ.get('DEBUG_SKEW_ANALYSIS', 'false')}")
 print("   ※ 'true'に設定すると判定根拠の詳細情報が表示されます")
 print()
 print("💿 特定メトリクススピル検出基準:")
 print('   🎯 ターゲット: "Sink - Num bytes spilled to disk due to memory pressure"')
 print("   ✅ 判定条件: 値 > 0")
 print()
-print("🎯 統計ベーススキュー検出基準:")
-print("   📊 taskDuration max/median比率 ≥ 3.0")
-print("   📊 shuffleReadBytes max/median比率 ≥ 3.0")
-print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
+print("🎯 AQEベーススキュー検出基準:")
+print("   📊 AQEShuffleRead - Number of skewed partitions > 0")
+print("   📊 判定条件: メトリクス値 > 0")
+print("   📊 重要度: 検出値に基づく")
 
 # COMMAND ----------
 
@@ -3010,90 +3010,63 @@ if sorted_nodes:
                     })
                     break
         
-        # データスキューの検出（統計的メトリクスに基づく精密判定）
+        # データスキューの検出（AQEベースの精密判定）
         skew_detected = False
         skew_details = []
         
-        # ノードのmetricsから統計情報を取得
-        # 注意: node.get('metrics')は配列を返すことがあるため、辞書型チェックが必要
-        node_metrics = node.get('metrics', {})
+        # AQEベーススキュー検出: "AQEShuffleRead - Number of skewed partitions" > 0
+        target_aqe_metrics = [
+            "AQEShuffleRead - Number of skewed partitions"
+        ]
         
-        # metrics が配列の場合は空の辞書に置き換え（統計データは詳細metricsから取得）
-        if isinstance(node_metrics, list):
-            node_metrics = {}
+        aqe_skew_value = 0
+        aqe_metric_name = ""
         
-        # 1. taskDurationによるスキュー検出
-        task_duration_stats = node_metrics.get('taskDuration', {})
-        if isinstance(task_duration_stats, dict):
-            max_duration = task_duration_stats.get('max', 0)
-            median_duration = task_duration_stats.get('median', 0)
-            min_duration = task_duration_stats.get('min', 0)
-            
-            if median_duration > 0 and max_duration > 0:
-                duration_ratio = max_duration / median_duration
-                if duration_ratio >= 3.0:  # 3倍以上の差がある場合
-                    skew_detected = True
-                    severity_level = "高" if duration_ratio >= 5.0 else "中"
-                    skew_details.append({
-                        'type': 'task_duration_skew',
-                        'ratio': duration_ratio,
-                        'threshold': 3.0,
-                        'max_value': max_duration,
-                        'median_value': median_duration,
-                        'min_value': min_duration,
-                        'severity': severity_level,
-                        'description': f'タスク実行時間スキュー: max({max_duration}ms)/median({median_duration}ms) = {duration_ratio:.1f} > 基準値 3.0 [重要度:{severity_level}]'
-                    })
+        # 1. detailed_metricsで検索
+        detailed_metrics = node.get('detailed_metrics', {})
+        for metric_key, metric_info in detailed_metrics.items():
+            if metric_key in target_aqe_metrics:
+                aqe_skew_value = metric_info.get('value', 0)
+                aqe_metric_name = metric_key
+                break
+            elif metric_info.get('label', '') in target_aqe_metrics:
+                aqe_skew_value = metric_info.get('value', 0)
+                aqe_metric_name = metric_info.get('label', '')
+                break
         
-        # 2. shuffleReadBytesによるスキュー検出
-        shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
-        if isinstance(shuffle_read_stats, dict):
-            max_shuffle = shuffle_read_stats.get('max', 0)
-            median_shuffle = shuffle_read_stats.get('median', 0)
-            min_shuffle = shuffle_read_stats.get('min', 0)
-            
-            if median_shuffle > 0 and max_shuffle > 0:
-                shuffle_ratio = max_shuffle / median_shuffle
-                if shuffle_ratio >= 3.0:  # 3倍以上の差がある場合
-                    skew_detected = True
-                    severity_level = "高" if shuffle_ratio >= 5.0 else "中"
-                    skew_details.append({
-                        'type': 'shuffle_read_skew',
-                        'ratio': shuffle_ratio,
-                        'threshold': 3.0,
-                        'max_value': max_shuffle,
-                        'median_value': median_shuffle,
-                        'min_value': min_shuffle,
-                        'severity': severity_level,
-                        'description': f'シャッフル読み込みスキュー: max({max_shuffle:,}bytes)/median({median_shuffle:,}bytes) = {shuffle_ratio:.1f} > 基準値 3.0 [重要度:{severity_level}]'
-                    })
+        # 2. raw_metricsで検索（フォールバック）
+        if aqe_skew_value == 0:
+            raw_metrics = node.get('metrics', [])
+            if isinstance(raw_metrics, list):
+                for raw_metric in raw_metrics:
+                    if isinstance(raw_metric, dict):
+                        raw_metric_name = raw_metric.get('metricName', '')
+                        if raw_metric_name in target_aqe_metrics:
+                            aqe_skew_value = raw_metric.get('value', 0)
+                            aqe_metric_name = raw_metric_name
+                            break
         
-        # 3. 他の統計メトリクスもチェック（拡張対応）
-        other_metrics_to_check = ['shuffleWriteBytes', 'inputBytes', 'outputBytes']
-        for metric_name in other_metrics_to_check:
-            # node_metricsが辞書型の場合のみメトリクス取得
-            if isinstance(node_metrics, dict):
-                metric_stats = node_metrics.get(metric_name, {})
-            else:
-                metric_stats = {}
-            if isinstance(metric_stats, dict):
-                max_val = metric_stats.get('max', 0)
-                median_val = metric_stats.get('median', 0)
-                
-                if median_val > 0 and max_val > 0:
-                    ratio = max_val / median_val
-                    if ratio >= 4.0:  # 他のメトリクスは基準を少し高めに設定
-                        skew_detected = True
-                        severity_level = "高" if ratio >= 6.0 else "中"
-                        skew_details.append({
-                            'type': f'{metric_name}_skew',
-                            'ratio': ratio,
-                            'threshold': 4.0,
-                            'max_value': max_val,
-                            'median_value': median_val,
-                            'severity': severity_level,
-                            'description': f'{metric_name}スキュー: max({max_val:,})/median({median_val:,}) = {ratio:.1f} > 基準値 4.0 [重要度:{severity_level}]'
-                        })
+        # 3. key_metricsで検索（フォールバック）
+        if aqe_skew_value == 0:
+            key_metrics = node.get('key_metrics', {})
+            for key_metric_name, key_metric_value in key_metrics.items():
+                if any(target in key_metric_name for target in target_aqe_metrics):
+                    aqe_skew_value = key_metric_value
+                    aqe_metric_name = key_metric_name
+                    break
+        
+        # AQEスキュー判定
+        if aqe_skew_value > 0:
+            skew_detected = True
+            severity_level = "高" if aqe_skew_value >= 5 else "中"
+            skew_details.append({
+                'type': 'aqe_skew',
+                'value': aqe_skew_value,
+                'threshold': 0,
+                'metric_name': aqe_metric_name,
+                'severity': severity_level,
+                'description': f'AQEスキュー検出: {aqe_metric_name} = {aqe_skew_value} > 基準値 0 [重要度:{severity_level}]'
+            })
         
         # 4. スピルメトリクスに基づくスキュー検出（メモリプレッシャーによるスピルの不均等を検出）
         if spill_detected and spill_bytes > 0:
@@ -3141,7 +3114,7 @@ if sorted_nodes:
         print(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
         print(f"    📊 処理行数: {rows_num:>8,} 行")
         print(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'あり' if skew_detected else 'なし'}")
+        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'検出' if skew_detected else 'なし'}")
         
         # 効率性指標（行/秒）を計算
         if duration_ms > 0:
@@ -3265,69 +3238,44 @@ if sorted_nodes:
                 else:
                     print(f"       🔍 参考: その他のスピル関連メトリクスは発見されませんでした")
         
-        # スキュー詳細情報（統計ベースのデバッグ表示付き）
+        # スキュー詳細情報（AQEベースのデバッグ表示付き）
         if skew_detected:
             print(f"    🔍 スキュー判定根拠:")
             for detail in skew_details:
                 description = detail['description']
                 print(f"       ⚖️ {description}")
                 
-                # より詳細な統計情報の表示
-                if detail['type'] in ['task_duration_skew', 'shuffle_read_skew']:
-                    max_val = detail['max_value']
-                    median_val = detail['median_value']
-                    min_val = detail.get('min_value', 0)
-                    
-                    if detail['type'] == 'task_duration_skew':
-                        print(f"           📊 実行時間分布: min={min_val}ms, median={median_val}ms, max={max_val}ms")
-                    else:  # shuffle_read_skew
-                        print(f"           📊 シャッフル分布: min={min_val:,}bytes, median={median_val:,}bytes, max={max_val:,}bytes")
-                    
-                    # 分散の度合いを表示
-                    if min_val > 0:
-                        max_min_ratio = max_val / min_val
-                        print(f"           📈 最大/最小比率: {max_min_ratio:.1f} (分散度合いの指標)")
+                # より詳細なAQE情報の表示
+                if detail['type'] == 'aqe_skew':
+                    aqe_value = detail['value']
+                    metric_name = detail['metric_name']
+                    print(f"           📊 AQEベース検出: {metric_name} = {aqe_value}")
+                    print(f"           🎯 AQE検出詳細: Sparkが自動的に{aqe_value}個のスキューパーティションを検出")
                     
                     severity = detail.get('severity', '中')
                     severity_emoji = "🚨" if severity == "高" else "⚠️"
-                    print(f"           {severity_emoji} 重要度: {severity} ({'5倍以上' if severity == '高' else '3-5倍'}の差)")
+                    print(f"           {severity_emoji} 重要度: {severity} ({'5個以上' if severity == '高' else '1-4個'}のスキューパーティション)")
         else:
             # スキューが検出されなかった場合のデバッグ情報（詳細表示時のみ）
             import os
             if os.environ.get('DEBUG_SKEW_ANALYSIS', '').lower() in ['true', '1', 'yes']:
                 debug_info = []
                 
-                # taskDurationの統計チェック（node_metricsが辞書型の場合のみ）
-                if isinstance(node_metrics, dict):
-                    task_duration_stats = node_metrics.get('taskDuration', {})
+                # AQEメトリクスの検索結果
+                debug_info.append(f"AQEメトリクス検索結果: {aqe_metric_name if aqe_metric_name else 'ターゲットメトリクス未発見'}")
+                if aqe_metric_name:
+                    debug_info.append(f"AQEメトリクス値: {aqe_skew_value} ≤ 基準値: 0")
                 else:
-                    task_duration_stats = {}
-                if isinstance(task_duration_stats, dict):
-                    max_duration = task_duration_stats.get('max', 0)
-                    median_duration = task_duration_stats.get('median', 0)
-                    if median_duration > 0 and max_duration > 0:
-                        duration_ratio = max_duration / median_duration
-                        debug_info.append(f"タスク実行時間比率: {duration_ratio:.1f} ≤ 基準値: 3.0")
-                    else:
-                        debug_info.append("タスク実行時間統計: データなし")
+                    debug_info.append("AQEメトリクス: 'AQEShuffleRead - Number of skewed partitions' 未発見")
                 
-                # shuffleReadBytesの統計チェック（node_metricsが辞書型の場合のみ）
-                if isinstance(node_metrics, dict):
-                    shuffle_read_stats = node_metrics.get('shuffleReadBytes', {})
-                else:
-                    shuffle_read_stats = {}
-                if isinstance(shuffle_read_stats, dict):
-                    max_shuffle = shuffle_read_stats.get('max', 0)
-                    median_shuffle = shuffle_read_stats.get('median', 0)
-                    if median_shuffle > 0 and max_shuffle > 0:
-                        shuffle_ratio = max_shuffle / median_shuffle
-                        debug_info.append(f"シャッフル読み込み比率: {shuffle_ratio:.1f} ≤ 基準値: 3.0")
-                    else:
-                        debug_info.append("シャッフル読み込み統計: データなし")
+                # 各ソースでの検索結果を表示
+                detailed_metrics = node.get('detailed_metrics', {})
+                raw_metrics = node.get('metrics', [])
+                key_metrics = node.get('key_metrics', {})
                 
-                # 利用可能なメトリクス一覧（node_metricsが辞書型の場合のみ）
-                available_metrics = list(node_metrics.keys()) if isinstance(node_metrics, dict) else []
-                debug_info.append(f"利用可能な統計メトリクス: {', '.join(available_metrics) if available_metrics else 'なし'}")
+                debug_info.append(f"detailed_metrics: {len(detailed_metrics)}個のメトリクス")
+                debug_info.append(f"raw_metrics: {len(raw_metrics) if isinstance(raw_metrics, list) else 0}個のメトリクス")
+                debug_info.append(f"key_metrics: {len(key_metrics)}個のメトリクス")
                 
                 if debug_info:
                     print(f"    🔍 スキュー未検出理由:")
