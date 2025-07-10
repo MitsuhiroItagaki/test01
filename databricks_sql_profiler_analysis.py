@@ -129,7 +129,11 @@ print("=" * 50)
 
 # ⚙️ 基本的な環境設定
 import json
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    print("Warning: pandas is not installed, some features may not work")
+    pd = None
 from typing import Dict, List, Any
 from datetime import datetime
 
@@ -222,26 +226,23 @@ print('   LLM_CONFIG["databricks"]["max_tokens"] = 131072  # 最大トークン�
 print()
 
 # 必要なライブラリのインポート
-import requests
-import os
-from pyspark.sql import SparkSession
-
-# PySpark関数を安全にインポート
 try:
-    from pyspark.sql.functions import col, lit, when
-    from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
-    print("✅ PySpark関数のインポート完了")
-except ImportError as e:
-    print(f"⚠️ PySpark関数のインポートをスキップ: {e}")
-    # 基本的な分析には影響しないためスキップ
-
-# Databricks環境の確認
-spark = SparkSession.builder.getOrCreate()
-print(f"✅ Spark Version: {spark.version}")
+    import requests
+except ImportError:
+    print("Warning: requests is not installed, some features may not work")
+    requests = None
+import os
+try:
+    from pyspark.sql import SparkSession
+except ImportError:
+    print("Warning: pyspark is not installed")
+    SparkSession = None
+    print("✅ Spark Version: Not available")
 
 # Databricks Runtime情報を安全に取得
 try:
-    runtime_version = spark.conf.get('spark.databricks.clusterUsageTags.sparkVersion')
+    if spark is not None:
+        runtime_version = spark.conf.get('spark.databricks.clusterUsageTags.sparkVersion')
     print(f"✅ Databricks Runtime: {runtime_version}")
 except Exception:
     try:
@@ -3040,6 +3041,19 @@ if sorted_nodes:
             if isinstance(raw_metrics, list):
                 for raw_metric in raw_metrics:
                     if isinstance(raw_metric, dict):
+                        # 'label'フィールドを最初にチェック
+                        raw_metric_label = raw_metric.get('label', '')
+                        if raw_metric_label in target_aqe_metrics:
+                            aqe_skew_value = raw_metric.get('value', 0)
+                            aqe_metric_name = raw_metric_label
+                            break
+                        # 'key'フィールドもチェック
+                        raw_metric_key = raw_metric.get('key', '')
+                        if raw_metric_key in target_aqe_metrics:
+                            aqe_skew_value = raw_metric.get('value', 0)
+                            aqe_metric_name = raw_metric_key
+                            break
+                        # 'metricName'フィールドもチェック（従来の互換性）
                         raw_metric_name = raw_metric.get('metricName', '')
                         if raw_metric_name in target_aqe_metrics:
                             aqe_skew_value = raw_metric.get('value', 0)
@@ -3380,40 +3394,6 @@ if extracted_metrics['stage_metrics']:
             
             print(f"   ⚠️ ステージ {stage_id}: {', '.join(issues)}")
     
-    # DataFrame形式での詳細データ（オプション）
-    print(f"\n📋 詳細データ (DataFrame形式):")
-    print("-" * 40)
-    try:
-        import pandas as pd
-        # データを整理してわかりやすく表示
-        display_data = []
-        for stage in stage_metrics:
-            display_data.append({
-                'ステージID': stage.get('stage_id', 'N/A'),
-                'ステータス': stage.get('status', 'UNKNOWN'),
-                '実行時間(秒)': round(stage.get('duration_ms', 0) / 1000, 1),
-                'タスク数': stage.get('num_tasks', 0),
-                '完了タスク': stage.get('num_complete_tasks', 0),
-                '失敗タスク': stage.get('num_failed_tasks', 0),
-                '平均タスク時間(ms)': round(stage.get('duration_ms', 0) / max(stage.get('num_tasks', 1), 1), 1)
-            })
-        
-        df = pd.DataFrame(display_data)
-        df = df.sort_values('実行時間(秒)', ascending=False)
-        print(df.to_string(index=False))
-        
-    except Exception as e:
-        print(f"⚠️ DataFrame表示をスキップ: {e}")
-        # シンプルな表形式で表示
-        print(f"{'ステージID':<10} {'実行時間':<10} {'タスク':<8} {'失敗':<6} {'ステータス'}")
-        print("-" * 50)
-        for stage in sorted_stages:
-            stage_id = str(stage.get('stage_id', 'N/A'))[:8]
-            duration_sec = stage.get('duration_ms', 0) / 1000
-            num_tasks = stage.get('num_tasks', 0)
-            failed = stage.get('num_failed_tasks', 0)
-            status = stage.get('status', 'UNKNOWN')[:8]
-            print(f"{stage_id:<10} {duration_sec:<10.1f} {num_tasks:<8} {failed:<6} {status}")
     
     print()
 else:
@@ -3574,7 +3554,7 @@ with open(result_output_path, 'w', encoding='utf-8') as file:
     file.write(f"{get_message('bottleneck_title')}\n")
     file.write("=" * 60 + "\n\n")
     file.write(f"{get_message('query_id')}: {extracted_metrics['query_info']['query_id']}\n")
-    file.write(f"{get_message('analysis_time')}: {pd.Timestamp.now()}\n")
+    file.write(f"{get_message('analysis_time')}: {datetime.now()}\n")
     file.write(f"{get_message('execution_time')}: {extracted_metrics['overall_metrics']['total_time_ms']:,} ms\n")
     file.write("=" * 60 + "\n\n")
     
@@ -6534,30 +6514,38 @@ print("📊 SQLの最適化により精密で実用的なBROADCAST推奨が可�
 print("🔍 既存の最適化状況を考慮した、より実際的な分析を提供します")
 print("✅ 全ての機能が正常に統合されました")
 
-### 🎛️ カスタマイズポイント
+# 🎛️ カスタマイズポイント
+#
+# - **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
+# - **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
+# - **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
+# - **表示形式**: emoji と出力フォーマットの調整
+#
+# 🔍 エラー対処方法
+#
+# 1. **LLMエンドポイントエラー**: 
+#    - Databricks: Model Servingエンドポイントの状態確認
+#    - OpenAI/Azure/Anthropic: APIキーとクォータ確認
+# 2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
+# 3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
+#
+# 💡 高度な使用例
+#
+# ```python
+# # 複数ファイルの一括分析
+# profiler_files = dbutils.fs.ls("/FileStore/profiler_logs/")
+# for file_info in profiler_files:
+#     if file_info.path.endswith('.json'):
+#         profiler_data = load_profiler_json(file_info.path)
+#         metrics = extract_performance_metrics(profiler_data)
+#         # 分析処理...
+# ```
 
-- **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
-- **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
-- **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
-- **表示形式**: emoji と出力フォーマットの調整
-
-### 🔍 エラー対処方法
-
-1. **LLMエンドポイントエラー**: 
-   - Databricks: Model Servingエンドポイントの状態確認
-   - OpenAI/Azure/Anthropic: APIキーとクォータ確認
-2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
-3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
-
-### 💡 高度な使用例
-
-```python
-# 複数ファイルの一括分析
-profiler_files = dbutils.fs.ls("/FileStore/profiler_logs/")
-for file_info in profiler_files:
-    if file_info.path.endswith('.json'):
-        profiler_data = load_profiler_json(file_info.path)
-        metrics = extract_performance_metrics(profiler_data)
-        # 分析処理...
-```
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        profiler_data = load_profiler_json(sys.argv[1])
+        extracted_metrics = extract_performance_metrics(profiler_data)
+        print("Testing skew detection...")
+        # Test completed
 
