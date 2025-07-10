@@ -3466,6 +3466,107 @@ def extract_table_name_from_scan_node(node: Dict[str, Any]) -> str:
     
     return None
 
+def extract_broadcast_table_names(profiler_data: Dict[str, Any], broadcast_nodes: list) -> Dict[str, Any]:
+    """
+    BROADCASTノードから関連するテーブル名を抽出
+    """
+    broadcast_table_info = {
+        "broadcast_tables": [],
+        "broadcast_table_mapping": {},
+        "broadcast_nodes_with_tables": []
+    }
+    
+    # 実行プランのグラフ情報を取得
+    graphs = profiler_data.get('graphs', [])
+    if not graphs:
+        return broadcast_table_info
+    
+    # 全ノードを収集
+    all_nodes = []
+    for graph in graphs:
+        nodes = graph.get('nodes', [])
+        all_nodes.extend(nodes)
+    
+    # エッジ情報を収集（ノード間の関係）
+    all_edges = []
+    for graph in graphs:
+        edges = graph.get('edges', [])
+        all_edges.extend(edges)
+    
+    # 各BROADCASTノードについて関連するテーブルを特定
+    for broadcast_node in broadcast_nodes:
+        broadcast_node_id = broadcast_node.get('node_id', '')
+        broadcast_node_name = broadcast_node.get('node_name', '')
+        
+        # BROADCASTノードから直接テーブル名を抽出
+        table_names = set()
+        
+        # 1. メタデータからテーブル名を抽出
+        metadata = broadcast_node.get('metadata', [])
+        for meta in metadata:
+            key = meta.get('key', '')
+            value = meta.get('value', '')
+            values = meta.get('values', [])
+            
+            # テーブル名を示すキーをチェック
+            if key in ['SCAN_IDENTIFIER', 'TABLE_NAME', 'RELATION']:
+                if value:
+                    table_names.add(value)
+                table_names.update(values)
+        
+        # 2. ノード名からテーブル名を推定
+        if 'SCAN' in broadcast_node_name:
+            # "Broadcast Scan delta orders" → "orders"
+            import re
+            table_match = re.search(r'SCAN\s+(?:DELTA|PARQUET|JSON|CSV)?\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)', broadcast_node_name, re.IGNORECASE)
+            if table_match:
+                table_names.add(table_match.group(1))
+        
+        # 3. エッジ情報から関連するスキャンノードを特定
+        for edge in all_edges:
+            source_id = edge.get('source', '')
+            target_id = edge.get('target', '')
+            
+            # BROADCASTノードに入力されるノードを検索
+            if target_id == broadcast_node_id:
+                # 入力ノードがスキャンノードかチェック
+                for node in all_nodes:
+                    if node.get('id', '') == source_id:
+                        node_name = node.get('name', '').upper()
+                        if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN']):
+                            # スキャンノードからテーブル名を抽出
+                            scan_table_name = extract_table_name_from_scan_node(node)
+                            if scan_table_name:
+                                table_names.add(scan_table_name)
+        
+        # 4. 同じグラフ内のスキャンノードとの関連付け
+        for node in all_nodes:
+            node_name = node.get('name', '').upper()
+            if any(keyword in node_name for keyword in ['SCAN', 'FILESCAN']):
+                # スキャンノードの名前がBROADCASTノード名に含まれるかチェック
+                scan_table_name = extract_table_name_from_scan_node(node)
+                if scan_table_name:
+                    # テーブル名の部分一致をチェック
+                    if any(part in broadcast_node_name for part in scan_table_name.split('.') if len(part) > 2):
+                        table_names.add(scan_table_name)
+        
+        # 結果を記録
+        table_names_list = list(table_names)
+        if table_names_list:
+            broadcast_table_info["broadcast_tables"].extend(table_names_list)
+            broadcast_table_info["broadcast_table_mapping"][broadcast_node_id] = table_names_list
+            
+            # BROADCASTノード情報を拡張
+            enhanced_broadcast_node = broadcast_node.copy()
+            enhanced_broadcast_node["associated_tables"] = table_names_list
+            enhanced_broadcast_node["table_count"] = len(table_names_list)
+            broadcast_table_info["broadcast_nodes_with_tables"].append(enhanced_broadcast_node)
+    
+    # 重複を除去
+    broadcast_table_info["broadcast_tables"] = list(set(broadcast_table_info["broadcast_tables"]))
+    
+    return broadcast_table_info
+
 def extract_execution_plan_info(profiler_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     JSONメトリクスから実行プラン情報を抽出
@@ -3479,7 +3580,8 @@ def extract_execution_plan_info(profiler_data: Dict[str, Any]) -> Dict[str, Any]
         "plan_summary": {},
         "broadcast_already_applied": False,
         "join_strategies": [],
-        "table_scan_details": {}
+        "table_scan_details": {},
+        "broadcast_table_info": {}
     }
     
     # プロファイラーデータから実行グラフ情報を取得
@@ -3660,6 +3762,15 @@ def extract_execution_plan_info(profiler_data: Dict[str, Any]) -> Dict[str, Any]
         "tables_scanned": len(plan_info["table_scan_details"])
     }
     
+    # BROADCASTテーブル情報を抽出
+    if plan_info["broadcast_nodes"]:
+        broadcast_table_info = extract_broadcast_table_names(profiler_data, plan_info["broadcast_nodes"])
+        plan_info["broadcast_table_info"] = broadcast_table_info
+        
+        # プランサマリーにBROADCASTテーブル情報を追加
+        plan_info["plan_summary"]["broadcast_tables"] = broadcast_table_info["broadcast_tables"]
+        plan_info["plan_summary"]["broadcast_table_count"] = len(broadcast_table_info["broadcast_tables"])
+    
     # 実行プランからのテーブルサイズ推定情報を追加（estimatedSizeInBytes利用不可のため無効化）
     plan_info["table_size_estimates"] = {}  # extract_table_size_estimates_from_plan(profiler_data)
     
@@ -3705,7 +3816,8 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
         "detailed_size_analysis": [],
         "execution_plan_analysis": {},
         "existing_broadcast_nodes": [],
-        "already_optimized": False
+        "already_optimized": False,
+        "broadcast_applied_tables": []
     }
     
     # クエリにJOINが含まれているかチェック
@@ -3746,8 +3858,29 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
         # 既にBROADCASTが適用されている場合の詳細記録
         if broadcast_nodes:
             broadcast_analysis["reasoning"].append(f"✅ 実行プランで既にBROADCAST JOINが適用済み: {len(broadcast_nodes)}個のノード")
-            for i, node in enumerate(broadcast_nodes[:3]):  # 最大3個まで表示
-                broadcast_analysis["reasoning"].append(f"  • BROADCAST Node {i+1}: {node['node_name'][:50]}...")
+            
+            # BROADCASTテーブル情報を取得
+            broadcast_table_info = plan_info.get("broadcast_table_info", {})
+            broadcast_tables = broadcast_table_info.get("broadcast_tables", [])
+            
+            if broadcast_tables:
+                broadcast_analysis["reasoning"].append(f"📋 BROADCASTされているテーブル: {', '.join(broadcast_tables)}")
+                broadcast_analysis["broadcast_applied_tables"] = broadcast_tables
+                
+                # 各BROADCASTノードの詳細
+                broadcast_nodes_with_tables = broadcast_table_info.get("broadcast_nodes_with_tables", [])
+                for i, node in enumerate(broadcast_nodes_with_tables[:3]):  # 最大3個まで表示
+                    node_name_short = node['node_name'][:50] + "..." if len(node['node_name']) > 50 else node['node_name']
+                    associated_tables = node.get('associated_tables', [])
+                    if associated_tables:
+                        broadcast_analysis["reasoning"].append(f"  • BROADCAST Node {i+1}: {node_name_short}")
+                        broadcast_analysis["reasoning"].append(f"    └─ テーブル: {', '.join(associated_tables)}")
+                    else:
+                        broadcast_analysis["reasoning"].append(f"  • BROADCAST Node {i+1}: {node_name_short} (テーブル名未特定)")
+            else:
+                # BROADCASTノードは存在するがテーブル名が特定できない場合
+                for i, node in enumerate(broadcast_nodes[:3]):  # 最大3個まで表示
+                    broadcast_analysis["reasoning"].append(f"  • BROADCAST Node {i+1}: {node['node_name'][:50]}... (テーブル名解析中)")
         else:
             # BROADCAST未適用だが、JOINが存在する場合
             if join_nodes:
@@ -4179,6 +4312,11 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         if broadcast_analysis["already_optimized"]:
             existing_broadcast_count = len(broadcast_analysis["existing_broadcast_nodes"])
             broadcast_summary.append(f"✅ 既にBROADCAST JOIN適用済み: {existing_broadcast_count}個のノード")
+            
+            # BROADCASTされているテーブル一覧を表示
+            broadcast_applied_tables = broadcast_analysis.get("broadcast_applied_tables", [])
+            if broadcast_applied_tables:
+                broadcast_summary.append(f"📋 BROADCASTされているテーブル: {', '.join(broadcast_applied_tables)}")
             
             # 既存のBROADCASTノードの詳細を表示（最大3個）
             for i, node in enumerate(broadcast_analysis["existing_broadcast_nodes"][:3]):
@@ -4900,6 +5038,12 @@ def generate_execution_plan_markdown_report_ja(plan_info: Dict[str, Any]) -> str
     if plan_summary.get('has_broadcast_joins', False):
         lines.append("✅ **既にBROADCAST JOINが適用されています**")
         lines.append("- 現在の実行プランでBROADCAST最適化が有効")
+        
+        # BROADCASTされているテーブル一覧を表示
+        broadcast_tables = plan_summary.get('broadcast_tables', [])
+        if broadcast_tables:
+            lines.append(f"- **BROADCASTされているテーブル**: {', '.join(broadcast_tables)}")
+        
         lines.append("- 追加のBROADCAST適用機会を確認してください")
     else:
         lines.append("⚠️ **BROADCAST JOINが未適用です**")
@@ -5103,6 +5247,12 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
     if plan_summary.get('has_broadcast_joins', False):
         lines.append("✅ **BROADCAST JOIN is already applied**")
         lines.append("- Current execution plan has BROADCAST optimization enabled")
+        
+        # Show list of broadcast tables
+        broadcast_tables = plan_summary.get('broadcast_tables', [])
+        if broadcast_tables:
+            lines.append(f"- **Tables Being Broadcast**: {', '.join(broadcast_tables)}")
+        
         lines.append("- Check for additional BROADCAST application opportunities")
     else:
         lines.append("⚠️ **BROADCAST JOIN is not applied**")
@@ -5276,6 +5426,12 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                 if broadcast_analysis['already_optimized']:
                     existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
                     f.write(f"- **既存のBROADCAST適用状況**: ✅ 既にBROADCAST JOIN適用済み（{existing_broadcast_count}個のノード）\n")
+                    
+                    # BROADCASTされているテーブル一覧を表示
+                    broadcast_applied_tables = broadcast_analysis.get('broadcast_applied_tables', [])
+                    if broadcast_applied_tables:
+                        f.write(f"- **BROADCASTされているテーブル**: {', '.join(broadcast_applied_tables)}\n")
+                    
                     # 既存のBROADCASTノードの詳細
                     for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
                         node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
@@ -5336,6 +5492,12 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                 if broadcast_analysis['already_optimized']:
                     existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
                     f.write(f"- **Existing BROADCAST Status**: ✅ BROADCAST JOIN already applied ({existing_broadcast_count} nodes)\n")
+                    
+                    # Show list of broadcast tables
+                    broadcast_applied_tables = broadcast_analysis.get('broadcast_applied_tables', [])
+                    if broadcast_applied_tables:
+                        f.write(f"- **Tables Being Broadcast**: {', '.join(broadcast_applied_tables)}\n")
+                    
                     # Details of existing BROADCAST nodes
                     for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
                         node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
