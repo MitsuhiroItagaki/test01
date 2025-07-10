@@ -5017,91 +5017,32 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 rows_per_sec = (rows_num * 1000) / duration_ms
                 report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
             
-            # スピル詳細情報とデバッグ情報
-            if spill_detected:
-                if spill_bytes > 0:
-                    spill_mb = spill_bytes / 1024 / 1024
-                    if spill_mb >= 1024:  # GB単位
-                        spill_display = f"{spill_mb/1024:.2f} GB"
-                    else:  # MB単位
-                        spill_display = f"{spill_mb:.1f} MB"
+            # スピル詳細情報（シンプル表示）
+            if spill_detected and spill_bytes > 0:
+                spill_mb = spill_bytes / 1024 / 1024
+                if spill_mb >= 1024:  # GB単位
+                    spill_display = f"{spill_mb/1024:.2f} GB"
+                else:  # MB単位
+                    spill_display = f"{spill_mb:.1f} MB"
+                report_lines.append(f"    💿 スピル: {spill_display}")
+            
+            # Shuffleノードの場合は常にShuffle attributesを表示
+            if "shuffle" in raw_node_name.lower():
+                shuffle_attributes = extract_shuffle_attributes(node)
+                if shuffle_attributes:
+                    report_lines.append(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
                     
-                    # メトリクス名を抽出してフォーマット
-                    metric_name = "Unknown"
-                    if "exact_match_detailed" in spill_detection_method or "exact_match_raw" in spill_detection_method:
-                        # カッコの中のメトリクス名を抽出
-                        start = spill_detection_method.find("(") + 1
-                        end = spill_detection_method.find(")")
-                        if start > 0 and end > start:
-                            metric_name = spill_detection_method[start:end]
+                    # REPARTITIONヒントの提案
+                    suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
+                    main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                     
-                    # メトリクス名の表示形式を統一
-                    formatted_display = f"{metric_name}: {spill_display}"
-                    report_lines.append(f"    💿 スピル詳細: {formatted_display}")
-                    
-                    # Shuffleノードでスピル発生時にShuffle attributesを検出して表示
-                    if "shuffle" in raw_node_name.lower():
-                        shuffle_attributes = extract_shuffle_attributes(node)
-                        if shuffle_attributes:
-                            report_lines.append(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
-                            
-                            # REPARTITIONヒントの提案
-                            if len(shuffle_attributes) > 0:
-                                # 適切な並列度を提案（現在の並列度の1.5倍を推奨）
-                                suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
-                                main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
-                                
-                                report_lines.append(f"    💡 最適化提案: REPARTITIONヒント")
-                                report_lines.append(f"       REPARTITION({suggested_partitions}, {main_attribute})")
-                                report_lines.append(f"       理由: スピル({spill_display})を改善するため")
-                        else:
-                            report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
-                else:
-                    report_lines.append(f"    💿 スピル詳細: 検出済み ({spill_detection_method})")
-            else:
-                # スピル未検出時のデバッグ情報（大容量メモリ使用時のみ）
-                if memory_mb > 1024:  # 1GB以上なのにスピル未検出の場合
-                    report_lines.append(f"    🔍 スピルデバッグ: メモリ{memory_mb:.1f}MBなのに未検出")
-                    
-                    # 利用可能なメトリクス一覧を表示（'spill'や'disk'関連のみ）
-                    spill_related_metrics = []
-                    
-                    # detailed_metricsから検索
-                    detailed_metrics = node.get('detailed_metrics', {})
-                    for key, info in detailed_metrics.items():
-                        if (key in exact_spill_metrics or info.get('label', '') in exact_spill_metrics):
-                            value = info.get('value', 0)
-                            label = info.get('label', '')
-                            spill_related_metrics.append(f"detailed[{key}]={value}")
-                            if label and label != key:
-                                spill_related_metrics.append(f"  label='{label}'")
-                    
-                    # raw_metricsから検索
-                    raw_metrics = node.get('metrics', [])
-                    if isinstance(raw_metrics, list):
-                        for metric in raw_metrics:
-                            key = metric.get('key', '')
-                            label = metric.get('label', '')
-                            value = metric.get('value', 0)
-                            if (key in exact_spill_metrics or label in exact_spill_metrics):
-                                spill_related_metrics.append(f"raw[{key}]={value}")
-                                if label and label != key:
-                                    spill_related_metrics.append(f"  label='{label}'")
-                    
-                    # key_metricsから検索
-                    key_metrics = node.get('key_metrics', {})
-                    for key, value in key_metrics.items():
-                        if key in exact_spill_metrics:
-                            spill_related_metrics.append(f"key[{key}]={value}")
-                    
-                    if spill_related_metrics:
-                        report_lines.append(f"    🔍 発見されたスピル関連メトリクス:")
-                        for metric in spill_related_metrics[:5]:  # 最大5個まで表示
-                            report_lines.append(f"      • {metric}")
-                        if len(spill_related_metrics) > 5:
-                            report_lines.append(f"      • ... 他{len(spill_related_metrics)-5}個")
+                    report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                    if spill_detected and spill_bytes > 0:
+                        report_lines.append(f"       理由: スピル({spill_display})を改善するため")
                     else:
-                        report_lines.append(f"    🔍 スピル関連メトリクスが全く見つかりません")
+                        report_lines.append(f"       理由: Shuffle効率を改善するため")
+                else:
+                    report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
