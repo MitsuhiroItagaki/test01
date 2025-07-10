@@ -3171,9 +3171,23 @@ if sorted_nodes:
                 else:
                     value_display = f"{value} bytes"
                 
+                # 全体のスピル値を取得（bottleneck_indicatorsから）
+                bottleneck_indicators = extracted_metrics.get('bottleneck_indicators', {})
+                total_spill_bytes = bottleneck_indicators.get('spill_bytes', value)
+                
+                # 全体のスピル値を適切な単位で表示
+                if total_spill_bytes >= 1024 * 1024 * 1024:  # GB単位
+                    total_value_display = f"{total_spill_bytes/1024/1024/1024:.1f} GB"
+                elif total_spill_bytes >= 1024 * 1024:  # MB単位
+                    total_value_display = f"{total_spill_bytes/1024/1024:.1f} MB"
+                elif total_spill_bytes >= 1024:  # KB単位
+                    total_value_display = f"{total_spill_bytes/1024:.1f} KB"
+                else:
+                    total_value_display = f"{total_spill_bytes} bytes"
+                
                 print(f"       🎯 ターゲットメトリクス: 'Sink/Num bytes spilled to disk due to memory pressure'")
-                print(f"       📊 検出値: {value_display} (from {source}.{matched_field})")
-                print(f"       🔍 メトリクス名: {metric_name}")
+                print(f"       📊 検出値: {total_value_display} (exact_match_detailed (Num bytes spilled to disk due to memory pressure))")
+                print(f"       🔍 メトリクス名: Num bytes spilled to disk due to memory pressure")
                 if label and label != metric_name:
                     print(f"       🏷️  ラベル: {label}")
                 print(f"       ✅ 判定: スピルあり (値 > 0)")
