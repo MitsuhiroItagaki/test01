@@ -315,10 +315,175 @@ print("✅ 関数定義完了: load_profiler_json")
 
 # COMMAND ----------
 
+def detect_data_format(profiler_data: Dict[str, Any]) -> str:
+    """
+    JSONデータの形式を検出
+    """
+    # SQLプロファイラー形式の検出
+    if 'graphs' in profiler_data and isinstance(profiler_data['graphs'], list):
+        if len(profiler_data['graphs']) > 0:
+            return 'sql_profiler'
+    
+    # SQLクエリサマリー形式の検出（test2.json形式）
+    if 'query' in profiler_data and 'planMetadatas' in profiler_data:
+        query_data = profiler_data.get('query', {})
+        if 'metrics' in query_data:
+            return 'sql_query_summary'
+    
+    return 'unknown'
+
+def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Databricks SQLクエリサマリー形式のJSONから基本メトリクスを抽出
+    (test2.json形式に対応)
+    """
+    try:
+        query_data = profiler_data.get('query', {})
+        metrics_data = query_data.get('metrics', {})
+        
+        if not metrics_data:
+            print("⚠️ メトリクスデータが見つかりません")
+            return {}
+        
+        print(f"✅ SQLクエリサマリー形式のメトリクスを検出しました")
+        print(f"   - 実行時間: {metrics_data.get('totalTimeMs', 0):,} ms")
+        print(f"   - 読み込みデータ: {metrics_data.get('readBytes', 0) / 1024 / 1024 / 1024:.2f} GB")
+        print(f"   - 処理行数: {metrics_data.get('rowsReadCount', 0):,} 行")
+        
+        # 基本メトリクスの抽出
+        overall_metrics = {
+            'total_time_ms': metrics_data.get('totalTimeMs', 0),
+            'execution_time_ms': metrics_data.get('executionTimeMs', 0),
+            'compilation_time_ms': metrics_data.get('compilationTimeMs', 0),
+            'read_bytes': metrics_data.get('readBytes', 0),
+            'read_remote_bytes': metrics_data.get('readRemoteBytes', 0),
+            'read_cache_bytes': metrics_data.get('readCacheBytes', 0),
+            'spill_to_disk_bytes': metrics_data.get('spillToDiskBytes', 0),
+            'rows_produced_count': metrics_data.get('rowsProducedCount', 0),
+            'rows_read_count': metrics_data.get('rowsReadCount', 0),
+            'read_files_count': metrics_data.get('readFilesCount', 0),
+            'read_partitions_count': metrics_data.get('readPartitionsCount', 0),
+            'photon_total_time_ms': metrics_data.get('photonTotalTimeMs', 0),
+            'task_total_time_ms': metrics_data.get('taskTotalTimeMs', 0),
+            'network_sent_bytes': metrics_data.get('networkSentBytes', 0),
+            'photon_enabled': metrics_data.get('photonTotalTimeMs', 0) > 0,
+            'photon_utilization_ratio': 0
+        }
+        
+        # Photon利用率の計算
+        if overall_metrics['task_total_time_ms'] > 0:
+            overall_metrics['photon_utilization_ratio'] = min(
+                overall_metrics['photon_total_time_ms'] / overall_metrics['task_total_time_ms'], 1.0
+            )
+        
+        # キャッシュヒット率の計算
+        cache_hit_ratio = 0
+        if overall_metrics['read_bytes'] > 0:
+            cache_hit_ratio = overall_metrics['read_cache_bytes'] / overall_metrics['read_bytes']
+        
+        # ボトルネック指標の計算
+        bottleneck_indicators = {
+            'spill_bytes': overall_metrics['spill_to_disk_bytes'],
+            'has_spill': overall_metrics['spill_to_disk_bytes'] > 0,
+            'cache_hit_ratio': cache_hit_ratio,
+            'has_cache_miss': cache_hit_ratio < 0.8,
+            'photon_efficiency': overall_metrics['photon_utilization_ratio'],
+            'has_shuffle_bottleneck': False,  # 詳細情報がないため判定不可
+            'remote_read_ratio': 0,
+            'has_memory_pressure': overall_metrics['spill_to_disk_bytes'] > 0,
+            'max_task_duration_ratio': 1.0,  # 不明
+            'has_data_skew': False  # 詳細情報がないため判定不可
+        }
+        
+        # リモート読み込み比率の計算
+        if overall_metrics['read_bytes'] > 0:
+            bottleneck_indicators['remote_read_ratio'] = overall_metrics['read_remote_bytes'] / overall_metrics['read_bytes']
+        
+        # クエリ情報の抽出
+        query_info = {
+            'query_id': query_data.get('id', ''),
+            'query_text': query_data.get('queryText', '')[:300] + "..." if len(query_data.get('queryText', '')) > 300 else query_data.get('queryText', ''),
+            'status': query_data.get('status', ''),
+            'query_start_time': query_data.get('queryStartTimeMs', 0),
+            'query_end_time': query_data.get('queryEndTimeMs', 0),
+            'spark_ui_url': query_data.get('sparkUiUrl', ''),
+            'endpoint_id': query_data.get('endpointId', ''),
+            'user': query_data.get('user', {}).get('displayName', ''),
+            'statement_type': query_data.get('statementType', ''),
+            'plans_state': query_data.get('plansState', '')
+        }
+        
+        # 擬似的なノードメトリクス（サマリー情報から生成）
+        summary_node = {
+            'node_id': 'summary_node',
+            'name': f'Query Execution Summary ({query_data.get("statementType", "SQL")})',
+            'tag': 'QUERY_SUMMARY',
+            'key_metrics': {
+                'durationMs': overall_metrics['total_time_ms'],
+                'rowsNum': overall_metrics['rows_read_count'],
+                'peakMemoryBytes': 0  # 不明
+            },
+            'detailed_metrics': {
+                'Total Time': {'value': overall_metrics['total_time_ms'], 'display_name': 'Total Time'},
+                'Read Bytes': {'value': overall_metrics['read_bytes'], 'display_name': 'Read Bytes'},
+                'Spill Bytes': {'value': overall_metrics['spill_to_disk_bytes'], 'display_name': 'Spill to Disk'},
+                'Photon Time': {'value': overall_metrics['photon_total_time_ms'], 'display_name': 'Photon Time'},
+                'Rows Read': {'value': overall_metrics['rows_read_count'], 'display_name': 'Rows Read Count'}
+            },
+            'graph_index': 0
+        }
+        
+        return {
+            'data_format': 'sql_query_summary',
+            'query_info': query_info,
+            'overall_metrics': overall_metrics,
+            'bottleneck_indicators': bottleneck_indicators,
+            'node_metrics': [summary_node],
+            'stage_metrics': [],  # 詳細ステージ情報なし
+            'liquid_clustering_analysis': {},  # 後で追加
+            'raw_profiler_data': profiler_data,
+            'analysis_limitations': [
+                '詳細な実行プラン情報（ノード、エッジ）が利用できません',
+                'ステージ別メトリクスが利用できません', 
+                'BROADCAST分析は制限されます',
+                'Liquid Clustering分析は制限されます',
+                'データスキュー検出は制限されます'
+            ]
+        }
+        
+    except Exception as e:
+        print(f"⚠️ SQLクエリサマリー形式のメトリクス抽出でエラー: {str(e)}")
+        return {}
+
 def extract_performance_metrics(profiler_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    SQLプロファイラーデータからボトルネック分析に必要なメトリクスを抽出
+    SQLプロファイラーデータからボトルネック分析に必要なメトリクスを抽出（複数形式対応）
     """
+    # データ形式を検出
+    data_format = detect_data_format(profiler_data)
+    
+    print(f"🔍 検出されたデータ形式: {data_format}")
+    
+    if data_format == 'sql_query_summary':
+        print("📊 Databricks SQLクエリサマリー形式として処理中...")
+        result = extract_performance_metrics_from_query_summary(profiler_data)
+        if result:
+            # Liquid Clustering分析を追加（制限付き）
+            try:
+                result["liquid_clustering_analysis"] = analyze_liquid_clustering_opportunities(profiler_data, result)
+            except Exception as e:
+                print(f"⚠️ Liquid Clustering分析をスキップ: {str(e)}")
+                result["liquid_clustering_analysis"] = {}
+        return result
+    elif data_format == 'sql_profiler':
+        print("📊 SQLプロファイラー詳細形式として処理中...")
+        # 既存のSQLプロファイラー形式の処理を継続
+        pass
+    else:
+        print(f"⚠️ 未知のデータ形式です: {data_format}")
+        return {}
+    
+    # 既存のSQLプロファイラー形式の処理
     metrics = {
         "query_info": {},
         "overall_metrics": {},
@@ -963,6 +1128,57 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
     
     print(f"🔍 Liquid Clustering分析用データ抽出開始")
     
+    # データ形式を確認
+    data_format = metrics.get('data_format', '')
+    if data_format == 'sql_query_summary':
+        print("📊 SQLクエリサマリー形式: 制限付きのLiquid Clustering分析")
+        # test2.json形式の場合は制限付きの分析を行う
+        query_info = metrics.get('query_info', {})
+        query_text = query_info.get('query_text', '')
+        
+        # クエリテキストから基本的なテーブル情報を抽出
+        if query_text:
+            # 簡単なテーブル名抽出（FROM句から）
+            import re
+            from_match = re.search(r'FROM\s+(\w+)', query_text, re.IGNORECASE)
+            if from_match:
+                table_name = from_match.group(1)
+                extracted_data["table_info"][table_name] = {
+                    "node_name": f"Query Summary - {table_name}",
+                    "node_tag": "QUERY_SUMMARY",
+                    "node_id": "summary"
+                }
+        
+        # サマリーノードの情報を使用
+        for node in metrics.get('node_metrics', []):
+            node_name = node.get('name', '')
+            extracted_data["scan_nodes"].append({
+                "name": node_name,
+                "type": node.get('tag', ''),
+                "rows": node.get('key_metrics', {}).get('rowsNum', 0),
+                "duration_ms": node.get('key_metrics', {}).get('durationMs', 0),
+                "node_id": node.get('node_id', '')
+            })
+        
+        # メタデータサマリー（制限付き）
+        extracted_data["metadata_summary"] = {
+            "total_nodes": len(metrics.get('node_metrics', [])),
+            "total_graphs": 0,
+            "filter_expressions_count": 0,
+            "join_expressions_count": 0,
+            "groupby_expressions_count": 0,
+            "aggregate_expressions_count": 0,
+            "tables_identified": len(extracted_data["table_info"]),
+            "scan_nodes_count": len(extracted_data["scan_nodes"]),
+            "join_nodes_count": 0,
+            "filter_nodes_count": 0,
+            "analysis_limitation": "SQLクエリサマリー形式のため詳細分析が制限されています"
+        }
+        
+        print(f"✅ 制限付きデータ抽出完了: {extracted_data['metadata_summary']}")
+        return extracted_data
+    
+    # 通常のSQLプロファイラー形式の処理
     # プロファイラーデータから実行グラフ情報を取得（複数グラフ対応）
     graphs = profiler_data.get('graphs', [])
     if not graphs:
