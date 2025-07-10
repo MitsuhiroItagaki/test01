@@ -5721,17 +5721,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
                 if len(spill_details) > 3:
                     f.write(f"    - ... {len(spill_details) - 3} more nodes\n")
         
-        # プラン情報の抽出と保存
-        plan_files = {}
-        execution_plan_info = metrics.get('execution_plan_info')
-        if execution_plan_info:
-            try:
-                plan_files = save_execution_plan_analysis(execution_plan_info)
-                print(f"✅ 実行プラン分析ファイルを保存しました:")
-                for file_type, filename in plan_files.items():
-                    print(f"   📄 {filename}")
-            except Exception as e:
-                print(f"⚠️ 実行プラン分析ファイルの保存でエラーが発生しました: {str(e)}")
+        # プラン情報の抽出と保存は除外（最適化レポートとTOP10ファイルのみ出力）
         
         # BROADCAST分析結果の追加
         try:
@@ -5879,8 +5869,15 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             error_msg = f"⚠️ BROADCAST分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating BROADCAST analysis: {str(e)}\n"
             f.write(error_msg)
         
-        # 最も時間がかかっている処理TOP10の追加（多言語対応）
-        f.write(f"\n\n## {get_message('top10_processes')}\n")
+        # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
+    
+    # 最も時間がかかっている処理TOP10を独立したファイルとして出力
+    top10_filename = f"output_top10_processes_{timestamp}.md"
+    with open(top10_filename, 'w', encoding='utf-8') as f:
+        f.write(f"# {get_message('top10_processes')}\n\n")
+        f.write(f"**{get_message('query_id')}**: {query_id}\n")
+        f.write(f"**{get_message('analysis_time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
         try:
             top10_report = generate_top10_time_consuming_processes_report(metrics)
             f.write(top10_report)
@@ -5888,16 +5885,13 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             error_msg = f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
             f.write(error_msg)
     
-    # プラン分析ファイルの結果も統合
+    # 出力ファイルの結果（output_optimization_reportとTOP10ファイルのみ）
     result = {
         'original_file': original_filename,
         'optimized_file': optimized_filename,
-        'report_file': report_filename
+        'report_file': report_filename,
+        'top10_file': top10_filename
     }
-    
-    # プラン分析ファイルが生成されている場合は結果に追加
-    if plan_files:
-        result.update(plan_files)
     
     return result
 
