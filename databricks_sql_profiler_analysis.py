@@ -1,56 +1,56 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Databricks SQLプロファイラー分析ツール
-# MAGIC 
+# MAGIC
 # MAGIC このnotebookは、DatabricksのSQLプロファイラーJSONログファイルを読み込み、ボトルネック特定と改善案の提示に必要なメトリクスを抽出して分析を行います。
-# MAGIC 
+# MAGIC
 # MAGIC ## 機能概要
-# MAGIC 
+# MAGIC
 # MAGIC 1. **SQLプロファイラーJSONファイルの読み込み**
 # MAGIC    - Databricksで出力されたプロファイラーログの解析
 # MAGIC    - `graphs`キーに格納された実行プランメトリクスの抽出
-# MAGIC 
+# MAGIC
 # MAGIC 2. **重要メトリクスの抽出**
 # MAGIC    - クエリ基本情報（ID、ステータス、実行時間など）
 # MAGIC    - 全体パフォーマンス（実行時間、データ量、キャッシュ効率など）
 # MAGIC    - ステージ・ノード詳細メトリクス
 # MAGIC    - ボトルネック指標の計算
-# MAGIC 
+# MAGIC
 # MAGIC 3. **AI によるボトルネック分析**
 # MAGIC    - 設定可能なLLMエンドポイント (Databricks, OpenAI, Azure OpenAI, Anthropic)
 # MAGIC    - 抽出メトリクスからボトルネック特定
 # MAGIC    - 具体的な改善案の提示
-# MAGIC 
+# MAGIC
 # MAGIC ---
-# MAGIC 
+# MAGIC
 # MAGIC **事前準備:**
 # MAGIC - LLMエンドポイントの設定（Databricks Model Serving または 外部API）
 # MAGIC - 必要なAPIキーの設定
 # MAGIC - SQLプロファイラーJSONファイルの準備（DBFS または FileStore）
-# MAGIC 
+# MAGIC
 # MAGIC ---
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC # 🔧 設定・準備セクション
-# MAGIC 
+# MAGIC
 # MAGIC **このセクションではツールの基本設定を行います**
-# MAGIC 
+# MAGIC
 # MAGIC 📋 **設定内容:**
 # MAGIC - 分析対象ファイルの指定
 # MAGIC - LLMエンドポイントの設定
 # MAGIC - 分析関数の定義
-# MAGIC 
+# MAGIC
 # MAGIC ⚠️ **重要:** メイン処理を実行する前に、このセクションのすべてのセルを実行してください
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 📁 分析対象ファイル設定
-# MAGIC 
+# MAGIC
 # MAGIC **最初に、分析対象のSQLプロファイラーJSONファイルを指定してください。**
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の設定を行います：
 # MAGIC - 📂 SQLプロファイラーJSONファイルのパス設定
 # MAGIC - 📋 対応するファイルパス形式の例
@@ -140,7 +140,7 @@ print("🚀 次のセルに進んでください")
 
 # MAGIC %md
 # MAGIC ## 🤖 LLMエンドポイント設定
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の設定を行います：
 # MAGIC - LLMプロバイダーの選択（Databricks/OpenAI/Azure/Anthropic）
 # MAGIC - 各プロバイダーの接続設定
@@ -255,7 +255,7 @@ except Exception:
 
 # MAGIC %md
 # MAGIC ## 📂 SQLプロファイラーJSONファイル読み込み関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - SQLプロファイラーJSONファイルの読み込み
 # MAGIC - DBFS/FileStore/ローカルパスの自動判別
@@ -306,7 +306,7 @@ print("✅ 関数定義完了: load_profiler_json")
 
 # MAGIC %md
 # MAGIC ## 📊 パフォーマンスメトリクス抽出関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - SQLプロファイラーデータからのメトリクス抽出
 # MAGIC - クエリ基本情報の取得
@@ -440,7 +440,7 @@ print("✅ 関数定義完了: extract_performance_metrics")
 
 # MAGIC %md
 # MAGIC ## 🏷️ ノード名解析・改善関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 汎用的なノード名（Whole Stage Codegen等）の具体化
 # MAGIC - 関連ノードの検索と最適な処理名の選択
@@ -720,7 +720,7 @@ print("✅ 関数定義完了: get_meaningful_node_name")
 
 # MAGIC %md
 # MAGIC ## 🎯 ボトルネック指標計算関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 実行時間とコンパイル時間の比率分析
 # MAGIC - キャッシュ効率とデータ処理効率の計算
@@ -936,7 +936,7 @@ print("✅ 関数定義完了: calculate_bottleneck_indicators")
 
 # MAGIC %md
 # MAGIC ## 🧬 Liquid Clustering分析関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - プロファイラーデータからのカラム情報抽出
 # MAGIC - フィルター、JOIN、GROUP BY条件の分析
@@ -1534,7 +1534,7 @@ print("✅ 関数定義完了: analyze_liquid_clustering_opportunities, save_liq
 
 # MAGIC %md
 # MAGIC ## 🤖 LLMによるボトルネック分析関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - 抽出されたメトリクスのLLM分析用フォーマット
 # MAGIC - 複数LLMプロバイダーの対応（Databricks/OpenAI/Azure/Anthropic）
@@ -1714,7 +1714,7 @@ Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してく�
 
 # MAGIC %md
 # MAGIC ## 🔌 個別LLMプロバイダー接続関数
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の機能を定義します：
 # MAGIC - Databricks Model Serving エンドポイント接続
 # MAGIC - OpenAI API 接続
@@ -1944,7 +1944,7 @@ print("✅ 関数定義完了: analyze_bottlenecks_with_llm")
 
 # MAGIC %md
 # MAGIC ## 📋 LLMボトルネック分析実行の準備
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたLLMプロバイダーの確認と表示
 # MAGIC - 分析開始の準備とメッセージ表示
@@ -2008,14 +2008,14 @@ except Exception as e:
 
 # MAGIC %md
 # MAGIC # 🚀 メイン処理実行セクション
-# MAGIC 
+# MAGIC
 # MAGIC **ここからメインの分析処理が開始されます**
-# MAGIC 
+# MAGIC
 # MAGIC 📋 **実行手順:**
 # MAGIC 1. 上記の🔧設定・準備セクションをすべて実行してください
 # MAGIC 2. 以下のセルを順番に実行して分析を行います
 # MAGIC 3. エラーが発生した場合は、設定セクションから再実行してください
-# MAGIC 
+# MAGIC
 # MAGIC ⚠️ **注意:**
 # MAGIC - 🔧設定・準備セクション → 🚀メイン処理セクション → 🔧SQL最適化セクション の順序で実行
 # MAGIC - ファイルパスの設定は必ず最初のセルで行ってください
@@ -2025,7 +2025,7 @@ except Exception as e:
 
 # MAGIC %md
 # MAGIC ## 🚀 SQLプロファイラーJSONファイル読み込み実行
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたファイルパスからJSONファイルの読み込み
 # MAGIC - ファイルサイズと基本情報の表示
@@ -2054,7 +2054,7 @@ print()
 
 # MAGIC %md
 # MAGIC ## 📊 パフォーマンスメトリクス抽出と概要表示
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからメトリクスの抽出
 # MAGIC - クエリ基本情報の表示
@@ -2097,7 +2097,7 @@ print(f"📊 高インパクトテーブル数: {liquid_summary.get('high_impact
 
 # MAGIC %md
 # MAGIC ## 🔍 ボトルネック指標詳細
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - Photon エンジンの利用状況とパフォーマンス分析
 # MAGIC - シャッフル操作と並列度の問題検出
@@ -2171,24 +2171,24 @@ print()
 
 # MAGIC %md
 # MAGIC ## 💾 メトリクス保存と時間消費分析
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 抽出したメトリクスのJSON形式での保存
 # MAGIC - set型からlist型への変換処理
 # MAGIC - 最も時間がかかっている処理TOP10の詳細分析
 # MAGIC - 特定メトリクスベーススピル検出と統計ベーススキュー分析
-# MAGIC 
+# MAGIC
 # MAGIC 💿 **スピル検出ロジック**:
 # MAGIC - ターゲットメトリクス: `"Sink - Num bytes spilled to disk due to memory pressure"`
 # MAGIC - 判定条件: 上記メトリクスの値 > 0 の場合にスピルありと判定
 # MAGIC - 検索対象: detailed_metrics → raw_metrics → key_metrics の順序で検索
-# MAGIC 
+# MAGIC
 # MAGIC 🎯 **スキュー検出ロジック**:
 # MAGIC - `taskDuration`: max/median比率 ≥ 3.0 でスキュー判定
 # MAGIC - `shuffleReadBytes`: max/median比率 ≥ 3.0 でスキュー判定  
 # MAGIC - 比率が5.0以上の場合は「高」重要度、3.0-5.0は「中」重要度
 # MAGIC - その他統計メトリクス（shuffleWriteBytes等）は基準値4.0で判定
-# MAGIC 
+# MAGIC
 # MAGIC 💡 **デバッグモード**: スピル・スキューの判定根拠を詳細表示したい場合
 # MAGIC ```python
 # MAGIC import os
@@ -2244,7 +2244,7 @@ print("   📊 重要度: 高(≥5倍), 中(3-5倍)")
 
 # MAGIC %md
 # MAGIC ## 🐌 最も時間がかかっている処理TOP10
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 抽出したメトリクスのJSON形式での保存
 # MAGIC - set型からlist型への変換処理
@@ -3127,7 +3127,7 @@ print()
 
 # MAGIC %md
 # MAGIC ## 🗂️ Liquid Clustering分析結果の詳細表示
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - テーブル別推奨クラスタリングカラムの詳細表示
 # MAGIC - パフォーマンス向上見込みの分析
@@ -3234,7 +3234,7 @@ analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
 
 # MAGIC %md
 # MAGIC ## 🎯 LLMボトルネック分析結果の表示
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 設定されたLLMプロバイダーによる詳細分析結果の表示
 # MAGIC - ボトルネック特定と改善提案の可視化
@@ -3255,7 +3255,7 @@ print("=" * 80)
 
 # MAGIC %md
 # MAGIC ## 💾 分析結果の保存と完了サマリー
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLM分析結果のテキストファイルへの保存
 # MAGIC - 分析対象の基本情報の記録
@@ -3332,22 +3332,22 @@ print("🎉" * 20)
 
 # MAGIC %md
 # MAGIC # 🔧 SQL最適化機能セクション
-# MAGIC 
+# MAGIC
 # MAGIC **このセクションではSQLクエリの最適化を行います**
-# MAGIC 
+# MAGIC
 # MAGIC 📋 **最適化プロセス:**
 # MAGIC - プロファイラーデータからオリジナルクエリの抽出
 # MAGIC - LLMによるクエリ最適化の実行
 # MAGIC - 最適化結果のファイル生成
 # MAGIC - テスト実行の準備
-# MAGIC 
+# MAGIC
 # MAGIC ⚠️ **前提条件:** メイン処理セクションを完了してから実行してください
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 🔧 SQL最適化関連関数定義
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の関数を定義します：
 # MAGIC - `extract_original_query_from_profiler_data`: プロファイラーデータからオリジナルクエリを抽出
 # MAGIC - `generate_optimized_query_with_llm`: LLM分析結果に基づくクエリ最適化
@@ -4513,7 +4513,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                                 break
             
             # 5. key_metricsから正確なメトリクス名で検索
-                        if not spill_detected:
+            if not spill_detected:
                 key_metrics = node.get('key_metrics', {})
                 
                 # まず正確な名前で検索
@@ -5499,7 +5499,7 @@ print("✅ 関数定義完了: SQL最適化関連関数（実行プランサイ�
 
 # MAGIC %md
 # MAGIC ## 🚀 SQLクエリ最適化の実行（ステップ1: クエリ抽出）
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからオリジナルクエリの抽出
 # MAGIC - 抽出されたクエリの詳細表示（64KBまで）
@@ -5551,7 +5551,7 @@ else:
 
 # MAGIC %md
 # MAGIC ## 🤖 LLMによるSQL最適化（ステップ2: 最適化実行）
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLMを使用した抽出クエリの最適化
 # MAGIC - 最適化結果の詳細表示（1000行まで）
@@ -5617,7 +5617,7 @@ else:
 
 # MAGIC %md
 # MAGIC ## 💾 最適化結果の保存（ステップ3: ファイル生成）
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 最適化されたSQLクエリのファイル保存（接頭語: output_）
 # MAGIC - オリジナルクエリ、最適化クエリ、レポートの生成
@@ -5709,7 +5709,7 @@ else:
 
 # MAGIC %md
 # MAGIC ## 🧪 Databricks Notebookでの実行ガイド（ステップ4: 実行方法）
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 生成されたファイルの使用方法説明
 # MAGIC - Databricks Notebookでの実行手順ガイド
@@ -5779,7 +5779,7 @@ else:
 
 # MAGIC %md
 # MAGIC ## 🏁 最終処理完了サマリー
-# MAGIC 
+# MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 全処理の完了状況確認
 # MAGIC - 生成された全ファイルの一覧表示
@@ -5868,36 +5868,36 @@ print("🎉" * 25)
 
 # MAGIC %md
 # MAGIC # 📚 参考・応用セクション
-# MAGIC 
+# MAGIC
 # MAGIC **このセクションでは応用的な使用方法を説明します**
-# MAGIC 
+# MAGIC
 # MAGIC 📋 **参考情報:**
 # MAGIC - ファイルアップロード方法
 # MAGIC - カスタマイズポイント
 # MAGIC - エラー対処方法
 # MAGIC - 高度な使用例
-# MAGIC 
+# MAGIC
 # MAGIC 💡 **用途:** ツールの活用を深めたい場合に参照してください
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 📚 追加の使用方法とカスタマイズ
-# MAGIC 
+# MAGIC
 # MAGIC ### 🔧 ファイルアップロード方法
-# MAGIC 
+# MAGIC
 # MAGIC #### 方法 1: Databricks UI でアップロード
 # MAGIC 1. **Data** > **Create Table** をクリック
 # MAGIC 2. **Upload File** を選択
 # MAGIC 3. SQLプロファイラーJSONファイルをドラッグ&ドロップ
 # MAGIC 4. アップロード完了後、パスをコピー
 # MAGIC 5. 上記の `JSON_FILE_PATH` に設定
-# MAGIC 
+# MAGIC
 # MAGIC #### 方法 2: dbutils を使用
 # MAGIC ```python
 # MAGIC # ローカルファイルをFileStoreにアップロード
 # MAGIC dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
-# MAGIC 
+# MAGIC
 # MAGIC # 外部ストレージからのコピー
 # MAGIC dbutils.fs.cp("s3a://bucket/profiler.json", "dbfs:/FileStore/profiler.json")
 # MAGIC ```
@@ -5906,11 +5906,11 @@ print("🎉" * 25)
 
 # MAGIC %md
 # MAGIC ## 🔍 実行プラン情報を活用したBROADCAST分析機能の追加完了
-# MAGIC 
+# MAGIC
 # MAGIC この更新により、JSONメトリクスから抽出した実行プラン情報を活用したBROADCAST分析が可能になりました：
-# MAGIC 
+# MAGIC
 # MAGIC ### 🆕 新機能
-# MAGIC 
+# MAGIC
 # MAGIC #### 1. `extract_execution_plan_info()` 関数
 # MAGIC - **機能**: JSONメトリクスから詳細な実行プラン情報を抽出
 # MAGIC - **検出内容**:
@@ -5920,7 +5920,7 @@ print("🎉" * 25)
 # MAGIC   - シャッフルノード（パーティション情報）
 # MAGIC   - 集約ノード（GROUP BY表現、集約関数）
 # MAGIC - **出力**: 構造化されたプラン情報辞書
-# MAGIC 
+# MAGIC
 # MAGIC #### 2. `analyze_broadcast_feasibility()` 関数の拡張
 # MAGIC - **追加機能**:
 # MAGIC   - 既存のBROADCAST適用状況の自動検出
@@ -5931,7 +5931,7 @@ print("🎉" * 25)
 # MAGIC   - `already_applied`: 既にBROADCAST適用済み
 # MAGIC   - `new_recommendation`: 新規BROADCAST推奨
 # MAGIC   - プラン情報と整合性のある分析
-# MAGIC 
+# MAGIC
 # MAGIC #### 3. SQL最適化の改善
 # MAGIC - **プラン考慮**: 実行プラン情報を含むBROADCAST分析
 # MAGIC - **LLMプロンプト強化**: プラン情報をLLMに提供して正確な最適化
@@ -6063,31 +6063,31 @@ print("🎉 実行プラン情報を活用したBROADCAST分析機能の追加�
 print("📊 SQLの最適化により精密で実用的なBROADCAST推奨が可能になりました")
 print("🔍 既存の最適化状況を考慮した、より実際的な分析を提供します")
 print("✅ 全ての機能が正常に統合されました")
-# MAGIC 
-# MAGIC ### 🎛️ カスタマイズポイント
-# MAGIC 
-# MAGIC - **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
-# MAGIC - **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
-# MAGIC - **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
-# MAGIC - **表示形式**: emoji と出力フォーマットの調整
-# MAGIC 
-# MAGIC ### 🔍 エラー対処方法
-# MAGIC 
-# MAGIC 1. **LLMエンドポイントエラー**: 
-# MAGIC    - Databricks: Model Servingエンドポイントの状態確認
-# MAGIC    - OpenAI/Azure/Anthropic: APIキーとクォータ確認
-# MAGIC 2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
-# MAGIC 3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
-# MAGIC 
-# MAGIC ### 💡 高度な使用例
-# MAGIC 
-# MAGIC ```python
-# MAGIC # 複数ファイルの一括分析
-# MAGIC profiler_files = dbutils.fs.ls("/FileStore/profiler_logs/")
-# MAGIC for file_info in profiler_files:
-# MAGIC     if file_info.path.endswith('.json'):
-# MAGIC         profiler_data = load_profiler_json(file_info.path)
-# MAGIC         metrics = extract_performance_metrics(profiler_data)
-# MAGIC         # 分析処理...
-# MAGIC ```
+
+### 🎛️ カスタマイズポイント
+
+- **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
+- **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
+- **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
+- **表示形式**: emoji と出力フォーマットの調整
+
+### 🔍 エラー対処方法
+
+1. **LLMエンドポイントエラー**: 
+   - Databricks: Model Servingエンドポイントの状態確認
+   - OpenAI/Azure/Anthropic: APIキーとクォータ確認
+2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
+3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
+
+### 💡 高度な使用例
+
+```python
+# 複数ファイルの一括分析
+profiler_files = dbutils.fs.ls("/FileStore/profiler_logs/")
+for file_info in profiler_files:
+    if file_info.path.endswith('.json'):
+        profiler_data = load_profiler_json(file_info.path)
+        metrics = extract_performance_metrics(profiler_data)
+        # 分析処理...
+```
 
