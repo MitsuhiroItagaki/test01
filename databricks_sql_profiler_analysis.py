@@ -3995,27 +3995,49 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
         else:
             broadcast_analysis["reasoning"].append(f"サイズ推定整合性: 推定圧縮{estimated_total_compressed_mb:.1f}MB vs 実際{total_read_gb:.1f}GB（比率:{size_ratio:.2f}）")
     
-    # BROADCAST推奨事項の生成（30MB閾値対応）
+    # BROADCAST推奨事項の生成（30MB閾値対応、既存のBROADCAST適用状況を考慮）
     total_broadcast_candidates = len(small_tables) + len(marginal_tables)
     total_tables = len(scan_nodes)
     
     if small_tables or marginal_tables:
         if large_tables:
-            broadcast_analysis["feasibility"] = "recommended"
-            broadcast_analysis["recommendations"] = [
-                f"🎯 BROADCAST推奨テーブル: {total_broadcast_candidates}個（全{total_tables}個中）",
-                f"  ✅ 強く推奨: {len(small_tables)}個（安全閾値{broadcast_safe_mb:.1f}MB以下）",
-                f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個（閾値{broadcast_threshold_mb:.1f}MB以下、要注意）",
-                f"  ❌ 非推奨: {len(large_tables)}個（閾値超過）"
-            ]
+            # 既存のBROADCAST適用状況を考慮した判定
+            if broadcast_analysis["already_optimized"]:
+                broadcast_analysis["feasibility"] = "already_optimized_with_improvements"
+                broadcast_analysis["recommendations"] = [
+                    f"✅ 既にBROADCAST JOIN適用済み - 追加改善の検討",
+                    f"🎯 追加最適化テーブル: {total_broadcast_candidates}個（全{total_tables}個中）",
+                    f"  ✅ 強く推奨: {len(small_tables)}個（安全閾値{broadcast_safe_mb:.1f}MB以下）",
+                    f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個（閾値{broadcast_threshold_mb:.1f}MB以下、要注意）",
+                    f"  ❌ 非推奨: {len(large_tables)}個（閾値超過）"
+                ]
+            else:
+                broadcast_analysis["feasibility"] = "recommended"
+                broadcast_analysis["recommendations"] = [
+                    f"🎯 BROADCAST推奨テーブル: {total_broadcast_candidates}個（全{total_tables}個中）",
+                    f"  ✅ 強く推奨: {len(small_tables)}個（安全閾値{broadcast_safe_mb:.1f}MB以下）",
+                    f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個（閾値{broadcast_threshold_mb:.1f}MB以下、要注意）",
+                    f"  ❌ 非推奨: {len(large_tables)}個（閾値超過）"
+                ]
         else:
-            broadcast_analysis["feasibility"] = "all_small"
-            broadcast_analysis["recommendations"] = [
-                f"🎯 全テーブル（{total_tables}個）がBROADCAST閾値以下",
-                f"  ✅ 強く推奨: {len(small_tables)}個",
-                f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個",
-                "📋 最小テーブルを優先的にBROADCASTすることを推奨"
-            ]
+            # 全テーブルが小さい場合
+            if broadcast_analysis["already_optimized"]:
+                broadcast_analysis["feasibility"] = "already_optimized_complete"
+                broadcast_analysis["recommendations"] = [
+                    f"✅ 既にBROADCAST JOIN適用済み - 最適化完了",
+                    f"🎯 全テーブル（{total_tables}個）がBROADCAST閾値以下で適切に処理済み",
+                    f"  ✅ 強く推奨: {len(small_tables)}個",
+                    f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個",
+                    "📋 現在の設定が最適です"
+                ]
+            else:
+                broadcast_analysis["feasibility"] = "all_small"
+                broadcast_analysis["recommendations"] = [
+                    f"🎯 全テーブル（{total_tables}個）がBROADCAST閾値以下",
+                    f"  ✅ 強く推奨: {len(small_tables)}個",
+                    f"  ⚠️ 条件付き推奨: {len(marginal_tables)}個",
+                    "📋 最小テーブルを優先的にBROADCASTすることを推奨"
+                ]
         
         # 具体的なBROADCAST候補の詳細
         for small_table in small_tables:
@@ -4153,6 +4175,23 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
     # BROADCAST分析結果のサマリー作成（30MB閾値対応）
     broadcast_summary = []
     if broadcast_analysis["is_join_query"]:
+        # 既存のBROADCAST適用状況を最初に表示
+        if broadcast_analysis["already_optimized"]:
+            existing_broadcast_count = len(broadcast_analysis["existing_broadcast_nodes"])
+            broadcast_summary.append(f"✅ 既にBROADCAST JOIN適用済み: {existing_broadcast_count}個のノード")
+            
+            # 既存のBROADCASTノードの詳細を表示（最大3個）
+            for i, node in enumerate(broadcast_analysis["existing_broadcast_nodes"][:3]):
+                node_name_short = node["node_name"][:50] + "..." if len(node["node_name"]) > 50 else node["node_name"]
+                broadcast_summary.append(f"  🔹 BROADCAST Node {i+1}: {node_name_short}")
+            
+            # 実行プラン分析からのJOIN戦略情報
+            plan_analysis = broadcast_analysis.get("execution_plan_analysis", {})
+            if plan_analysis.get("unique_join_strategies"):
+                broadcast_summary.append(f"🔍 検出されたJOIN戦略: {', '.join(plan_analysis['unique_join_strategies'])}")
+        else:
+            broadcast_summary.append("🔍 BROADCAST JOIN未適用 - 最適化の機会を検討中")
+        
         broadcast_summary.append(f"🎯 BROADCAST適用可能性: {broadcast_analysis['feasibility']}")
         broadcast_summary.append(f"⚖️ Spark閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）")
         
@@ -4173,16 +4212,33 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
             broadcast_summary.append("📋 BROADCAST候補詳細:")
             for i, candidate in enumerate(broadcast_analysis["broadcast_candidates"][:3]):
                 confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
+                # 既にBROADCAST済みかどうかを表示
+                already_broadcasted = candidate.get('is_already_broadcasted', False)
+                status_icon = "✅" if already_broadcasted else "💡"
+                status_text = "既に適用済み" if already_broadcasted else "適用推奨"
+                
                 broadcast_summary.append(
                     f"  {confidence_icon} {candidate['table']}: 非圧縮{candidate['estimated_uncompressed_mb']:.1f}MB "
                     f"(圧縮{candidate['estimated_compressed_mb']:.1f}MB, {candidate['file_format']}, "
-                    f"圧縮率{candidate['compression_ratio']:.1f}x)"
+                    f"圧縮率{candidate['compression_ratio']:.1f}x) {status_icon} {status_text}"
                 )
+        
+        # 既存のBROADCAST適用状況を考慮した推奨メッセージ
+        if broadcast_analysis["already_optimized"]:
+            if broadcast_analysis["feasibility"] in ["recommended", "all_small"]:
+                broadcast_summary.append("💡 追加最適化: 実行プランは既に最適化済みですが、更なる改善の余地があります")
+            else:
+                broadcast_summary.append("✅ 最適化完了: 実行プランは適切にBROADCAST JOINが適用されています")
+        else:
+            if broadcast_analysis["feasibility"] in ["recommended", "all_small"]:
+                broadcast_summary.append("🚀 最適化推奨: BROADCASTヒントの適用により大幅な性能改善が期待できます")
+            elif broadcast_analysis["feasibility"] == "not_recommended":
+                broadcast_summary.append("⚠️ 最適化困難: テーブルサイズが大きく、BROADCAST適用は推奨されません")
         
         # 重要な注意事項
         if broadcast_analysis["reasoning"]:
             broadcast_summary.append("⚠️ 重要な注意事項:")
-            for reason in broadcast_analysis["reasoning"][:2]:
+            for reason in broadcast_analysis["reasoning"][:3]:  # 最大3個に拡張
                 broadcast_summary.append(f"  • {reason}")
     else:
         broadcast_summary.append("❌ JOINクエリではないため、BROADCASTヒント適用対象外")
@@ -5215,6 +5271,22 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             if OUTPUT_LANGUAGE == 'ja':
                 f.write(f"\n\n## BROADCASTヒント分析結果（30MB閾値基準）\n\n")
                 f.write(f"- **JOINクエリ**: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}\n")
+                
+                # 既存のBROADCAST適用状況を最初に表示
+                if broadcast_analysis['already_optimized']:
+                    existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
+                    f.write(f"- **既存のBROADCAST適用状況**: ✅ 既にBROADCAST JOIN適用済み（{existing_broadcast_count}個のノード）\n")
+                    # 既存のBROADCASTノードの詳細
+                    for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
+                        node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
+                        f.write(f"  - BROADCAST Node {i+1}: {node_name_short}\n")
+                    # 実行プラン分析からのJOIN戦略情報
+                    plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
+                    if plan_analysis.get('unique_join_strategies'):
+                        f.write(f"  - 検出されたJOIN戦略: {', '.join(plan_analysis['unique_join_strategies'])}\n")
+                else:
+                    f.write(f"- **既存のBROADCAST適用状況**: 🔍 BROADCAST JOIN未適用 - 最適化の機会を検討中\n")
+                
                 f.write(f"- **Spark BROADCAST閾値**: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）\n")
                 f.write(f"- **BROADCAST適用可能性**: {broadcast_analysis['feasibility']}\n")
                 f.write(f"- **BROADCAST候補数**: {len(broadcast_analysis['broadcast_candidates'])}個\n")
@@ -5259,6 +5331,22 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             else:
                 f.write(f"\n\n## BROADCAST Hint Analysis (30MB Threshold)\n\n")
                 f.write(f"- **JOIN Query**: {'Yes' if broadcast_analysis['is_join_query'] else 'No'}\n")
+                
+                # Show existing BROADCAST application status first
+                if broadcast_analysis['already_optimized']:
+                    existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
+                    f.write(f"- **Existing BROADCAST Status**: ✅ BROADCAST JOIN already applied ({existing_broadcast_count} nodes)\n")
+                    # Details of existing BROADCAST nodes
+                    for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
+                        node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
+                        f.write(f"  - BROADCAST Node {i+1}: {node_name_short}\n")
+                    # JOIN strategy information from execution plan analysis
+                    plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
+                    if plan_analysis.get('unique_join_strategies'):
+                        f.write(f"  - Detected JOIN Strategies: {', '.join(plan_analysis['unique_join_strategies'])}\n")
+                else:
+                    f.write(f"- **Existing BROADCAST Status**: 🔍 BROADCAST JOIN not applied - optimization opportunities under consideration\n")
+                
                 f.write(f"- **Spark BROADCAST Threshold**: {broadcast_analysis['spark_threshold_mb']:.1f}MB (uncompressed)\n")
                 f.write(f"- **BROADCAST Feasibility**: {broadcast_analysis['feasibility']}\n")
                 f.write(f"- **BROADCAST Candidates**: {len(broadcast_analysis['broadcast_candidates'])}\n")
