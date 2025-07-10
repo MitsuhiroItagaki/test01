@@ -5698,7 +5698,148 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         
         # プラン情報の抽出と保存は除外（最適化レポートとTOP10ファイルのみ出力）
         
-        # BROADCAST分析結果の追加は除外（不要）
+        # Liquid Clustering分析結果の追加（セル35からマージ）
+        try:
+            liquid_analysis = metrics.get('liquid_clustering_analysis', {})
+            if liquid_analysis:
+                if OUTPUT_LANGUAGE == 'ja':
+                    f.write(f"\n\n## 🗂️ Liquid Clustering分析結果\n\n")
+                    
+                    # パフォーマンス概要
+                    performance_context = liquid_analysis.get('performance_context', {})
+                    f.write(f"### 📊 パフォーマンス概要\n\n")
+                    f.write(f"| 項目 | 値 |\n")
+                    f.write(f"|------|-----|\n")
+                    f.write(f"| 実行時間 | {performance_context.get('total_time_sec', 0):.1f}秒 |\n")
+                    f.write(f"| データ読み込み | {performance_context.get('read_gb', 0):.2f}GB |\n")
+                    f.write(f"| 出力行数 | {performance_context.get('rows_produced', 0):,}行 |\n")
+                    f.write(f"| 読み込み行数 | {performance_context.get('rows_read', 0):,}行 |\n")
+                    f.write(f"| データ選択性 | {performance_context.get('data_selectivity', 0):.4f} |\n\n")
+                    
+                    # LLM分析結果
+                    llm_analysis = liquid_analysis.get('llm_analysis', '')
+                    if llm_analysis:
+                        f.write(f"### 🤖 LLM分析結果\n\n")
+                        f.write(f"{llm_analysis}\n\n")
+                    
+                    # 抽出されたメタデータ
+                    extracted_data = liquid_analysis.get('extracted_data', {})
+                    summary = liquid_analysis.get('summary', {})
+                    
+                    f.write(f"### 🔍 抽出されたメタデータ\n\n")
+                    f.write(f"- **フィルター条件**: {summary.get('total_filter_columns', 0)}個\n")
+                    f.write(f"- **JOIN条件**: {summary.get('total_join_columns', 0)}個\n")
+                    f.write(f"- **GROUP BY条件**: {summary.get('total_groupby_columns', 0)}個\n")
+                    f.write(f"- **集約関数**: {summary.get('total_aggregate_columns', 0)}個\n")
+                    f.write(f"- **識別テーブル**: {summary.get('tables_identified', 0)}個\n")
+                    f.write(f"- **スキャンノード**: {summary.get('scan_nodes_count', 0)}個\n\n")
+                    
+                    # 主要なフィルター条件（上位5個）
+                    filter_columns = extracted_data.get('filter_columns', [])
+                    if filter_columns:
+                        f.write(f"#### フィルター条件 (上位5個)\n\n")
+                        for i, filter_item in enumerate(filter_columns[:5], 1):
+                            f.write(f"{i}. `{filter_item.get('expression', '')}` (ノード: {filter_item.get('node_name', '')})\n")
+                        if len(filter_columns) > 5:
+                            f.write(f"... 他 {len(filter_columns) - 5}個\n")
+                        f.write("\n")
+                    
+                    # 主要なJOIN条件（上位5個）
+                    join_columns = extracted_data.get('join_columns', [])
+                    if join_columns:
+                        f.write(f"#### JOIN条件 (上位5個)\n\n")
+                        for i, join_item in enumerate(join_columns[:5], 1):
+                            f.write(f"{i}. `{join_item.get('expression', '')}` ({join_item.get('key_type', '')})\n")
+                        if len(join_columns) > 5:
+                            f.write(f"... 他 {len(join_columns) - 5}個\n")
+                        f.write("\n")
+                    
+                    # テーブル情報
+                    table_info = extracted_data.get('table_info', {})
+                    if table_info:
+                        f.write(f"#### 🏷️ 識別されたテーブル ({len(table_info)}個)\n\n")
+                        for table_name, table_details in table_info.items():
+                            f.write(f"- **{table_name}** (ノード: {table_details.get('node_name', '')})\n")
+                        f.write("\n")
+                    
+                    # 分析サマリー
+                    f.write(f"### 📋 分析サマリー\n\n")
+                    f.write(f"- **分析方法**: {summary.get('analysis_method', 'Unknown')}\n")
+                    f.write(f"- **LLMプロバイダー**: {summary.get('llm_provider', 'Unknown')}\n")
+                    f.write(f"- **分析対象テーブル数**: {summary.get('tables_identified', 0)}\n")
+                    f.write(f"- **抽出カラム数**: フィルター({summary.get('total_filter_columns', 0)}) + JOIN({summary.get('total_join_columns', 0)}) + GROUP BY({summary.get('total_groupby_columns', 0)})\n\n")
+                    
+                else:
+                    # 英語版
+                    f.write(f"\n\n## 🗂️ Liquid Clustering Analysis Results\n\n")
+                    
+                    # Performance overview
+                    performance_context = liquid_analysis.get('performance_context', {})
+                    f.write(f"### 📊 Performance Overview\n\n")
+                    f.write(f"| Item | Value |\n")
+                    f.write(f"|------|-------|\n")
+                    f.write(f"| Execution Time | {performance_context.get('total_time_sec', 0):.1f}s |\n")
+                    f.write(f"| Data Read | {performance_context.get('read_gb', 0):.2f}GB |\n")
+                    f.write(f"| Rows Produced | {performance_context.get('rows_produced', 0):,} |\n")
+                    f.write(f"| Rows Read | {performance_context.get('rows_read', 0):,} |\n")
+                    f.write(f"| Data Selectivity | {performance_context.get('data_selectivity', 0):.4f} |\n\n")
+                    
+                    # LLM analysis results
+                    llm_analysis = liquid_analysis.get('llm_analysis', '')
+                    if llm_analysis:
+                        f.write(f"### 🤖 LLM Analysis Results\n\n")
+                        f.write(f"{llm_analysis}\n\n")
+                    
+                    # Extracted metadata
+                    extracted_data = liquid_analysis.get('extracted_data', {})
+                    summary = liquid_analysis.get('summary', {})
+                    
+                    f.write(f"### 🔍 Extracted Metadata\n\n")
+                    f.write(f"- **Filter Conditions**: {summary.get('total_filter_columns', 0)}\n")
+                    f.write(f"- **JOIN Conditions**: {summary.get('total_join_columns', 0)}\n")
+                    f.write(f"- **GROUP BY Conditions**: {summary.get('total_groupby_columns', 0)}\n")
+                    f.write(f"- **Aggregate Functions**: {summary.get('total_aggregate_columns', 0)}\n")
+                    f.write(f"- **Identified Tables**: {summary.get('tables_identified', 0)}\n")
+                    f.write(f"- **Scan Nodes**: {summary.get('scan_nodes_count', 0)}\n\n")
+                    
+                    # Main filter conditions (top 5)
+                    filter_columns = extracted_data.get('filter_columns', [])
+                    if filter_columns:
+                        f.write(f"#### Filter Conditions (Top 5)\n\n")
+                        for i, filter_item in enumerate(filter_columns[:5], 1):
+                            f.write(f"{i}. `{filter_item.get('expression', '')}` (Node: {filter_item.get('node_name', '')})\n")
+                        if len(filter_columns) > 5:
+                            f.write(f"... {len(filter_columns) - 5} more\n")
+                        f.write("\n")
+                    
+                    # Main JOIN conditions (top 5)
+                    join_columns = extracted_data.get('join_columns', [])
+                    if join_columns:
+                        f.write(f"#### JOIN Conditions (Top 5)\n\n")
+                        for i, join_item in enumerate(join_columns[:5], 1):
+                            f.write(f"{i}. `{join_item.get('expression', '')}` ({join_item.get('key_type', '')})\n")
+                        if len(join_columns) > 5:
+                            f.write(f"... {len(join_columns) - 5} more\n")
+                        f.write("\n")
+                    
+                    # Table information
+                    table_info = extracted_data.get('table_info', {})
+                    if table_info:
+                        f.write(f"#### 🏷️ Identified Tables ({len(table_info)})\n\n")
+                        for table_name, table_details in table_info.items():
+                            f.write(f"- **{table_name}** (Node: {table_details.get('node_name', '')})\n")
+                        f.write("\n")
+                    
+                    # Analysis summary
+                    f.write(f"### 📋 Analysis Summary\n\n")
+                    f.write(f"- **Analysis Method**: {summary.get('analysis_method', 'Unknown')}\n")
+                    f.write(f"- **LLM Provider**: {summary.get('llm_provider', 'Unknown')}\n")
+                    f.write(f"- **Target Tables**: {summary.get('tables_identified', 0)}\n")
+                    f.write(f"- **Extracted Columns**: Filter({summary.get('total_filter_columns', 0)}) + JOIN({summary.get('total_join_columns', 0)}) + GROUP BY({summary.get('total_groupby_columns', 0)})\n\n")
+                        
+        except Exception as e:
+            error_msg = f"⚠️ Liquid Clustering分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating Liquid Clustering analysis: {str(e)}\n"
+            f.write(error_msg)
         
         # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
     
