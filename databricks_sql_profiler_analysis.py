@@ -413,6 +413,9 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'plans_state': query_data.get('plansState', '')
         }
         
+        # 詳細なパフォーマンス洞察を計算
+        performance_insights = calculate_performance_insights_from_metrics(overall_metrics)
+        
         # 擬似的なノードメトリクス（サマリー情報から生成）
         summary_node = {
             'node_id': 'summary_node',
@@ -421,16 +424,23 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'key_metrics': {
                 'durationMs': overall_metrics['total_time_ms'],
                 'rowsNum': overall_metrics['rows_read_count'],
-                'peakMemoryBytes': 0  # 不明
+                'peakMemoryBytes': 0,  # 不明
+                'throughputMBps': performance_insights['parallelization']['throughput_mb_per_second'],
+                'dataSelectivity': performance_insights['data_efficiency']['data_selectivity'],
+                'cacheHitRatio': performance_insights['cache_efficiency']['cache_hit_ratio']
             },
             'detailed_metrics': {
                 'Total Time': {'value': overall_metrics['total_time_ms'], 'display_name': 'Total Time'},
                 'Read Bytes': {'value': overall_metrics['read_bytes'], 'display_name': 'Read Bytes'},
                 'Spill Bytes': {'value': overall_metrics['spill_to_disk_bytes'], 'display_name': 'Spill to Disk'},
                 'Photon Time': {'value': overall_metrics['photon_total_time_ms'], 'display_name': 'Photon Time'},
-                'Rows Read': {'value': overall_metrics['rows_read_count'], 'display_name': 'Rows Read Count'}
+                'Rows Read': {'value': overall_metrics['rows_read_count'], 'display_name': 'Rows Read Count'},
+                'Cache Hit Ratio': {'value': performance_insights['cache_efficiency']['cache_hit_ratio'], 'display_name': 'Cache Hit Ratio'},
+                'Data Selectivity': {'value': performance_insights['data_efficiency']['data_selectivity'], 'display_name': 'Data Selectivity'},
+                'Throughput': {'value': performance_insights['parallelization']['throughput_mb_per_second'], 'display_name': 'Throughput (MB/s)'}
             },
-            'graph_index': 0
+            'graph_index': 0,
+            'performance_insights': performance_insights
         }
         
         return {
@@ -442,12 +452,20 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'stage_metrics': [],  # 詳細ステージ情報なし
             'liquid_clustering_analysis': {},  # 後で追加
             'raw_profiler_data': profiler_data,
+            'performance_insights': performance_insights,  # 詳細なパフォーマンス洞察を追加
+            'analysis_capabilities': [
+                'メトリクスベースのボトルネック分析（キャッシュ効率、データ選択性、Photon効率）',
+                'リソース使用状況分析（スピル、並列化効率、スループット）',
+                'パフォーマンス指標計算（ファイル効率、パーティション効率）',
+                'ポテンシャルボトルネック特定（メトリクスベース）'
+            ],
             'analysis_limitations': [
                 '詳細な実行プラン情報（ノード、エッジ）が利用できません',
                 'ステージ別メトリクスが利用できません', 
-                'BROADCAST分析は制限されます',
-                'Liquid Clustering分析は制限されます',
-                'データスキュー検出は制限されます'
+                'BROADCAST分析は基本的な推定のみ可能',
+                'Liquid Clustering分析は一般的な推奨のみ可能',
+                'データスキュー検出は平均値ベースの推定のみ',
+                'クエリ構造の詳細解析は行いません（メトリクス重視アプローチ）'
             ]
         }
         
@@ -1110,6 +1128,85 @@ print("✅ 関数定義完了: calculate_bottleneck_indicators")
 
 # COMMAND ----------
 
+def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    メトリクス情報のみから詳細なパフォーマンス洞察を計算
+    """
+    insights = {}
+    
+    # 基本データ
+    total_time_ms = overall_metrics.get('total_time_ms', 0)
+    read_bytes = overall_metrics.get('read_bytes', 0)
+    read_cache_bytes = overall_metrics.get('read_cache_bytes', 0)
+    read_remote_bytes = overall_metrics.get('read_remote_bytes', 0)
+    rows_read = overall_metrics.get('rows_read_count', 0)
+    rows_produced = overall_metrics.get('rows_produced_count', 0)
+    read_files = overall_metrics.get('read_files_count', 0)
+    read_partitions = overall_metrics.get('read_partitions_count', 0)
+    photon_time = overall_metrics.get('photon_total_time_ms', 0)
+    task_time = overall_metrics.get('task_total_time_ms', 0)
+    spill_bytes = overall_metrics.get('spill_to_disk_bytes', 0)
+    
+    # 1. データ効率分析
+    insights['data_efficiency'] = {
+        'data_selectivity': rows_produced / max(rows_read, 1),
+        'avg_bytes_per_file': read_bytes / max(read_files, 1),
+        'avg_bytes_per_partition': read_bytes / max(read_partitions, 1),
+        'avg_rows_per_file': rows_read / max(read_files, 1),
+        'avg_rows_per_partition': rows_read / max(read_partitions, 1)
+    }
+    
+    # 2. キャッシュ効率分析
+    cache_hit_ratio = read_cache_bytes / max(read_bytes, 1)
+    insights['cache_efficiency'] = {
+        'cache_hit_ratio': cache_hit_ratio,
+        'cache_hit_percentage': cache_hit_ratio * 100,
+        'remote_read_ratio': read_remote_bytes / max(read_bytes, 1),
+        'cache_effectiveness': 'high' if cache_hit_ratio > 0.8 else 'medium' if cache_hit_ratio > 0.5 else 'low'
+    }
+    
+    # 3. 並列化効率分析
+    insights['parallelization'] = {
+        'files_per_second': read_files / max(total_time_ms / 1000, 1),
+        'partitions_per_second': read_partitions / max(total_time_ms / 1000, 1),
+        'throughput_mb_per_second': (read_bytes / 1024 / 1024) / max(total_time_ms / 1000, 1),
+        'rows_per_second': rows_read / max(total_time_ms / 1000, 1)
+    }
+    
+    # 4. Photon効率分析
+    photon_efficiency = photon_time / max(task_time, 1)
+    insights['photon_analysis'] = {
+        'photon_enabled': photon_time > 0,
+        'photon_efficiency': photon_efficiency,
+        'photon_utilization_percentage': photon_efficiency * 100,
+        'photon_effectiveness': 'high' if photon_efficiency > 0.8 else 'medium' if photon_efficiency > 0.5 else 'low'
+    }
+    
+    # 5. リソース使用状況
+    insights['resource_usage'] = {
+        'memory_pressure': spill_bytes > 0,
+        'spill_gb': spill_bytes / 1024 / 1024 / 1024,
+        'data_processed_gb': read_bytes / 1024 / 1024 / 1024,
+        'data_reduction_ratio': 1 - (rows_produced / max(rows_read, 1))
+    }
+    
+    # 6. ボトルネック指標
+    bottlenecks = []
+    if cache_hit_ratio < 0.3:
+        bottlenecks.append('低キャッシュ効率')
+    if read_remote_bytes / max(read_bytes, 1) > 0.8:
+        bottlenecks.append('高リモート読み込み比率')
+    if photon_efficiency < 0.5 and photon_time > 0:
+        bottlenecks.append('低Photon効率')
+    if spill_bytes > 0:
+        bottlenecks.append('メモリスピル発生')
+    if insights['data_efficiency']['data_selectivity'] < 0.1:
+        bottlenecks.append('低データ選択性')
+    
+    insights['potential_bottlenecks'] = bottlenecks
+    
+    return insights
+
 def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     SQLプロファイラーデータからLiquid Clustering分析に必要なデータを抽出（LLM分析用）
@@ -1136,18 +1233,21 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
         query_info = metrics.get('query_info', {})
         query_text = query_info.get('query_text', '')
         
-        # クエリテキストから基本的なテーブル情報を抽出
-        if query_text:
-            # 簡単なテーブル名抽出（FROM句から）
-            import re
-            from_match = re.search(r'FROM\s+(\w+)', query_text, re.IGNORECASE)
-            if from_match:
-                table_name = from_match.group(1)
-                extracted_data["table_info"][table_name] = {
-                    "node_name": f"Query Summary - {table_name}",
-                    "node_tag": "QUERY_SUMMARY",
-                    "node_id": "summary"
-                }
+        # メトリクス情報のみから基本的なテーブル情報を生成
+        # 複雑なSQL解析は行わず、シンプルにメトリクス重視の分析を行う
+        
+        # 基本的なテーブル情報（メトリクス重視）
+        extracted_data["table_info"]["query_summary"] = {
+            "node_name": "Query Summary Analysis",
+            "node_tag": "QUERY_SUMMARY", 
+            "node_id": "summary",
+            "files_count": overall_metrics.get('read_files_count', 0),
+            "partitions_count": overall_metrics.get('read_partitions_count', 0),
+            "data_size_gb": overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024,
+            "rows_read": overall_metrics.get('rows_read_count', 0),
+            "rows_produced": overall_metrics.get('rows_produced_count', 0),
+            "data_selectivity": overall_metrics.get('rows_produced_count', 0) / max(overall_metrics.get('rows_read_count', 1), 1)
+        }
         
         # サマリーノードの情報を使用
         for node in metrics.get('node_metrics', []):
@@ -1161,6 +1261,9 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             })
         
         # メタデータサマリー（制限付き）
+        view_count = sum(1 for table in extracted_data["table_info"].values() if table.get('is_view', False))
+        actual_table_count = sum(len(table.get('underlying_tables', [])) for table in extracted_data["table_info"].values())
+        
         extracted_data["metadata_summary"] = {
             "total_nodes": len(metrics.get('node_metrics', [])),
             "total_graphs": 0,
@@ -1169,6 +1272,8 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             "groupby_expressions_count": 0,
             "aggregate_expressions_count": 0,
             "tables_identified": len(extracted_data["table_info"]),
+            "views_identified": view_count,
+            "underlying_tables_estimated": actual_table_count,
             "scan_nodes_count": len(extracted_data["scan_nodes"]),
             "join_nodes_count": 0,
             "filter_nodes_count": 0,
@@ -1176,6 +1281,25 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
         }
         
         print(f"✅ 制限付きデータ抽出完了: {extracted_data['metadata_summary']}")
+        
+        # ビュー情報の詳細表示
+        if view_count > 0:
+            print(f"🔍 ビュー情報の詳細:")
+            for table_name, table_info in extracted_data["table_info"].items():
+                if table_info.get('is_view', False):
+                    print(f"  📊 ビュー: {table_name}")
+                    print(f"     エイリアス: {table_info.get('alias', 'なし')}")
+                    print(f"     テーブル種別: {table_info.get('table_type', 'unknown')}")
+                    
+                    underlying_tables = table_info.get('underlying_tables', [])
+                    if underlying_tables:
+                        print(f"     推定実テーブル数: {len(underlying_tables)}")
+                        for i, underlying_table in enumerate(underlying_tables[:3]):  # 最大3個表示
+                            print(f"       - {underlying_table}")
+                        if len(underlying_tables) > 3:
+                            print(f"       ... および {len(underlying_tables) - 3} 個の追加テーブル")
+                    print()
+        
         return extracted_data
     
     # 通常のSQLプロファイラー形式の処理
