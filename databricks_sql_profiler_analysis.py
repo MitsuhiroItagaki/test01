@@ -2598,7 +2598,7 @@ print("   📊 重要度: 検出値に基づく")
 
 # COMMAND ----------
 
-# 💾 抽出したメトリクスをJSONファイルとして保存
+# 💾 抽出したメトリクスのJSONファイル保存は除外（不要）
 def format_thinking_response(response) -> str:
     """
     thinking_enabled: Trueの場合のレスポンスを人間に読みやすい形式に変換
@@ -2860,18 +2860,7 @@ def convert_sets_to_lists(obj):
     else:
         return obj
 
-from datetime import datetime
-metrics_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-output_path = f'output_extracted_metrics_{metrics_timestamp}.json'
-try:
-    # set型をlist型に変換してからJSONに保存
-    serializable_metrics = convert_sets_to_lists(extracted_metrics)
-    with open(output_path, 'w', encoding='utf-8') as file:
-        json.dump(serializable_metrics, file, indent=2, ensure_ascii=False)
-    print(f"✅ 抽出メトリクスを保存しました: {output_path}")
-except Exception as e:
-    print(f"⚠️ メトリクス保存でエラーが発生しましたがスキップします: {e}")
-    print("✅ 分析は正常に継続されます")
+# output_extracted_metrics の生成は除外（不要）
 
 # 🐌 最も時間がかかっている処理TOP10
 print(f"\n🐌 最も時間がかかっている処理TOP10")
@@ -3620,7 +3609,7 @@ print("\n" + "🎉" * 20)
 print("🏁 【処理完了サマリー】")
 print("🎉" * 20)
 print("✅ SQLプロファイラーJSONファイル読み込み完了")
-print(f"✅ パフォーマンスメトリクス抽出完了 ({output_path})")
+print(f"✅ パフォーマンスメトリクス抽出完了")
 
 # LLMプロバイダー情報の動的表示
 try:
@@ -3639,7 +3628,6 @@ except Exception as e:
 print(f"✅ 分析結果保存完了 ({result_output_path})")
 print()
 print("📁 出力ファイル:")
-print(f"   📄 {output_path}")
 print(f"   📄 {result_output_path}")
 print()
 print("🚀 分析完了！結果を確認してクエリ最適化にお役立てください。")
@@ -5610,19 +5598,8 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     query_id = metrics.get('query_info', {}).get('query_id', 'unknown')
     
-    # オリジナルクエリファイルの保存
-    original_filename = f"output_original_query_{timestamp}.sql"
-    with open(original_filename, 'w', encoding='utf-8') as f:
-        f.write(f"-- オリジナルSQLクエリ\n")
-        f.write(f"-- クエリID: {query_id}\n")
-        f.write(f"-- 抽出日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"-- ファイル: {original_filename}\n\n")
-        
-        # オリジナルクエリの末尾にもセミコロンを確実に追加
-        original_query_clean = original_query.strip()
-        if original_query_clean and not original_query_clean.endswith(';'):
-            original_query_clean += ';'
-        f.write(original_query_clean)
+    # オリジナルクエリファイルの保存は除外（不要）
+    original_filename = None
     
     # 最適化されたクエリの抽出と保存
     optimized_filename = f"output_optimized_query_{timestamp}.sql"
@@ -5658,7 +5635,6 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"-- 最適化されたSQLクエリ\n")
         f.write(f"-- 元クエリID: {query_id}\n")
         f.write(f"-- 最適化日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"-- ベースクエリ: {original_filename}\n")
         f.write(f"-- ファイル: {optimized_filename}\n\n")
         
         if optimized_sql:
@@ -5678,7 +5654,6 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         f.write(f"# {get_message('sql_optimization_report')}\n\n")
         f.write(f"**{get_message('query_id')}**: {query_id}\n")
         f.write(f"**{get_message('optimization_time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"**{get_message('original_file')}**: {original_filename}\n")
         f.write(f"**{get_message('optimized_file')}**: {optimized_filename}\n\n")
         f.write(f"## {get_message('optimization_analysis')}\n\n")
         f.write(optimized_result_for_file)
@@ -5723,151 +5698,7 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
         
         # プラン情報の抽出と保存は除外（最適化レポートとTOP10ファイルのみ出力）
         
-        # BROADCAST分析結果の追加
-        try:
-            # プラン情報を含むBROADCAST分析
-            profiler_data = metrics.get('raw_profiler_data', {})
-            plan_info = None
-            if profiler_data:
-                plan_info = extract_execution_plan_info(profiler_data)
-            
-            broadcast_analysis = analyze_broadcast_feasibility(metrics, original_query, plan_info)
-            if OUTPUT_LANGUAGE == 'ja':
-                f.write(f"\n\n## BROADCASTヒント分析結果（30MB閾値基準）\n\n")
-                f.write(f"- **JOINクエリ**: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}\n")
-                
-                # 既存のBROADCAST適用状況を最初に表示
-                if broadcast_analysis['already_optimized']:
-                    existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
-                    f.write(f"- **既存のBROADCAST適用状況**: ✅ 既にBROADCAST JOIN適用済み（{existing_broadcast_count}個のノード）\n")
-                    
-                    # BROADCASTされているテーブル一覧を表示
-                    broadcast_applied_tables = broadcast_analysis.get('broadcast_applied_tables', [])
-                    if broadcast_applied_tables:
-                        f.write(f"- **BROADCASTされているテーブル**: {', '.join(broadcast_applied_tables)}\n")
-                    
-                    # 既存のBROADCASTノードの詳細
-                    for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
-                        node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
-                        f.write(f"  - BROADCAST Node {i+1}: {node_name_short}\n")
-                    # 実行プラン分析からのJOIN戦略情報
-                    plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
-                    if plan_analysis.get('unique_join_strategies'):
-                        f.write(f"  - 検出されたJOIN戦略: {', '.join(plan_analysis['unique_join_strategies'])}\n")
-                else:
-                    f.write(f"- **既存のBROADCAST適用状況**: 🔍 BROADCAST JOIN未適用 - 最適化の機会を検討中\n")
-                
-                f.write(f"- **Spark BROADCAST閾値**: {broadcast_analysis['spark_threshold_mb']:.1f}MB（非圧縮）\n")
-                f.write(f"- **BROADCAST適用可能性**: {broadcast_analysis['feasibility']}\n")
-                f.write(f"- **BROADCAST候補数**: {len(broadcast_analysis['broadcast_candidates'])}個\n")
-                
-                # 30MB閾値ヒット分析
-                if broadcast_analysis["30mb_hit_analysis"]["has_30mb_candidates"]:
-                    hit_analysis = broadcast_analysis["30mb_hit_analysis"]
-                    f.write(f"- **30MB閾値ヒット**: ✅ {hit_analysis['candidate_count']}個のテーブルが適合\n")
-                    f.write(f"- **候補サイズ範囲**: {hit_analysis['smallest_table_mb']:.1f}MB - {hit_analysis['largest_candidate_mb']:.1f}MB\n")
-                    f.write(f"- **総メモリ影響**: {hit_analysis['memory_impact_estimation']}\n")
-                    if "optimal_candidate" in hit_analysis:
-                        optimal = hit_analysis["optimal_candidate"]
-                        f.write(f"- **最適候補**: {optimal['table']} ({optimal['size_mb']:.1f}MB) - {optimal['reasoning']}\n")
-                else:
-                    f.write(f"- **30MB閾値ヒット**: ❌ {broadcast_analysis['30mb_hit_analysis']['reason']}\n")
-                f.write("\n")
-                
-                if broadcast_analysis["broadcast_candidates"]:
-                    f.write("### BROADCAST候補テーブル（詳細分析）\n\n")
-                    for candidate in broadcast_analysis["broadcast_candidates"]:
-                        confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
-                        f.write(f"{confidence_icon} **{candidate['table']}**\n")
-                        f.write(f"  - **非圧縮サイズ**: {candidate['estimated_uncompressed_mb']:.1f}MB\n")
-                        f.write(f"  - **圧縮サイズ**: {candidate['estimated_compressed_mb']:.1f}MB\n")
-                        f.write(f"  - **圧縮率**: {candidate['compression_ratio']:.1f}x\n")
-                        f.write(f"  - **ファイル形式**: {candidate['file_format']}\n")
-                        f.write(f"  - **行数**: {candidate['rows']:,}行\n")
-                        f.write(f"  - **信頼度**: {candidate['confidence']}\n")
-                        f.write(f"  - **根拠**: {candidate['reasoning']}\n\n")
-                
-                if broadcast_analysis["recommendations"]:
-                    f.write("### 推奨事項\n\n")
-                    for rec in broadcast_analysis["recommendations"]:
-                        f.write(f"- {rec}\n")
-                    f.write("\n")
-                
-                if broadcast_analysis["reasoning"]:
-                    f.write("### 判定根拠\n\n")
-                    for reason in broadcast_analysis["reasoning"]:
-                        f.write(f"- {reason}\n")
-                    f.write("\n")
-            else:
-                f.write(f"\n\n## BROADCAST Hint Analysis (30MB Threshold)\n\n")
-                f.write(f"- **JOIN Query**: {'Yes' if broadcast_analysis['is_join_query'] else 'No'}\n")
-                
-                # Show existing BROADCAST application status first
-                if broadcast_analysis['already_optimized']:
-                    existing_broadcast_count = len(broadcast_analysis['existing_broadcast_nodes'])
-                    f.write(f"- **Existing BROADCAST Status**: ✅ BROADCAST JOIN already applied ({existing_broadcast_count} nodes)\n")
-                    
-                    # Show list of broadcast tables
-                    broadcast_applied_tables = broadcast_analysis.get('broadcast_applied_tables', [])
-                    if broadcast_applied_tables:
-                        f.write(f"- **Tables Being Broadcast**: {', '.join(broadcast_applied_tables)}\n")
-                    
-                    # Details of existing BROADCAST nodes
-                    for i, node in enumerate(broadcast_analysis['existing_broadcast_nodes'][:3]):
-                        node_name_short = node['node_name'][:50] + '...' if len(node['node_name']) > 50 else node['node_name']
-                        f.write(f"  - BROADCAST Node {i+1}: {node_name_short}\n")
-                    # JOIN strategy information from execution plan analysis
-                    plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
-                    if plan_analysis.get('unique_join_strategies'):
-                        f.write(f"  - Detected JOIN Strategies: {', '.join(plan_analysis['unique_join_strategies'])}\n")
-                else:
-                    f.write(f"- **Existing BROADCAST Status**: 🔍 BROADCAST JOIN not applied - optimization opportunities under consideration\n")
-                
-                f.write(f"- **Spark BROADCAST Threshold**: {broadcast_analysis['spark_threshold_mb']:.1f}MB (uncompressed)\n")
-                f.write(f"- **BROADCAST Feasibility**: {broadcast_analysis['feasibility']}\n")
-                f.write(f"- **BROADCAST Candidates**: {len(broadcast_analysis['broadcast_candidates'])}\n")
-                
-                # 30MB threshold hit analysis
-                if broadcast_analysis["30mb_hit_analysis"]["has_30mb_candidates"]:
-                    hit_analysis = broadcast_analysis["30mb_hit_analysis"]
-                    f.write(f"- **30MB Threshold Hit**: ✅ {hit_analysis['candidate_count']} tables qualify\n")
-                    f.write(f"- **Candidate Size Range**: {hit_analysis['smallest_table_mb']:.1f}MB - {hit_analysis['largest_candidate_mb']:.1f}MB\n")
-                    f.write(f"- **Total Memory Impact**: {hit_analysis['memory_impact_estimation']}\n")
-                    if "optimal_candidate" in hit_analysis:
-                        optimal = hit_analysis["optimal_candidate"]
-                        f.write(f"- **Optimal Candidate**: {optimal['table']} ({optimal['size_mb']:.1f}MB) - {optimal['reasoning']}\n")
-                else:
-                    f.write(f"- **30MB Threshold Hit**: ❌ {broadcast_analysis['30mb_hit_analysis']['reason']}\n")
-                f.write("\n")
-                
-                if broadcast_analysis["broadcast_candidates"]:
-                    f.write("### BROADCAST Candidate Tables (Detailed Analysis)\n\n")
-                    for candidate in broadcast_analysis["broadcast_candidates"]:
-                        confidence_icon = "🔹" if candidate['confidence'] == 'high' else "🔸"
-                        f.write(f"{confidence_icon} **{candidate['table']}**\n")
-                        f.write(f"  - **Uncompressed Size**: {candidate['estimated_uncompressed_mb']:.1f}MB\n")
-                        f.write(f"  - **Compressed Size**: {candidate['estimated_compressed_mb']:.1f}MB\n")
-                        f.write(f"  - **Compression Ratio**: {candidate['compression_ratio']:.1f}x\n")
-                        f.write(f"  - **File Format**: {candidate['file_format']}\n")
-                        f.write(f"  - **Rows**: {candidate['rows']:,}\n")
-                        f.write(f"  - **Confidence**: {candidate['confidence']}\n")
-                        f.write(f"  - **Reasoning**: {candidate['reasoning']}\n\n")
-                
-                if broadcast_analysis["recommendations"]:
-                    f.write("### Recommendations\n\n")
-                    for rec in broadcast_analysis["recommendations"]:
-                        f.write(f"- {rec}\n")
-                    f.write("\n")
-                
-                if broadcast_analysis["reasoning"]:
-                    f.write("### Analysis Details\n\n")
-                    for reason in broadcast_analysis["reasoning"]:
-                        f.write(f"- {reason}\n")
-                    f.write("\n")
-                        
-        except Exception as e:
-            error_msg = f"⚠️ BROADCAST分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating BROADCAST analysis: {str(e)}\n"
-            f.write(error_msg)
+        # BROADCAST分析結果の追加は除外（不要）
         
         # 最も時間がかかっている処理TOP10の情報は除外（独立したファイルとして出力）
     
@@ -5887,7 +5718,6 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     
     # 出力ファイルの結果（output_optimization_reportとTOP10ファイルのみ）
     result = {
-        'original_file': original_filename,
         'optimized_file': optimized_filename,
         'report_file': report_filename,
         'top10_file': top10_filename
@@ -6299,11 +6129,6 @@ print("✅ 最適化結果ファイル生成完了（接頭語: output_）")
 missing_summary_vars = []
 
 try:
-    output_path
-except NameError:
-    missing_summary_vars.append("output_path (セル14を実行してください)")
-
-try:
     result_output_path
 except NameError:
     missing_summary_vars.append("result_output_path (セル16を実行してください)")
@@ -6315,11 +6140,6 @@ except NameError:
     saved_files = {}
 
 print(f"\n📁 出力ファイル一覧:")
-
-if 'output_path' in globals():
-    print(f"   📄 パフォーマンス分析: {output_path}")
-else:
-    print("   📄 パフォーマンス分析: (セル14を実行してください)")
 
 if 'result_output_path' in globals():
     print(f"   📄 ボトルネック分析レポート: {result_output_path}")
