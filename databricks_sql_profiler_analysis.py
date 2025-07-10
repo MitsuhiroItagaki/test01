@@ -3245,15 +3245,15 @@ if sorted_nodes:
                 # 利用可能なスピル関連メトリクス一覧（参考）
                 spill_related = []
                 for key in detailed_metrics.keys():
-                    if 'spill' in key.lower() or 'disk' in key.lower():
+                    if key in target_spill_metrics:
                         spill_related.append(f"detailed_metrics.{key}")
                 for metric in raw_metrics:
                     key = metric.get('key', '')
                     label = metric.get('label', '')
-                    if 'spill' in key.lower() or 'disk' in key.lower() or 'spill' in label.lower() or 'disk' in label.lower():
+                    if key in target_spill_metrics or label in target_spill_metrics:
                         spill_related.append(f"raw_metrics.{key}")
                 for key in key_metrics.keys():
-                    if 'spill' in key.lower() or 'disk' in key.lower():
+                    if key in target_spill_metrics:
                         spill_related.append(f"key_metrics.{key}")
                 
                 if spill_related:
@@ -4947,18 +4947,8 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     metric_value = metric_info.get('value', 0)
                     metric_label = metric_info.get('label', '')
                     
-                    # スピル関連キーワードの包括的検索（大文字小文字無視）
-                    key_lower = metric_key.lower()
-                    label_lower = metric_label.lower()
-                    
-                    is_spill_metric = (
-                        'spill' in key_lower or 'spill' in label_lower or
-                        'disk' in key_lower or 'disk' in label_lower or
-                        ('memory pressure' in key_lower) or ('memory pressure' in label_lower) or
-                        ('bytes spilled' in key_lower) or ('bytes spilled' in label_lower) or
-                        ('num bytes' in key_lower and 'disk' in key_lower) or
-                        ('num bytes' in label_lower and 'disk' in label_lower)
-                    )
+                    # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
+                    is_spill_metric = (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics)
                     
                     if is_spill_metric and metric_value > 0:
                         spill_detected = True
@@ -4988,14 +4978,8 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                             metric_label = metric.get('label', '')
                             metric_value = metric.get('value', 0)
                             
-                            key_lower = metric_key.lower()
-                            label_lower = metric_label.lower()
-                            
-                            is_spill_metric = (
-                                'spill' in key_lower or 'spill' in label_lower or
-                                'disk' in key_lower or 'disk' in label_lower or
-                                ('memory pressure' in key_lower) or ('memory pressure' in label_lower)
-                            )
+                            # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
+                            is_spill_metric = (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics)
                             
                             if is_spill_metric and metric_value > 0:
                                 spill_detected = True
@@ -5018,12 +5002,8 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 # 正確な名前で見つからない場合、パターンマッチング
                 if not spill_detected:
                     for key_metric_name, key_metric_value in key_metrics.items():
-                        key_lower = key_metric_name.lower()
-                        
-                        is_spill_metric = (
-                            'spill' in key_lower or 'disk' in key_lower or
-                            'memory pressure' in key_lower
-                        )
+                        # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
+                        is_spill_metric = (key_metric_name in exact_spill_metrics)
                         
                         if is_spill_metric and key_metric_value > 0:
                             spill_detected = True
@@ -5128,8 +5108,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     # detailed_metricsから検索
                     detailed_metrics = node.get('detailed_metrics', {})
                     for key, info in detailed_metrics.items():
-                        if ('spill' in key.lower() or 'disk' in key.lower() or 
-                            'spill' in info.get('label', '').lower() or 'disk' in info.get('label', '').lower()):
+                        if (key in exact_spill_metrics or info.get('label', '') in exact_spill_metrics):
                             value = info.get('value', 0)
                             label = info.get('label', '')
                             spill_related_metrics.append(f"detailed[{key}]={value}")
@@ -5143,8 +5122,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                             key = metric.get('key', '')
                             label = metric.get('label', '')
                             value = metric.get('value', 0)
-                            if ('spill' in key.lower() or 'disk' in key.lower() or 
-                                'spill' in label.lower() or 'disk' in label.lower()):
+                            if (key in exact_spill_metrics or label in exact_spill_metrics):
                                 spill_related_metrics.append(f"raw[{key}]={value}")
                                 if label and label != key:
                                     spill_related_metrics.append(f"  label='{label}'")
@@ -5152,7 +5130,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     # key_metricsから検索
                     key_metrics = node.get('key_metrics', {})
                     for key, value in key_metrics.items():
-                        if 'spill' in key.lower() or 'disk' in key.lower():
+                        if key in exact_spill_metrics:
                             spill_related_metrics.append(f"key[{key}]={value}")
                     
                     if spill_related_metrics:
