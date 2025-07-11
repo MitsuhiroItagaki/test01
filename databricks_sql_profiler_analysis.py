@@ -5764,7 +5764,8 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
             llm_analysis = liquid_analysis.get('llm_analysis', '')
             
             report += f"""
-## 🗂️ 2. Liquid Clustering分析結果
+
+## 🗂️ 3. Liquid Clustering分析結果
 
 ### 📊 パフォーマンス概要
 
@@ -5782,15 +5783,44 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 
 """
         
+        # 最も時間がかかっている処理TOP10を統合
+        report += f"""
+## 🐌 2. 最も時間がかかっている処理TOP10
+
+### 📊 詳細なボトルネック分析
+
+"""
+        
+        # TOP10レポートの生成と統合
+        try:
+            top10_report = generate_top10_time_consuming_processes_report(metrics)
+            # レポートからヘッダーを除去して統合
+            top10_lines = top10_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
+            filtered_lines = []
+            skip_header = True
+            for line in top10_lines:
+                if skip_header and line.startswith("## 🐌"):
+                    skip_header = False
+                    continue
+                if not skip_header:
+                    filtered_lines.append(line)
+            
+            report += '\n'.join(filtered_lines)
+            
+        except Exception as e:
+            report += f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n"
+        
         # SQL最適化分析結果の追加
         report += f"""
-## 🚀 3. SQL最適化分析結果
+
+## 🚀 4. SQL最適化分析結果
 
 ### 💡 最適化提案
 
 {optimized_result}
 
-### 📈 4. 期待されるパフォーマンス改善効果
+### 📈 5. 期待されるパフォーマンス改善効果
 
 #### 🎯 予想される改善点
 
@@ -5897,13 +5927,42 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         report += "\n"
         
+        # 最も時間がかかっている処理TOP10を統合（英語版）
+        report += f"""
+## 🐌 2. Top 10 Most Time-Consuming Processes
+
+### 📊 Detailed Bottleneck Analysis
+
+"""
+        
+        # TOP10レポートの生成と統合（英語版）
+        try:
+            top10_report = generate_top10_time_consuming_processes_report(metrics)
+            # レポートからヘッダーを除去して統合
+            top10_lines = top10_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
+            filtered_lines = []
+            skip_header = True
+            for line in top10_lines:
+                if skip_header and line.startswith("## 🐌"):
+                    skip_header = False
+                    continue
+                if not skip_header:
+                    filtered_lines.append(line)
+            
+            report += '\n'.join(filtered_lines)
+            
+        except Exception as e:
+            report += f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
+        
         # Liquid Clustering分析結果の追加（英語版）
         if liquid_analysis:
             performance_context = liquid_analysis.get('performance_context', {})
             llm_analysis = liquid_analysis.get('llm_analysis', '')
             
             report += f"""
-## 🗂️ 2. Liquid Clustering Analysis Results
+
+## 🗂️ 3. Liquid Clustering Analysis Results
 
 ### 📊 Performance Overview
 
@@ -5923,13 +5982,13 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         # SQL最適化分析結果の追加（英語版）
         report += f"""
-## 🚀 3. SQL Optimization Analysis Results
+## 🚀 4. SQL Optimization Analysis Results
 
 ### 💡 Optimization Recommendations
 
 {optimized_result}
 
-### 📈 4. Expected Performance Improvement
+### 📈 5. Expected Performance Improvement
 
 #### 🎯 Anticipated Improvements
 
@@ -6144,25 +6203,10 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     
     print("✅ LLMによるレポート推敲完了")
     
-    # 最も時間がかかっている処理TOP10を独立したファイルとして出力
-    top10_filename = f"output_top10_processes_{timestamp}.md"
-    with open(top10_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# {get_message('top10_processes')}\n\n")
-        f.write(f"**{get_message('query_id')}**: {query_id}\n")
-        f.write(f"**{get_message('analysis_time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        try:
-            top10_report = generate_top10_time_consuming_processes_report(metrics)
-            f.write(top10_report)
-        except Exception as e:
-            error_msg = f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n" if OUTPUT_LANGUAGE == 'ja' else f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
-            f.write(error_msg)
-    
-    # 出力ファイルの結果（output_optimization_reportとTOP10ファイルのみ）
+    # 出力ファイルの結果（独立したTOP10ファイルは削除し、最適化レポートに統合）
     result = {
         'optimized_file': optimized_filename,
-        'report_file': report_filename,
-        'top10_file': top10_filename
+        'report_file': report_filename
     }
     
     return result
