@@ -1066,8 +1066,8 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             "severity": "CRITICAL" if duration_ms >= 10000 else "HIGH" if duration_ms >= 5000 else "MEDIUM" if duration_ms >= 1000 else "LOW"
         }
         
-        # Shuffleノードの場合、attributesとREPARTITIONヒントを追加
-        if node_analysis["is_shuffle_node"]:
+        # Shuffleノードの場合、スピルが検出されている場合のみREPARTITIONヒントを追加
+        if node_analysis["is_shuffle_node"] and spill_detected and spill_bytes > 0:
             shuffle_attributes = extract_shuffle_attributes(node)
             if shuffle_attributes:
                 suggested_partitions = max(num_tasks * 2, 200)
@@ -1077,9 +1077,9 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
                     "node_id": node_analysis["node_id"],
                     "attributes": shuffle_attributes,
                     "suggested_sql": f"REPARTITION({suggested_partitions}, {main_attribute})",
-                    "reason": f"スピル({node_analysis['spill_gb']:.2f}GB)改善" if spill_detected and spill_bytes > 0 else "Shuffle効率改善",
-                    "priority": "HIGH" if spill_detected else "MEDIUM",
-                    "estimated_improvement": "大幅な性能改善が期待" if spill_detected else "Shuffle効率向上が期待"
+                    "reason": f"スピル({node_analysis['spill_gb']:.2f}GB)改善",
+                    "priority": "HIGH",
+                    "estimated_improvement": "大幅な性能改善が期待"
                 }
                 detailed_analysis["shuffle_optimization_hints"].append(repartition_hint)
                 node_analysis["repartition_hint"] = repartition_hint
@@ -1121,7 +1121,7 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
         detailed_analysis["performance_recommendations"].append({
             "type": "shuffle_optimization", 
             "priority": "HIGH",
-            "description": f"{len(detailed_analysis['shuffle_optimization_hints'])}個のShuffleノードでREPARTITION最適化が可能"
+            "description": f"{len(detailed_analysis['shuffle_optimization_hints'])}個のスピル発生Shuffleノードでメモリ最適化が必要"
         })
     
     if detailed_analysis["skew_analysis"]["total_skewed_partitions"] > 10:
@@ -3394,15 +3394,13 @@ if sorted_nodes:
             if shuffle_attributes:
                 print(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
                 
-                # REPARTITIONヒントの提案
-                suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
-                main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
-                
-                print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                # REPARTITIONヒントの提案（スピルが検出された場合のみ）
                 if spill_detected and spill_bytes > 0 and spill_display:
+                    suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
+                    main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
+                    
+                    print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
                     print(f"       理由: スピル({spill_display})を改善するため")
-                else:
-                    print(f"       理由: Shuffle効率を改善するため")
             else:
                 print(f"    🔄 Shuffle属性: 検出されませんでした")
 
@@ -4673,10 +4671,10 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         if node["skew_detected"]:
             performance_critical_issues.append(f"      ⚖️ スキュー: {node['skewed_partitions']}パーティション - データ分散改善必要")
     
-    # 🔄 REPARTITIONヒントの詳細生成（Shuffle attributes活用）
+    # 🔄 REPARTITIONヒントの詳細生成（スピル検出時のみ）
     repartition_hints = []
     if detailed_bottleneck["shuffle_optimization_hints"]:
-        repartition_hints.append("🔄 REPARTITIONヒント（Shuffle attributes基準）:")
+        repartition_hints.append("🔄 REPARTITIONヒント（スピル検出時のみ）:")
         for hint in detailed_bottleneck["shuffle_optimization_hints"]:
             priority_icon = "🚨" if hint["priority"] == "HIGH" else "📈"
             repartition_hints.append(f"   {priority_icon} ノードID {hint['node_id']}: {hint['suggested_sql']}")
@@ -4815,8 +4813,8 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 【📊 セル33詳細ボトルネック分析結果】
 {chr(10).join(performance_critical_issues) if performance_critical_issues else "特別な重要課題は検出されませんでした"}
 
-【🔄 REPARTITIONヒント（Shuffle attributes基準）】
-{chr(10).join(repartition_hints) if repartition_hints else "REPARTITIONヒントは検出されませんでした"}
+【🔄 REPARTITIONヒント（スピル検出時のみ）】
+{chr(10).join(repartition_hints) if repartition_hints else "スピルが検出されていないため、REPARTITIONヒントは適用対象外です"}
 
 【🚀 処理速度重視の最適化推奨事項】
 {chr(10).join(speed_optimization_recommendations) if speed_optimization_recommendations else "特別な推奨事項はありません"}
@@ -4841,7 +4839,8 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
    - メモリ効率的なJOIN順序の検討
    - 中間結果のサイズ削減
 
-2. **🔄 REPARTITIONヒント適用**（Shuffle attributes基準）
+2. **🔄 REPARTITIONヒント適用**（スピル検出時のみ）
+   - **スピルが検出された場合のみ**REPARTITIONヒントを適用
    - 検出されたShuffle attributesを基に具体的なREPARTITIONヒントを適用
    - GROUP BY前またはJOIN前の適切な位置にREPARTITIONを配置
    - 推奨パーティション数を使用
@@ -4872,10 +4871,12 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
    - CTE活用による共通化
 
 【🔄 REPARTITIONヒント適用ルール】
+- **スピルが検出された場合のみ適用**
 - GROUP BYクエリの場合: GROUP BY前にREPARTITION(推奨数, group_by_column)
 - JOINクエリの場合: JOIN前にREPARTITION(推奨数, join_key)
 - 複数テーブルの場合: 最も大きなテーブルをリパーティション
 - 推奨パーティション数: 検出されたタスク数の2倍以上、最低200
+- スピルが検出されていない場合: REPARTITIONヒントは適用しない
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
@@ -4983,7 +4984,7 @@ FROM cte1 c
 
 **適用した最適化手法**:
 - [具体的な最適化手法のリスト]
-- [REPARTITIONヒントの適用詳細]
+- [REPARTITIONヒントの適用詳細（スピル検出時のみ）]
 - [BROADCASTヒントの適用詳細 - SELECT直後配置]
 - [推定される性能改善効果]
 
@@ -4997,7 +4998,7 @@ FROM cte1 c
 ```sql
 -- 🚨 重要: BROADCASTヒントは必ずSELECT文の直後に配置
 -- 例: SELECT /*+ BROADCAST(table_name) */ column1, column2, ...
--- 複数ヒント例: SELECT /*+ REPARTITION(100), BROADCAST(small_table) */ column1, column2, ...
+-- 複数ヒント例（スピル検出時のみ）: SELECT /*+ REPARTITION(100), BROADCAST(small_table) */ column1, column2, ...
 -- 無効な例: SELECT /*+ BROADCAST */ column1, column2, ... (テーブル名なし - 無効)
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
 ```
@@ -5204,15 +5205,13 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if shuffle_attributes:
                     report_lines.append(f"    🔄 Shuffle属性: {', '.join(shuffle_attributes)}")
                     
-                    # REPARTITIONヒントの提案
-                    suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
-                    main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
-                    
-                    report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                    # REPARTITIONヒントの提案（スピルが検出された場合のみ）
                     if spill_detected and spill_bytes > 0 and spill_display:
+                        suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
+                        main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
+                        
+                        report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
                         report_lines.append(f"       理由: スピル({spill_display})を改善するため")
-                    else:
-                        report_lines.append(f"       理由: Shuffle効率を改善するため")
                 else:
                     report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
             
