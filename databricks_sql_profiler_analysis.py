@@ -4883,7 +4883,52 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - オリジナルクエリのすべてのSELECT項目を保持してください
 - 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
 - 実際に実行できる完全なSQLクエリのみを出力してください
-- **BROADCASTヒントは必ずSELECT文の直後に配置し、JOIN句内には絶対に配置しないでください**
+
+【🚨 BROADCASTヒント配置の厳格なルール】
+**絶対に守るべき文法ルール:**
+
+✅ **正しい配置（必須）:**
+```sql
+SELECT /*+ BROADCAST(table_name) */
+  column1, column2, ...
+FROM table1 t1
+  JOIN table2 t2 ON t1.id = t2.id
+```
+
+❌ **絶対に禁止される誤った配置:**
+```sql
+-- これらは全て文法エラーになります
+FROM table1 /*+ BROADCAST(table1) */
+JOIN /*+ BROADCAST(table2) */ table2 ON ...
+WHERE /*+ BROADCAST(table1) */ ...
+```
+
+**重要な配置ルール:**
+1. **ヒントは必ずSELECT文の直後**に配置
+2. **FROM句、JOIN句、WHERE句内には絶対に配置しない**
+3. **複数テーブルのBROADCAST時も全てSELECT直後に記述**
+4. **CTEを使用する場合は各CTEのSELECT直後に配置**
+
+**複数テーブルBROADCAST例:**
+```sql
+SELECT /*+ BROADCAST(table1, table2) */
+  t1.column1, t2.column2
+FROM table1 t1
+  JOIN table2 t2 ON t1.id = t2.id
+```
+
+**CTEでのBROADCAST例:**
+```sql
+WITH cte1 AS (
+  SELECT /*+ BROADCAST(table1) */
+    column1, column2
+  FROM table1
+)
+SELECT /*+ BROADCAST(table2) */
+  c.column1, t.column2
+FROM cte1 c
+  JOIN table2 t ON c.id = t.id
+```
 
 【出力形式】
 ## 🚀 処理速度重視の最適化されたSQL
@@ -4891,9 +4936,17 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 **適用した最適化手法**:
 - [具体的な最適化手法のリスト]
 - [REPARTITIONヒントの適用詳細]
+- [BROADCASTヒントの適用詳細 - SELECT直後配置]
 - [推定される性能改善効果]
 
+**🚨 BROADCASTヒント配置確認**:
+- ✅ 全てのBROADCASTヒントがSELECT文の直後に配置されている
+- ✅ FROM句、JOIN句、WHERE句内にヒントが配置されていない
+- ✅ 文法的に正しいSQL構文になっている
+
 ```sql
+-- 🚨 重要: BROADCASTヒントは必ずSELECT文の直後に配置
+-- 例: SELECT /*+ BROADCAST(table_name) */ column1, column2, ...
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
 ```
 
@@ -5004,110 +5057,38 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if duration_ms > 0:  # このノードに関連するステージを推定
                     num_tasks = max(num_tasks, stage.get('num_tasks', 0))
             
-            # スピル検出（堅牢版 - メモリベース + 包括的メトリクス検索）
+            # スピル検出（セル33と同じロジック - 正確なメトリクス名のみ）
             spill_detected = False
             spill_bytes = 0
-            spill_detection_method = "none"
-            
-            # メモリ使用量を事前に計算（後のフォールバックで使用）
-            memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / (1024 * 1024)
-            
-            # 2. 正確なメトリクス名による検索（優先）
             exact_spill_metrics = [
                 "Num bytes spilled to disk due to memory pressure",
                 "Sink - Num bytes spilled to disk due to memory pressure",
                 "Sink/Num bytes spilled to disk due to memory pressure"
             ]
             
+            # detailed_metricsから検索
             detailed_metrics = node.get('detailed_metrics', {})
             for metric_key, metric_info in detailed_metrics.items():
                 metric_value = metric_info.get('value', 0)
                 metric_label = metric_info.get('label', '')
                 
-                # まず正確な名前でチェック
                 if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
                     spill_detected = True
                     spill_bytes = max(spill_bytes, metric_value)
-                    spill_detection_method = f"exact_match_detailed ({metric_key})"
                     break
             
-            # 3. 包括的スピルメトリクス検索（正確な名前で見つからない場合）
-            if not spill_detected:
-                for metric_key, metric_info in detailed_metrics.items():
-                    metric_value = metric_info.get('value', 0)
-                    metric_label = metric_info.get('label', '')
-                    
-                    # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
-                    is_spill_metric = (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics)
-                    
-                    if is_spill_metric and metric_value > 0:
-                        spill_detected = True
-                        spill_bytes = max(spill_bytes, metric_value)  # 最大値を使用
-                        spill_detection_method = f"pattern_match_detailed ({metric_key})"
-            
-            # 4. raw_metricsから正確なメトリクス名で検索
+            # raw_metricsから検索（フォールバック）
             if not spill_detected:
                 raw_metrics = node.get('metrics', [])
-                if isinstance(raw_metrics, list):
-                    # まず正確な名前で検索
-                    for metric in raw_metrics:
-                        metric_key = metric.get('key', '')
-                        metric_label = metric.get('label', '')
-                        metric_value = metric.get('value', 0)
-                        
-                        if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
-                            spill_detected = True
-                            spill_bytes = max(spill_bytes, metric_value)
-                            spill_detection_method = f"exact_match_raw ({metric_key})"
-                            break
+                for metric in raw_metrics:
+                    metric_key = metric.get('key', '')
+                    metric_label = metric.get('label', '')
+                    metric_value = metric.get('value', 0)
                     
-                    # 正確な名前で見つからない場合、パターンマッチング
-                    if not spill_detected:
-                        for metric in raw_metrics:
-                            metric_key = metric.get('key', '')
-                            metric_label = metric.get('label', '')
-                            metric_value = metric.get('value', 0)
-                            
-                            # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
-                            is_spill_metric = (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics)
-                            
-                            if is_spill_metric and metric_value > 0:
-                                spill_detected = True
-                                spill_bytes = max(spill_bytes, metric_value)
-                                spill_detection_method = f"pattern_match_raw ({metric_key})"
-                                break
-            
-            # 5. key_metricsから正確なメトリクス名で検索
-            if not spill_detected:
-                key_metrics = node.get('key_metrics', {})
-                
-                # まず正確な名前で検索
-                for exact_metric in exact_spill_metrics:
-                    if exact_metric in key_metrics and key_metrics[exact_metric] > 0:
+                    if (metric_key in exact_spill_metrics or metric_label in exact_spill_metrics) and metric_value > 0:
                         spill_detected = True
-                        spill_bytes = max(spill_bytes, key_metrics[exact_metric])
-                        spill_detection_method = f"exact_match_key ({exact_metric})"
+                        spill_bytes = max(spill_bytes, metric_value)
                         break
-                
-                # 正確な名前で見つからない場合、パターンマッチング
-                if not spill_detected:
-                    for key_metric_name, key_metric_value in key_metrics.items():
-                        # 正確なメトリクス名のみを使用（部分文字列マッチング禁止）
-                        is_spill_metric = (key_metric_name in exact_spill_metrics)
-                        
-                        if is_spill_metric and key_metric_value > 0:
-                            spill_detected = True
-                            spill_bytes = max(spill_bytes, key_metric_value)
-                            spill_detection_method = f"pattern_match_key ({key_metric_name})"
-                            break
-            
-            # 6. メモリベーススピル検出（最終フォールバック）
-            # すべてのメトリクス検索で見つからなかった場合のフォールバック
-            if not spill_detected and memory_mb > 1024:  # 1GB以上でスピル未検出の場合
-                spill_detected = True
-                spill_detection_method = "memory_based_fallback"
-                # メモリの10%がスピルしたと仮定（保守的な見積もり）
-                spill_bytes = int(memory_mb * 1024 * 1024 * 0.1)
             
             # スキュー検出: AQEShuffleRead - Number of skewed partitions メトリクス使用（正確なメトリクス名のみ）
             skew_detected = False
