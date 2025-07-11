@@ -3371,7 +3371,7 @@ if sorted_nodes:
         print(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
         print(f"    📊 処理行数: {rows_num:>8,} 行")
         print(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'検出' if skew_detected else 'なし'}")
+        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
         
         # 効率性指標（行/秒）を計算
         if duration_ms > 0:
@@ -5129,7 +5129,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             report_lines.append(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
             report_lines.append(f"    📊 処理行数: {rows_num:>8,} 行")
             report_lines.append(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'検出' if skew_detected else 'なし'}")
+            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
             
             # 効率性指標（行/秒）を計算
             if duration_ms > 0:
@@ -5707,6 +5707,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 | データ選択性 | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ 良好' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ 改善必要'} |
 | シャッフル操作 | {bottleneck_indicators.get('shuffle_operations_count', 0)}回 | {'✅ 良好' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ 多数'} |
 | スピル発生 | {'はい' if bottleneck_indicators.get('has_spill', False) else 'いいえ'} | {'❌ 問題あり' if bottleneck_indicators.get('has_spill', False) else '✅ 良好'} |
+| スキュー検出 | {'AQEで検出・対応済' if bottleneck_indicators.get('has_skew', False) else '未検出'} | {'🔧 AQE対応済' if bottleneck_indicators.get('has_skew', False) else '✅ 良好'} |
 
 ### 🚨 主要ボトルネック
 
@@ -5721,6 +5722,9 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         if bottleneck_indicators.get('has_shuffle_bottleneck', False):
             bottlenecks.append("**シャッフルボトルネック**: JOIN/GROUP BY処理での大量データ転送")
+        
+        if bottleneck_indicators.get('has_skew', False):
+            bottlenecks.append("**データスキュー**: AQEで検出・対応済 - Sparkが自動的に最適化実行")
         
         if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
             bottlenecks.append("**キャッシュ効率低下**: データ再利用効率が低い")
@@ -5876,6 +5880,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 | Data Selectivity | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ Good' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ Needs Improvement'} |
 | Shuffle Operations | {bottleneck_indicators.get('shuffle_operations_count', 0)} times | {'✅ Good' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ High'} |
 | Spill Occurrence | {'Yes' if bottleneck_indicators.get('has_spill', False) else 'No'} | {'❌ Issues' if bottleneck_indicators.get('has_spill', False) else '✅ Good'} |
+| Skew Detection | {'AQE Detected & Handled' if bottleneck_indicators.get('has_skew', False) else 'Not Detected'} | {'🔧 AQE Handled' if bottleneck_indicators.get('has_skew', False) else '✅ Good'} |
 
 ### 🚨 Key Bottlenecks
 
@@ -5890,6 +5895,9 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         if bottleneck_indicators.get('has_shuffle_bottleneck', False):
             bottlenecks.append("**Shuffle Bottleneck**: Large data transfer in JOIN/GROUP BY operations")
+        
+        if bottleneck_indicators.get('has_skew', False):
+            bottlenecks.append("**Data Skew**: AQE Detected & Handled - Spark automatically optimized execution")
         
         if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
             bottlenecks.append("**Cache Inefficiency**: Low data reuse efficiency")
