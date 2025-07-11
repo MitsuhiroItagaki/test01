@@ -4859,6 +4859,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 5. **🎯 BROADCAST最適化**（30MB閾値厳守）
    - 30MB以下の小テーブルのみBROADCAST適用
    - BROADCASTヒント句は必ずSELECT文の直後に配置
+   - BROADCASTヒントには必ずテーブル名/エイリアス名を指定（`/*+ BROADCAST(table_name) */`）
 
 6. **💾 メモリ効率化**
    - 不要なカラムの除去
@@ -4919,7 +4920,7 @@ LEFT JOIN (
 **🚨 サブクエリ使用時の正しい配置（絶対遵守）:**
 ```sql
 -- ✅ 正しい: メインクエリのSELECT直後に全てのBROADCASTヒントを統合
-SELECT /*+ REPARTITION(2316) BROADCAST(COUPON) */
+SELECT /*+ REPARTITION(2316), BROADCAST(COUPON) */
   retail_item_name, qtz_item_id, ...
 FROM prd_public.public.dmp_id_pos POS
   LEFT JOIN (
@@ -4971,10 +4972,11 @@ FROM cte1 c
 - 複数のテーブルに対するBROADCASTヒントは、メインクエリのSELECT直後に統合することで全て有効になる
 
 **🚨 ヒント構文の重要な注意点:**
-- 複数のヒント種類はスペース区切りで指定: `/*+ REPARTITION(100) BROADCAST(table1) */`
-- カンマ区切りは無効: `/*+ REPARTITION(100), BROADCAST(table1) */` ❌
+- 複数のヒント種類はカンマ区切りで指定: `/*+ REPARTITION(100), BROADCAST(table1) */` ✅
+- BROADCASTヒントには必ずテーブル名/エイリアス名を指定: `/*+ BROADCAST(table_name) */` ✅
+- テーブル名なしのBROADCASTヒントは無効: `/*+ BROADCAST */` ❌
 - 同一ヒント内の複数パラメータはカンマ区切り: `/*+ BROADCAST(table1, table2) */` ✅
-- 異なるヒント種類の組み合わせはスペース区切り: `/*+ REPARTITION(200) BROADCAST(small_table) COALESCE(1) */` ✅
+- 異なるヒント種類の組み合わせはカンマ区切り: `/*+ REPARTITION(200), BROADCAST(small_table), COALESCE(1) */` ✅
 
 【出力形式】
 ## 🚀 処理速度重視の最適化されたSQL
@@ -4988,11 +4990,15 @@ FROM cte1 c
 **🚨 BROADCASTヒント配置確認**:
 - ✅ 全てのBROADCASTヒントがSELECT文の直後に配置されている
 - ✅ FROM句、JOIN句、WHERE句内にヒントが配置されていない
+- ✅ BROADCASTヒントに必ずテーブル名/エイリアス名が指定されている
+- ✅ 複数ヒントはカンマ区切りで指定されている
 - ✅ 文法的に正しいSQL構文になっている
 
 ```sql
 -- 🚨 重要: BROADCASTヒントは必ずSELECT文の直後に配置
 -- 例: SELECT /*+ BROADCAST(table_name) */ column1, column2, ...
+-- 複数ヒント例: SELECT /*+ REPARTITION(100), BROADCAST(small_table) */ column1, column2, ...
+-- 無効な例: SELECT /*+ BROADCAST */ column1, column2, ... (テーブル名なし - 無効)
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
 ```
 
@@ -5012,7 +5018,7 @@ FROM cte1 c
 - 🔍 閾値適合性: [30MB以下で適合/30MB超過で非適合]
 - 💾 メモリ影響: [推定メモリ使用量]MB がワーカーノードにブロードキャスト
 - 🚀 期待効果: [ネットワーク転送量削減・JOIN処理高速化・シャッフル削減など]
-- ✅ **ヒント句配置**: SELECT文の直後に `/*+ BROADCAST(table_name) */` を正しく配置
+- ✅ **ヒント句配置**: SELECT文の直後に `/*+ BROADCAST(table_name) */` を正しく配置（テーブル名必須）
 
 ## 期待効果  
 [実行時間・メモリ・スピル改善の見込み（BROADCAST効果を含む）]
