@@ -5774,6 +5774,17 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 
 ### 📊 詳細なボトルネック分析
 
+以下のトピックに基づいて処理を分析します：
+
+#### 🔍 分析対象トピック
+- **⏱️ 実行時間**: 全体に占める処理時間の割合
+- **💾 メモリ使用量**: ピークメモリ使用量とメモリプレッシャー
+- **🔧 並列度**: タスク数と並列実行効率
+- **💿 スピル検出**: メモリ不足によるディスクスピル
+- **⚖️ スキュー検出**: AQEベースのデータ分散不均等検出
+- **🔄 Shuffle属性**: パーティション再分散の最適化ポイント
+- **🚀 処理効率**: 行/秒での処理効率指標
+
 """
         
         # TOP10レポートの生成と統合
@@ -5921,6 +5932,17 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 ## 🐌 2. Top 10 Most Time-Consuming Processes
 
 ### 📊 Detailed Bottleneck Analysis
+
+The following topics are analyzed for process evaluation:
+
+#### 🔍 Analysis Topics
+- **⏱️ Execution Time**: Percentage of total processing time
+- **💾 Memory Usage**: Peak memory usage and memory pressure
+- **🔧 Parallelism**: Number of tasks and parallel execution efficiency
+- **💿 Spill Detection**: Disk spill due to memory shortage
+- **⚖️ Skew Detection**: AQE-based data distribution imbalance detection
+- **🔄 Shuffle Attributes**: Optimization points for partition redistribution
+- **🚀 Processing Efficiency**: Processing efficiency metrics in rows/second
 
 """
         
@@ -6647,238 +6669,5 @@ print(f"   4. 本番環境への適用検討")
 
 print("🎉" * 25)
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC # 📚 参考・応用セクション
-# MAGIC
-# MAGIC **このセクションでは応用的な使用方法を説明します**
-# MAGIC
-# MAGIC 📋 **参考情報:**
-# MAGIC - ファイルアップロード方法
-# MAGIC - カスタマイズポイント
-# MAGIC - エラー対処方法
-# MAGIC - 高度な使用例
-# MAGIC
-# MAGIC 💡 **用途:** ツールの活用を深めたい場合に参照してください
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 📚 追加の使用方法とカスタマイズ
-# MAGIC
-# MAGIC ### 🔧 ファイルアップロード方法
-# MAGIC
-# MAGIC #### 方法 1: Databricks UI でアップロード
-# MAGIC 1. **Data** > **Create Table** をクリック
-# MAGIC 2. **Upload File** を選択
-# MAGIC 3. SQLプロファイラーJSONファイルをドラッグ&ドロップ
-# MAGIC 4. アップロード完了後、パスをコピー
-# MAGIC 5. 上記の `JSON_FILE_PATH` に設定
-# MAGIC
-# MAGIC #### 方法 2: dbutils を使用
-# MAGIC ```python
-# MAGIC # ローカルファイルをFileStoreにアップロード
-# MAGIC dbutils.fs.cp("file:/local/path/profiler.json", "dbfs:/FileStore/profiler.json")
-# MAGIC
-# MAGIC # 外部ストレージからのコピー
-# MAGIC dbutils.fs.cp("s3a://bucket/profiler.json", "dbfs:/FileStore/profiler.json")
-# MAGIC ```
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 🔍 実行プラン情報を活用したBROADCAST分析機能の追加完了
-# MAGIC
-# MAGIC この更新により、JSONメトリクスから抽出した実行プラン情報を活用したBROADCAST分析が可能になりました：
-# MAGIC
-# MAGIC ### 🆕 新機能
-# MAGIC
-# MAGIC #### 1. `extract_execution_plan_info()` 関数
-# MAGIC - **機能**: JSONメトリクスから詳細な実行プラン情報を抽出
-# MAGIC - **検出内容**:
-# MAGIC   - BROADCASTノード（既存の適用状況）
-# MAGIC   - JOINノード（戦略：broadcast_hash_join, sort_merge_join, shuffle_hash_join等）
-# MAGIC   - スキャンノード（テーブル名、ファイル形式、プッシュダウンフィルタ）
-# MAGIC   - シャッフルノード（パーティション情報）
-# MAGIC   - 集約ノード（GROUP BY表現、集約関数）
-# MAGIC - **出力**: 構造化されたプラン情報辞書
-# MAGIC
-# MAGIC #### 2. `analyze_broadcast_feasibility()` 関数の拡張
-# MAGIC - **追加機能**:
-# MAGIC   - 既存のBROADCAST適用状況の自動検出
-# MAGIC   - プラン情報からテーブル名とファイル形式の正確な特定
-# MAGIC   - 既に最適化済みテーブルと新規推奨の区別
-# MAGIC   - 実行プラン分析結果の詳細記録
-# MAGIC - **判定強化**:
-# MAGIC   - `already_applied`: 既にBROADCAST適用済み
-# MAGIC   - `new_recommendation`: 新規BROADCAST推奨
-# MAGIC   - プラン情報と整合性のある分析
-# MAGIC
-# MAGIC #### 3. SQL最適化の改善
-# MAGIC - **プラン考慮**: 実行プラン情報を含むBROADCAST分析
-# MAGIC - **LLMプロンプト強化**: プラン情報をLLMに提供して正確な最適化
-# MAGIC - **30MB閾値の厳格適用**: 実際のSparkプラン情報との整合性確保
-
-# COMMAND ----------
-
-# 🔍 実行プラン情報を活用したBROADCAST分析のデモ関数
-def demonstrate_plan_based_broadcast_analysis():
-    """
-    実行プラン情報を活用したBROADCAST分析のデモ
-    """
-    print("\n🔍 実行プラン情報を活用したBROADCAST分析デモ")
-    print("=" * 60)
-    
-    # メトリクスデータが存在するかチェック
-    try:
-        # extracted_metrics と profiler_data を使用
-        extracted_metrics
-        profiler_data
-        
-        print("📊 実行プラン情報を抽出中...")
-        plan_info = extract_execution_plan_info(profiler_data)
-        
-        print(f"✅ プラン情報の抽出完了")
-        print(f"   - 総ノード数: {plan_info.get('plan_summary', {}).get('total_nodes', 0)}")
-        print(f"   - BROADCASTノード数: {plan_info.get('plan_summary', {}).get('broadcast_nodes_count', 0)}")
-        print(f"   - JOINノード数: {plan_info.get('plan_summary', {}).get('join_nodes_count', 0)}")
-        print(f"   - スキャンノード数: {plan_info.get('plan_summary', {}).get('scan_nodes_count', 0)}")
-        print(f"   - シャッフルノード数: {plan_info.get('plan_summary', {}).get('shuffle_nodes_count', 0)}")
-        
-        # JOIN戦略の分析
-        join_strategies = plan_info.get('plan_summary', {}).get('unique_join_strategies', [])
-        if join_strategies:
-            print(f"\n🔗 検出されたJOIN戦略:")
-            for strategy in join_strategies:
-                print(f"   - {strategy}")
-        
-        # 既存のBROADCAST適用状況
-        broadcast_nodes = plan_info.get('broadcast_nodes', [])
-        if broadcast_nodes:
-            print(f"\n📡 既存のBROADCAST適用状況:")
-            for i, node in enumerate(broadcast_nodes[:3]):  # 最大3個まで表示
-                print(f"   {i+1}. {node['node_name'][:60]}...")
-                metadata_count = len(node.get('metadata', []))
-                print(f"      メタデータ項目数: {metadata_count}")
-        else:
-            print(f"\n📡 現在BROADCASTは適用されていません")
-        
-        # テーブルスキャンの詳細
-        table_scan_details = plan_info.get('table_scan_details', {})
-        if table_scan_details:
-            print(f"\n📋 スキャンされるテーブル:")
-            for table_name, scan_detail in list(table_scan_details.items())[:5]:  # 最大5個まで表示
-                file_format = scan_detail.get('file_format', 'unknown')
-                pushed_filters = len(scan_detail.get('pushed_filters', []))
-                output_columns = len(scan_detail.get('output_columns', []))
-                print(f"   - {table_name}")
-                print(f"     ファイル形式: {file_format}, フィルタ: {pushed_filters}個, カラム: {output_columns}個")
-        
-        # オリジナルクエリの抽出（存在する場合）
-        try:
-            original_query_for_demo = extract_original_query_from_profiler_data(profiler_data)
-            if not original_query_for_demo:
-                original_query_for_demo = "SELECT * FROM table1 t1 JOIN table2 t2 ON t1.id = t2.id"
-        except:
-            original_query_for_demo = "SELECT * FROM table1 t1 JOIN table2 t2 ON t1.id = t2.id"
-        
-        print(f"\n🎯 プラン情報を考慮したBROADCAST分析を実行中...")
-        broadcast_analysis = analyze_broadcast_feasibility(
-            extracted_metrics, 
-            original_query_for_demo, 
-            plan_info
-        )
-        
-        # BROADCAST分析結果の表示
-        print(f"\n📊 BROADCAST分析結果:")
-        print(f"   - JOINクエリ: {'はい' if broadcast_analysis['is_join_query'] else 'いいえ'}")
-        print(f"   - 既に最適化済み: {'はい' if broadcast_analysis['already_optimized'] else 'いいえ'}")
-        print(f"   - Spark BROADCAST閾値: {broadcast_analysis['spark_threshold_mb']:.1f}MB")
-        print(f"   - 適用可能性: {broadcast_analysis['feasibility']}")
-        print(f"   - BROADCAST候補数: {len(broadcast_analysis['broadcast_candidates'])}")
-        
-        # 実行プラン分析結果
-        exec_plan_analysis = broadcast_analysis.get('execution_plan_analysis', {})
-        if exec_plan_analysis:
-            print(f"\n🔍 実行プラン分析詳細:")
-            print(f"   - BROADCASTが既に使用中: {'はい' if exec_plan_analysis['has_broadcast_joins'] else 'いいえ'}")
-            print(f"   - 使用されているJOIN戦略: {', '.join(exec_plan_analysis.get('unique_join_strategies', []))}")
-            print(f"   - プラン内のテーブル数: {len(exec_plan_analysis.get('tables_in_plan', []))}")
-        
-        # BROADCAST候補の詳細
-        if broadcast_analysis['broadcast_candidates']:
-            print(f"\n🔹 BROADCAST候補詳細:")
-            for candidate in broadcast_analysis['broadcast_candidates'][:3]:  # 最大3個まで表示
-                status = candidate.get('status', 'unknown')
-                status_icon = "✅" if status == "already_applied" else "🆕" if status == "new_recommendation" else "🔍"
-                print(f"   {status_icon} {candidate['table']}")
-                print(f"      非圧縮サイズ: {candidate['estimated_uncompressed_mb']:.1f}MB")
-                print(f"      圧縮サイズ: {candidate['estimated_compressed_mb']:.1f}MB")
-                print(f"      信頼度: {candidate['confidence']}")
-                print(f"      ステータス: {status}")
-                print(f"      根拠: {candidate['reasoning'][:80]}...")
-        
-        # 推奨事項
-        if broadcast_analysis['recommendations']:
-            print(f"\n💡 推奨事項:")
-            for rec in broadcast_analysis['recommendations'][:5]:  # 最大5個まで表示
-                print(f"   • {rec}")
-        
-        print(f"\n✅ プラン情報を活用したBROADCAST分析完了")
-        
-    except NameError as e:
-        print(f"⚠️ 必要な変数が定義されていません: {str(e)}")
-        print("   以下のセルを先に実行してください：")
-        print("   - Cell 11: JSON読み込み")
-        print("   - Cell 12: メトリクス抽出")
-    except Exception as e:
-        print(f"❌ プラン分析中にエラーが発生しました: {str(e)}")
-
-# デモ実行の呼び出し例（コメントアウトされているので、必要に応じて有効化）
-# demonstrate_plan_based_broadcast_analysis()
-
-print("✅ 関数定義完了: 実行プラン情報を活用したBROADCAST分析デモ")
-
-# COMMAND ----------
-
-print("🎉 実行プラン情報を活用したBROADCAST分析機能の追加完了")
-print("📊 SQLの最適化により精密で実用的なBROADCAST推奨が可能になりました")
-print("🔍 既存の最適化状況を考慮した、より実際的な分析を提供します")
-print("✅ 全ての機能が正常に統合されました")
-
-# 🎛️ カスタマイズポイント
-#
-# - **LLMプロバイダー**: `LLM_CONFIG` でプロバイダーとAPIキーを切り替え
-# - **メトリクス抽出**: `extract_performance_metrics` 関数内の重要キーワードリスト
-# - **分析プロンプト**: `analyze_bottlenecks_with_llm` 関数内の分析指示
-# - **表示形式**: emoji と出力フォーマットの調整
-#
-# 🔍 エラー対処方法
-#
-# 1. **LLMエンドポイントエラー**: 
-#    - Databricks: Model Servingエンドポイントの状態確認
-#    - OpenAI/Azure/Anthropic: APIキーとクォータ確認
-# 2. **ファイル読み込みエラー**: `dbutils.fs.ls("/FileStore/")` でファイル存在を確認
-# 3. **メモリエラー**: 大きなJSONファイルの場合はクラスタのメモリ設定を確認
-#
-# 💡 高度な使用例
-#
-# ```python
-# # 複数ファイルの一括分析
-# profiler_files = dbutils.fs.ls("/FileStore/profiler_logs/")
-# for file_info in profiler_files:
-#     if file_info.path.endswith('.json'):
-#         profiler_data = load_profiler_json(file_info.path)
-#         metrics = extract_performance_metrics(profiler_data)
-#         # 分析処理...
-# ```
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1:
-        profiler_data = load_profiler_json(sys.argv[1])
-        extracted_metrics = extract_performance_metrics(profiler_data)
-        print("Testing skew detection...")
-        # Test completed
 
