@@ -1071,15 +1071,18 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             shuffle_attributes = extract_shuffle_attributes(node)
             if shuffle_attributes:
                 suggested_partitions = max(num_tasks * 2, 200)
-                main_attribute = shuffle_attributes[0]
+                
+                # Shuffle属性で検出されたカラムを全て使用（完全一致）
+                repartition_columns = ", ".join(shuffle_attributes)
                 
                 repartition_hint = {
                     "node_id": node_analysis["node_id"],
                     "attributes": shuffle_attributes,
-                    "suggested_sql": f"REPARTITION({suggested_partitions}, {main_attribute})",
+                    "suggested_sql": f"REPARTITION({suggested_partitions}, {repartition_columns})",
                     "reason": f"スピル({node_analysis['spill_gb']:.2f}GB)改善",
                     "priority": "HIGH",
-                    "estimated_improvement": "大幅な性能改善が期待"
+                    "estimated_improvement": "大幅な性能改善が期待",
+
                 }
                 detailed_analysis["shuffle_optimization_hints"].append(repartition_hint)
                 node_analysis["repartition_hint"] = repartition_hint
@@ -3397,10 +3400,13 @@ if sorted_nodes:
                 # REPARTITIONヒントの提案（スピルが検出された場合のみ）
                 if spill_detected and spill_bytes > 0 and spill_display:
                     suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
-                    main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                     
-                    print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                    # Shuffle属性で検出されたカラムを全て使用（完全一致）
+                    repartition_columns = ", ".join(shuffle_attributes)
+                    
+                    print(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {repartition_columns})")
                     print(f"       理由: スピル({spill_display})を改善するため")
+                    print(f"       対象: Shuffle属性全{len(shuffle_attributes)}カラムを完全使用")
             else:
                 print(f"    🔄 Shuffle属性: 検出されませんでした")
 
@@ -5208,10 +5214,13 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                     # REPARTITIONヒントの提案（スピルが検出された場合のみ）
                     if spill_detected and spill_bytes > 0 and spill_display:
                         suggested_partitions = max(num_tasks * 2, 200)  # 最小200パーティション
-                        main_attribute = shuffle_attributes[0]  # 最初のattributeを使用
                         
-                        report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {main_attribute})")
+                        # Shuffle属性で検出されたカラムを全て使用（完全一致）
+                        repartition_columns = ", ".join(shuffle_attributes)
+                        
+                        report_lines.append(f"    💡 最適化提案: REPARTITION({suggested_partitions}, {repartition_columns})")
                         report_lines.append(f"       理由: スピル({spill_display})を改善するため")
+                        report_lines.append(f"       対象: Shuffle属性全{len(shuffle_attributes)}カラムを完全使用")
                 else:
                     report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
             
