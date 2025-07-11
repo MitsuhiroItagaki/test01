@@ -4901,13 +4901,48 @@ FROM table1 t1
 FROM table1 /*+ BROADCAST(table1) */
 JOIN /*+ BROADCAST(table2) */ table2 ON ...
 WHERE /*+ BROADCAST(table1) */ ...
+-- 🚨 特に重要: サブクエリ内部へのBROADCASTヒント配置は禁止
+LEFT JOIN (
+  SELECT /*+ BROADCAST(COUPON) */ distinct  -- ❌ 間違い: サブクエリ内部配置
+    qtz_receipt_id
+  FROM prd_delta.qtz_s3_etl.fm_coupon_pos COUPON
+) COUPON ON ...
 ```
 
 **重要な配置ルール:**
-1. **ヒントは必ずSELECT文の直後**に配置
+1. **ヒントは必ずメインクエリのSELECT文の直後**に配置
 2. **FROM句、JOIN句、WHERE句内には絶対に配置しない**
-3. **複数テーブルのBROADCAST時も全てSELECT直後に記述**
-4. **CTEを使用する場合は各CTEのSELECT直後に配置**
+3. **🚨 サブクエリ内部のSELECT文には絶対に配置しない**
+4. **複数テーブルのBROADCAST時は全てメインクエリのSELECT直後に統合**
+5. **CTEを使用する場合は最終的なメインクエリのSELECT直後に配置**
+
+**🚨 サブクエリ使用時の正しい配置（絶対遵守）:**
+```sql
+-- ✅ 正しい: メインクエリのSELECT直後に全てのBROADCASTヒントを統合
+SELECT /*+ REPARTITION(2316) BROADCAST(COUPON) */
+  retail_item_name, qtz_item_id, ...
+FROM prd_public.public.dmp_id_pos POS
+  LEFT JOIN (
+    SELECT distinct  -- ✅ 正しい: サブクエリ内部にはヒントなし
+      qtz_receipt_id
+    FROM prd_delta.qtz_s3_etl.fm_coupon_pos COUPON
+    WHERE dt between '20240418' and '20250417'
+  ) COUPON ON POS.qtz_receipt_id = COUPON.qtz_receipt_id
+WHERE dt between '20240418' and '20250417'
+```
+
+**❌ 絶対に禁止される間違った配置:**
+```sql
+-- ❌ 間違い: サブクエリ内部にBROADCASTヒント配置
+SELECT /*+ REPARTITION(2316) */
+  retail_item_name, qtz_item_id, ...
+FROM prd_public.public.dmp_id_pos POS
+  LEFT JOIN (
+    SELECT /*+ BROADCAST(COUPON) */ distinct  -- ❌ 禁止: サブクエリ内部配置
+      qtz_receipt_id
+    FROM prd_delta.qtz_s3_etl.fm_coupon_pos COUPON
+  ) COUPON ON ...
+```
 
 **複数テーブルBROADCAST例:**
 ```sql
@@ -4920,15 +4955,26 @@ FROM table1 t1
 **CTEでのBROADCAST例:**
 ```sql
 WITH cte1 AS (
-  SELECT /*+ BROADCAST(table1) */
+  SELECT  -- ✅ 正しい: CTE内部にはヒントなし
     column1, column2
   FROM table1
 )
-SELECT /*+ BROADCAST(table2) */
+SELECT /*+ BROADCAST(table2) */  -- ✅ 正しい: メインクエリのSELECT直後に配置
   c.column1, t.column2
 FROM cte1 c
   JOIN table2 t ON c.id = t.id
 ```
+
+**🚨 Spark/Databricks SQLヒント解析の重要な仕様:**
+- ヒントはSELECT文の直後でのみ解析される
+- サブクエリ内部のヒントは、外側のクエリから参照されるテーブルエイリアスが解析時に未定義のため無視される
+- 複数のテーブルに対するBROADCASTヒントは、メインクエリのSELECT直後に統合することで全て有効になる
+
+**🚨 ヒント構文の重要な注意点:**
+- 複数のヒント種類はスペース区切りで指定: `/*+ REPARTITION(100) BROADCAST(table1) */`
+- カンマ区切りは無効: `/*+ REPARTITION(100), BROADCAST(table1) */` ❌
+- 同一ヒント内の複数パラメータはカンマ区切り: `/*+ BROADCAST(table1, table2) */` ✅
+- 異なるヒント種類の組み合わせはスペース区切り: `/*+ REPARTITION(200) BROADCAST(small_table) COALESCE(1) */` ✅
 
 【出力形式】
 ## 🚀 処理速度重視の最適化されたSQL
