@@ -4852,6 +4852,97 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 - 推奨パーティション数: 検出されたタスク数の2倍以上、最低200
 - スピルが検出されていない場合: REPARTITIONヒントは適用しない
 
+**🚨 CREATE TABLE AS SELECT (CTAS) でのREPARTITION配置の重要な注意事項:**
+- CREATE TABLE AS SELECT文では、トップレベルのSELECT句にREPARTITIONヒントを配置すると、**最終的な出力書き込み段階のみに影響**し、JOIN や集計などの中間処理段階には影響しない
+- JOINの前にパーティショニングを制御するには、**REPARTITIONヒントをサブクエリ内部に配置する必要がある**
+- これにより、Sparkがデータフローの適切な時点でリパーティションを適用し、書き込み段階ではなく実行段階で最適化される
+
+**正しいCTAS REPARTITIONヒント配置例:**
+```sql
+-- ❌ 間違い: トップレベルのSELECT句（書き込み段階のみに影響）
+CREATE TABLE optimized_table AS
+SELECT /*+ REPARTITION(200, join_key) */
+  t1.column1, t2.column2
+FROM table1 t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+
+-- ✅ 正しい: サブクエリ内部に配置（JOIN処理段階で最適化）
+CREATE TABLE optimized_table AS
+SELECT 
+  t1.column1, t2.column2
+FROM (
+  SELECT /*+ REPARTITION(200, join_key) */
+    column1, join_key
+  FROM table1
+) t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+```
+
+**🚨 全般的なREPARTITIONヒント配置の重要な注意事項:**
+- **CTAS以外のクエリでも同様**：トップレベルのクエリにREPARTITIONヒントを配置すると、**最終的な出力段階のみに影響**し、JOIN や集計などの中間変換段階には影響しない
+- この動作は、結果をテーブルに書き込むかどうかに関係なく**すべてのSpark SQLクエリで一貫**している
+- JOINの入力段階でリパーティションを確実に実行するには、**REPARTITIONヒントをサブクエリ内部に配置する必要がある**
+- これにより、Sparkが適切なデータフローの時点でリパーティションを適用し、最終出力段階ではなく実行段階で最適化される
+
+**一般的なクエリでの正しいREPARTITIONヒント配置例:**
+```sql
+-- ❌ 間違い: トップレベルのSELECT句（最終出力段階のみに影響）
+SELECT /*+ REPARTITION(200, join_key) */
+  t1.column1, t2.column2
+FROM table1 t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+
+-- ✅ 正しい: サブクエリ内部に配置（JOIN処理段階で最適化）
+SELECT 
+  t1.column1, t2.column2
+FROM (
+  SELECT /*+ REPARTITION(200, join_key) */
+    column1, join_key
+  FROM table1
+) t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+
+-- ✅ 正しい: より複雑なケース（複数のサブクエリでのリパーティション）
+SELECT 
+  t1.column1, t2.column2, t3.column3
+FROM (
+  SELECT /*+ REPARTITION(200, join_key) */
+    column1, join_key
+  FROM table1
+) t1
+  JOIN (
+    SELECT /*+ REPARTITION(200, join_key) */
+      column2, join_key
+    FROM table2
+  ) t2 ON t1.join_key = t2.join_key
+  JOIN table3 t3 ON t2.join_key = t3.join_key
+```
+
+**🚨 全般的なREPARTITIONヒント配置の重要な注意事項:**
+- **CTAS以外のクエリでも同様**：トップレベルのクエリにREPARTITIONヒントを配置すると、**最終的な出力段階のみに影響**し、JOIN や集計などの中間変換段階には影響しない
+- この動作は、結果をテーブルに書き込むかどうかに関係なく**すべてのSpark SQLクエリで一貫**している
+- JOINの入力段階でリパーティションを確実に実行するには、**REPARTITIONヒントをサブクエリ内部に配置する必要がある**
+- これにより、Sparkが適切なデータフローの時点でリパーティションを適用し、最終出力段階ではなく実行段階で最適化される
+
+**一般的なクエリでの正しいREPARTITIONヒント配置例:**
+```sql
+-- ❌ 間違い: トップレベルのSELECT句（最終出力段階のみに影響）
+SELECT /*+ REPARTITION(200, join_key) */
+  t1.column1, t2.column2
+FROM table1 t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+
+-- ✅ 正しい: サブクエリ内部に配置（JOIN処理段階で最適化）
+SELECT 
+  t1.column1, t2.column2
+FROM (
+  SELECT /*+ REPARTITION(200, join_key) */
+    column1, join_key
+  FROM table1
+) t1
+  JOIN table2 t2 ON t1.join_key = t2.join_key
+```
+
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
 - すべてのカラム名、テーブル名、CTE名を完全に記述してください
