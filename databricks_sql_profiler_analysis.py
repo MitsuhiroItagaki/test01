@@ -2391,10 +2391,7 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 - Photon使用率: {metrics['bottleneck_indicators'].get('photon_ratio', 0)*100:.0f}%
 
 【求める分析】
-1. 主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
-2. 最も時間がかかっている処理TOP10
-3. 実施した改善案
-4. パフォーマンス改善見込み
+主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
 
 **重要**: パーティショニングやZORDERは提案せず、Liquid Clusteringのみを推奨してください。
 Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してください：
