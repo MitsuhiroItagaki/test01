@@ -5180,8 +5180,8 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
    - 中間結果のキャッシュ活用
 
 7. **🔧 実行プラン最適化**
-   - PHOTONエンジン最適化
-   - Liquid Clustering活用
+   - PHOTONエンジン最適化（目標はPhoton利用率90%以上)
+   - Liquid Clustering活用 (Where条件の書き換え含む検討を実施）
    - CTE活用による共通化
 
 【🔄 REPARTITIONヒント適用ルール】
