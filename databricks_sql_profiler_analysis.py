@@ -7204,7 +7204,7 @@ print("🎉" * 25)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📝 セル48: レポート推敲処理
+# MAGIC ## 📝 レポート推敲処理
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - セル47で出力されたレポートファイルの読み込み
@@ -7213,8 +7213,8 @@ print("🎉" * 25)
 
 # COMMAND ----------
 
-# 📝 セル48: レポート推敲処理
-print("\n📝 セル48: レポート推敲処理")
+# 📝 レポート推敲処理
+print("\n📝 レポート推敲処理")
 print("-" * 40)
 
 def find_latest_report_file() -> str:
@@ -7287,6 +7287,29 @@ def refine_report_content_with_llm(report_content: str) -> str:
         return report_content
 
 def save_refined_report(refined_content: str, original_filename: str) -> str:
+def finalize_report_files(original_filename: str, refined_filename: str) -> str:
+    """元のファイルを削除し、推敲版ファイルを元のファイル名にリネーム"""
+    import os
+    
+    try:
+        # 元のファイルを削除
+        if os.path.exists(original_filename):
+            os.remove(original_filename)
+            print(f"🗑️ 元のファイルを削除: {original_filename}")
+        
+        # 推敲版ファイルを元のファイル名にリネーム
+        if os.path.exists(refined_filename):
+            os.rename(refined_filename, original_filename)
+            print(f"📝 推敲版ファイルをリネーム: {refined_filename} → {original_filename}")
+            return original_filename
+        else:
+            print(f"❌ 推敲版ファイルが見つかりません: {refined_filename}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ ファイル操作中にエラー: {str(e)}")
+        return None
+
     """推敲されたレポートを保存"""
     from datetime import datetime
     
@@ -7342,7 +7365,26 @@ try:
                     file_size = os.path.getsize(refined_filename)
                     print(f"📁 推敲版ファイルサイズ: {file_size:,} bytes")
                 
-                print("✅ レポート推敲処理が完了しました")
+                # 元のファイルを削除し、推敲版ファイルを元のファイル名にリネーム
+                final_filename = finalize_report_files(latest_report, refined_filename)
+                
+                if final_filename:
+                    print(f"📄 最終レポートファイル: {final_filename}")
+                    
+                    # 最終ファイルサイズの確認
+                    if os.path.exists(final_filename):
+                        final_file_size = os.path.getsize(final_filename)
+                        print(f"📁 最終ファイルサイズ: {final_file_size:,} bytes")
+                
+                
+                # 推敲の結果を表示（最初の1000文字）
+                print("\n📋 推敲結果のプレビュー:")
+                print("-" * 50)
+                preview = refined_content[:1000]
+                print(preview)
+                if len(refined_content) > 1000:
+                    print(f"\n... (残り {len(refined_content) - 1000} 文字は {final_filename or latest_report} を参照)")
+                print("-" * 50)
                 
                 # 推敲の結果を表示（最初の1000文字）
                 print("\n📋 推敲結果のプレビュー:")
