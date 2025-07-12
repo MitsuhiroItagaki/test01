@@ -953,6 +953,60 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     # 重複を削除
     return list(set(shuffle_attributes))
 
+def extract_cluster_attributes(node: Dict[str, Any]) -> list:
+    """
+    スキャンノードからクラスタリングキー(SCAN_CLUSTERS)を抽出
+    
+    Args:
+        node: ノード情報
+        
+    Returns:
+        list: 検出されたクラスタリングキー
+    """
+    cluster_attributes = []
+    
+    # metadataからSCAN_CLUSTERSを検索
+    metadata = node.get('metadata', [])
+    if isinstance(metadata, list):
+        for item in metadata:
+            if isinstance(item, dict):
+                item_key = item.get('key', '')
+                item_label = item.get('label', '')
+                item_values = item.get('values', [])
+                
+                # keyとlabelの両方をチェック
+                if (item_key == 'SCAN_CLUSTERS' or 
+                    item_label == 'Cluster attributes'):
+                    if isinstance(item_values, list):
+                        cluster_attributes.extend(item_values)
+    
+    # raw_metricsからも検索（labelもチェック）
+    raw_metrics = node.get('metrics', [])
+    if isinstance(raw_metrics, list):
+        for metric in raw_metrics:
+            if isinstance(metric, dict):
+                metric_key = metric.get('key', '')
+                metric_label = metric.get('label', '')
+                metric_values = metric.get('values', [])
+                
+                if (metric_key == 'SCAN_CLUSTERS' or 
+                    metric_label == 'Cluster attributes'):
+                    if isinstance(metric_values, list):
+                        cluster_attributes.extend(metric_values)
+    
+    # detailed_metricsからも検索
+    detailed_metrics = node.get('detailed_metrics', {})
+    if isinstance(detailed_metrics, dict):
+        for key, info in detailed_metrics.items():
+            if (key == 'SCAN_CLUSTERS' or 
+                (isinstance(info, dict) and info.get('label') == 'Cluster attributes')):
+                values = info.get('values', []) if isinstance(info, dict) else []
+                if isinstance(values, list):
+                    cluster_attributes.extend(values)
+    
+    # 重複を削除
+    return list(set(cluster_attributes))
+
 def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
     """
     ノードからSize of files prunedとSize of files readメトリクスを抽出してフィルタ率を計算
@@ -1206,6 +1260,13 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             "files_pruned_bytes": filter_result["files_pruned_bytes"],
             "files_read_bytes": filter_result["files_read_bytes"],
             "has_filter_metrics": filter_result["has_filter_metrics"]
+        })
+        
+        # クラスタリングキー情報の追加
+        cluster_attributes = extract_cluster_attributes(node)
+        node_analysis.update({
+            "cluster_attributes": cluster_attributes,
+            "has_clustering": len(cluster_attributes) > 0
         })
         
         detailed_analysis["top_bottleneck_nodes"].append(node_analysis)
@@ -5447,6 +5508,14 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                         report_lines.append(f"       対象: Shuffle属性全{len(shuffle_attributes)}カラムを完全使用")
                 else:
                     report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
+            
+            # スキャンノードの場合はクラスタリングキーを表示
+            if "scan" in raw_node_name.lower():
+                cluster_attributes = extract_cluster_attributes(node)
+                if cluster_attributes:
+                    report_lines.append(f"    📊 クラスタリングキー: {', '.join(cluster_attributes)}")
+                else:
+                    report_lines.append(f"    📊 クラスタリングキー: 検出されませんでした")
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
