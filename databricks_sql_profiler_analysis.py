@@ -2610,19 +2610,6 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     
     return "\n".join(report_lines)
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 🔌 個別LLMプロバイダー接続関数
-# MAGIC
-# MAGIC このセルでは以下の機能を定義します：
-# MAGIC - Databricks Model Serving エンドポイント接続
-# MAGIC - OpenAI API 接続
-# MAGIC - Azure OpenAI API 接続
-# MAGIC - Anthropic API 接続
-# MAGIC - 各プロバイダーのエラーハンドリング
-
-# COMMAND ----------
 
 def _call_databricks_llm(prompt: str) -> str:
     """Databricks Model Serving APIを呼び出す"""
