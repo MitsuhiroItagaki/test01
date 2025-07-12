@@ -2392,11 +2392,9 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
 
 【求める分析】
 1. 主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
-2. Liquid Clustering実装の優先順位と手順（パーティショニング・ZORDER以外をDatabricksSQLでサポートされる正しいSQL構文で提示）
-3. 各推奨カラムの選定理由と効果
-4. Photonエンジンの最適化案
-5. 並列度・シャッフル最適化案
-6. パフォーマンス改善見込み
+2. 最も時間がかかっている処理TOP10
+3. 実施した改善案
+4. パフォーマンス改善見込み
 
 **重要**: パーティショニングやZORDERは提案せず、Liquid Clusteringのみを推奨してください。
 Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してください：
