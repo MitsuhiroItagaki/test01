@@ -963,43 +963,87 @@ def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict: フィルタ率計算結果
     """
+    import os
+    debug_mode = os.environ.get('DEBUG_FILTER_ANALYSIS', 'false').lower() == 'true'
+    
     filter_rate = None
     files_pruned_bytes = 0
     files_read_bytes = 0
+    debug_info = []
+    
+    # 検索対象のメトリクス名（複数パターン対応）
+    pruned_metrics = [
+        "Size of files pruned",
+        "Pruned files size", 
+        "Files pruned size",
+        "Num pruned files size"
+    ]
+    
+    read_metrics = [
+        "Size of files read",
+        "Files read size",
+        "Read files size",
+        "Num files read size"
+    ]
     
     # detailed_metricsから検索
     detailed_metrics = node.get('detailed_metrics', {})
+    if debug_mode:
+        debug_info.append(f"detailed_metrics keys: {list(detailed_metrics.keys())[:5]}")
+    
     for metric_key, metric_info in detailed_metrics.items():
         metric_label = metric_info.get('label', '')
         metric_value = metric_info.get('value', 0)
         
-        if metric_label == "Size of files pruned" and metric_value > 0:
+        # Pruned関連
+        if any(target in metric_label for target in pruned_metrics) and metric_value > 0:
             files_pruned_bytes = metric_value
-        elif metric_label == "Size of files read" and metric_value > 0:
+            if debug_mode:
+                debug_info.append(f"Found pruned metric: {metric_label} = {metric_value}")
+        
+        # Read関連
+        if any(target in metric_label for target in read_metrics) and metric_value > 0:
             files_read_bytes = metric_value
+            if debug_mode:
+                debug_info.append(f"Found read metric: {metric_label} = {metric_value}")
     
     # raw_metricsから検索（フォールバック）
     if files_pruned_bytes == 0 or files_read_bytes == 0:
         raw_metrics = node.get('metrics', [])
+        if debug_mode:
+            debug_info.append(f"Searching in {len(raw_metrics)} raw metrics")
+        
         for metric in raw_metrics:
             metric_label = metric.get('label', '')
             metric_value = metric.get('value', 0)
             
-            if metric_label == "Size of files pruned" and metric_value > 0:
+            # Pruned関連
+            if files_pruned_bytes == 0 and any(target in metric_label for target in pruned_metrics) and metric_value > 0:
                 files_pruned_bytes = metric_value
-            elif metric_label == "Size of files read" and metric_value > 0:
+                if debug_mode:
+                    debug_info.append(f"Found pruned metric in raw: {metric_label} = {metric_value}")
+            
+            # Read関連
+            if files_read_bytes == 0 and any(target in metric_label for target in read_metrics) and metric_value > 0:
                 files_read_bytes = metric_value
+                if debug_mode:
+                    debug_info.append(f"Found read metric in raw: {metric_label} = {metric_value}")
     
-    # フィルタ率計算（両方の値が存在する場合のみ）
-    if files_read_bytes > 0 and files_pruned_bytes > 0:
+    # フィルタ率計算（files_readが存在する場合は常に計算）
+    if files_read_bytes > 0:
         filter_rate = files_pruned_bytes / files_read_bytes
     
-    return {
+    result = {
         "filter_rate": filter_rate,
         "files_pruned_bytes": files_pruned_bytes,
         "files_read_bytes": files_read_bytes,
-        "has_filter_metrics": files_read_bytes > 0 and files_pruned_bytes > 0
+        "has_filter_metrics": files_read_bytes > 0
     }
+    
+    if debug_mode:
+        result["debug_info"] = debug_info
+    
+    return result
 
 def format_filter_rate_display(filter_result: Dict[str, Any]) -> str:
     """
@@ -1011,7 +1055,7 @@ def format_filter_rate_display(filter_result: Dict[str, Any]) -> str:
     Returns:
         str: 表示用文字列
     """
-    if not filter_result["has_filter_metrics"]:
+    if not filter_result["has_filter_metrics"] or filter_result["filter_rate"] is None:
         return None
     
     filter_rate = filter_result["filter_rate"]
@@ -3426,11 +3470,28 @@ if sorted_nodes:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
         
-        # フィルタ率表示
+# フィルタ率表示（デバッグ機能付き）
         filter_result = calculate_filter_rate(node)
         filter_display = format_filter_rate_display(filter_result)
         if filter_display:
             print(f"    {filter_display}")
+        else:
+            # デバッグ情報：なぜフィルタ率が表示されないかを確認
+            if filter_result["has_filter_metrics"]:
+                print(f"    📂 フィルタ率: {filter_result['filter_rate']:.1%} (読み込み: {filter_result['files_read_bytes']/(1024*1024*1024):.2f}GB, プルーン: {filter_result['files_pruned_bytes']/(1024*1024*1024):.2f}GB)")
+            else:
+                # メトリクス検索のデバッグ
+                debug_info = []
+                detailed_metrics = node.get('detailed_metrics', {})
+                for metric_key, metric_info in detailed_metrics.items():
+                    metric_label = metric_info.get('label', '')
+                    if 'file' in metric_label.lower() and ('read' in metric_label.lower() or 'prun' in metric_label.lower()):
+                        debug_info.append(f"{metric_label}: {metric_info.get('value', 0)}")
+                
+                if debug_info:
+                    print(f"    📂 フィルタ関連メトリクス検出: {', '.join(debug_info[:2])}")
+                # else:
+                #     print(f"    📂 フィルタ率: メトリクス未検出")
         
         # スピル詳細情報（シンプル表示）
         spill_display = ""
@@ -5337,11 +5398,26 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 rows_per_sec = (rows_num * 1000) / duration_ms
                 report_lines.append(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
             
-            # フィルタ率表示
+            # フィルタ率表示（デバッグ機能付き）
             filter_result = calculate_filter_rate(node)
             filter_display = format_filter_rate_display(filter_result)
             if filter_display:
                 report_lines.append(f"    {filter_display}")
+            else:
+                # デバッグ情報：なぜフィルタ率が表示されないかを確認
+                if filter_result["has_filter_metrics"]:
+                    report_lines.append(f"    📂 フィルタ率: {filter_result['filter_rate']:.1%} (読み込み: {filter_result['files_read_bytes']/(1024*1024*1024):.2f}GB, プルーン: {filter_result['files_pruned_bytes']/(1024*1024*1024):.2f}GB)")
+                else:
+                    # メトリクス検索のデバッグ
+                    debug_info = []
+                    detailed_metrics = node.get('detailed_metrics', {})
+                    for metric_key, metric_info in detailed_metrics.items():
+                        metric_label = metric_info.get('label', '')
+                        if 'file' in metric_label.lower() and ('read' in metric_label.lower() or 'prun' in metric_label.lower()):
+                            debug_info.append(f"{metric_label}: {metric_info.get('value', 0)}")
+                    
+                    if debug_info:
+                        report_lines.append(f"    📂 フィルタ関連メトリクス検出: {', '.join(debug_info[:2])}")
             
             # スピル詳細情報（シンプル表示）
             spill_display = ""
