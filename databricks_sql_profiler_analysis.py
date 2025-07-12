@@ -1148,20 +1148,8 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
                          key=lambda x: x.get('key_metrics', {}).get('durationMs', 0), 
                          reverse=True)
     
-    # スキャンノードを優先表示するため、スキャンノードとその他のノードを分離
-    scan_nodes = [node for node in sorted_nodes if 'scan' in node.get('name', '').lower()]
-    non_scan_nodes = [node for node in sorted_nodes if 'scan' not in node.get('name', '').lower()]
-    
-    # スキャンノードを実行時間順でソート
-    scan_nodes.sort(key=lambda x: x.get('key_metrics', {}).get('durationMs', 0), reverse=True)
-    # その他のノードを実行時間順でソート
-    non_scan_nodes.sort(key=lambda x: x.get('key_metrics', {}).get('durationMs', 0), reverse=True)
-    
-    # スキャンノードを優先して結合（最大5個のスキャンノード + 残りの枠でその他のノード）
-    prioritized_nodes = scan_nodes[:5] + non_scan_nodes[:max(0, 10 - len(scan_nodes[:5]))]
-    
-    # 最終的に10個になるように調整
-    final_sorted_nodes = prioritized_nodes[:10]
+    # 最大10個のノードを処理
+    final_sorted_nodes = sorted_nodes[:10]
     
     total_duration = sum(node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes)
     
@@ -3309,20 +3297,8 @@ sorted_nodes = sorted(extracted_metrics['node_metrics'],
                      key=lambda x: x['key_metrics'].get('durationMs', 0), 
                      reverse=True)
 
-# スキャンノードを優先表示するため、スキャンノードとその他のノードを分離
-scan_nodes = [node for node in sorted_nodes if 'scan' in node['name'].lower()]
-non_scan_nodes = [node for node in sorted_nodes if 'scan' not in node['name'].lower()]
-
-# スキャンノードを実行時間順でソート
-scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
-# その他のノードを実行時間順でソート
-non_scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
-
-# スキャンノードを優先して結合（最大5個のスキャンノード + 残りの枠でその他のノード）
-prioritized_nodes = scan_nodes[:5] + non_scan_nodes[:max(0, 10 - len(scan_nodes[:5]))]
-
-# 最終的に10個になるように調整
-final_sorted_nodes = prioritized_nodes[:10]
+# 最大10個のノードを処理
+final_sorted_nodes = sorted_nodes[:10]
 
 if final_sorted_nodes:
     # 全体の実行時間を計算
@@ -3330,8 +3306,7 @@ if final_sorted_nodes:
     
     print(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
     print(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
-    if scan_nodes:
-        print(f"🔍 スキャンノード優先表示: {len(scan_nodes[:5])}個のスキャンノードを優先表示")
+
     print()
     
     for i, node in enumerate(final_sorted_nodes):
@@ -3613,7 +3588,15 @@ if final_sorted_nodes:
                     print(f"       理由: スピル({spill_display})を改善するため")
                     print(f"       対象: Shuffle属性全{len(shuffle_attributes)}カラムを完全使用")
             else:
-                print(f"    🔄 Shuffle属性: 検出されませんでした")
+                print(f"    🔄 Shuffle属性: 設定なし")
+        
+        # スキャンノードの場合はクラスタリングキーを表示
+        if "scan" in short_name.lower():
+            cluster_attributes = extract_cluster_attributes(node)
+            if cluster_attributes:
+                print(f"    📊 クラスタリングキー: {', '.join(cluster_attributes)}")
+            else:
+                print(f"    📊 クラスタリングキー: 設定なし")
 
         
         # スキュー詳細情報（簡略表示）
@@ -5022,7 +5005,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 ```
 
 【📊 セル33詳細ボトルネック分析結果】
-{chr(10).join(performance_critical_issues) if performance_critical_issues else "特別な重要課題は検出されませんでした"}
+{chr(10).join(performance_critical_issues) if performance_critical_issues else "特別な重要課題は設定なし"}
 
 【🔄 REPARTITIONヒント（スピル検出時のみ）】
 {chr(10).join(repartition_hints) if repartition_hints else "スピルが検出されていないため、REPARTITIONヒントは適用対象外です"}
@@ -5031,7 +5014,7 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 {chr(10).join(speed_optimization_recommendations) if speed_optimization_recommendations else "特別な推奨事項はありません"}
 
 【基本的なボトルネック情報】
-{chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは検出されませんでした"}
+{chr(10).join(optimization_context) if optimization_context else "主要なボトルネックは設定なし"}
 
 【BROADCAST分析結果】
 {chr(10).join(broadcast_summary)}
@@ -5368,20 +5351,8 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                          key=lambda x: x['key_metrics'].get('durationMs', 0), 
                          reverse=True)
     
-    # スキャンノードを優先表示するため、スキャンノードとその他のノードを分離
-    scan_nodes = [node for node in sorted_nodes if 'scan' in node['name'].lower()]
-    non_scan_nodes = [node for node in sorted_nodes if 'scan' not in node['name'].lower()]
-    
-    # スキャンノードを実行時間順でソート
-    scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
-    # その他のノードを実行時間順でソート
-    non_scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
-    
-    # スキャンノードを優先して結合（最大5個のスキャンノード + 残りの枠でその他のノード）
-    prioritized_nodes = scan_nodes[:5] + non_scan_nodes[:max(0, 10 - len(scan_nodes[:5]))]
-    
-    # 最終的に10個になるように調整
-    final_sorted_nodes = prioritized_nodes[:10]
+    # 最大10個のノードを処理
+    final_sorted_nodes = sorted_nodes[:10]
 
     if final_sorted_nodes:
         # 全体の実行時間を計算（元のsorted_nodesから）
@@ -5389,8 +5360,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
         
         report_lines.append(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
         report_lines.append(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
-        if scan_nodes:
-            report_lines.append(f"🔍 スキャンノード優先表示: {len(scan_nodes[:5])}個のスキャンノードを優先表示")
+
         report_lines.append("")
         
         for i, node in enumerate(final_sorted_nodes):
@@ -5554,7 +5524,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                         report_lines.append(f"       理由: スピル({spill_display})を改善するため")
                         report_lines.append(f"       対象: Shuffle属性全{len(shuffle_attributes)}カラムを完全使用")
                 else:
-                    report_lines.append(f"    🔄 Shuffle属性: 検出されませんでした")
+                    report_lines.append(f"    🔄 Shuffle属性: 設定なし")
             
             # スキャンノードの場合はクラスタリングキーを表示
             if "scan" in raw_node_name.lower():
@@ -5562,7 +5532,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 if cluster_attributes:
                     report_lines.append(f"    📊 クラスタリングキー: {', '.join(cluster_attributes)}")
                 else:
-                    report_lines.append(f"    📊 クラスタリングキー: 検出されませんでした")
+                    report_lines.append(f"    📊 クラスタリングキー: 設定なし")
             
             # スキュー詳細情報
             if skew_detected and skewed_partitions > 0:
@@ -6139,7 +6109,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
             for i, bottleneck in enumerate(bottlenecks, 1):
                 report += f"{i}. {bottleneck}\n"
         else:
-            report += "主要なボトルネックは検出されませんでした。\n"
+            report += "主要なボトルネックは設定なし。\n"
         
         report += "\n"
         
