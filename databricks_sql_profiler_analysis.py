@@ -6579,23 +6579,20 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write("-- 以下は最適化分析の全結果です:\n\n")
             f.write(f"/*\n{optimized_result_main_content}\n*/")
     
-    # 分析レポートファイルの保存（LLMで推敲された読みやすいレポート）
+    # 分析レポートファイルの保存（詳細な技術情報を保持したオリジナルレポート）
     report_filename = f"output_optimization_report_{timestamp}.md"
     
-    print("🤖 LLMによるレポート推敲を実行中...")
+    print("📄 詳細な技術レポートを生成中...")
     
-    # 初期レポートの生成
-    initial_report = generate_comprehensive_optimization_report(
+    # 詳細レポートの生成（LLM修正を無効化）
+    detailed_report = generate_comprehensive_optimization_report(
         query_id, optimized_result_for_file, metrics, analysis_result
     )
     
-    # LLMでレポートを推敲
-    refined_report = refine_report_with_llm(initial_report, query_id)
-    
     with open(report_filename, 'w', encoding='utf-8') as f:
-        f.write(refined_report)
+        f.write(detailed_report)
     
-    print("✅ LLMによるレポート推敲完了")
+    print("✅ 詳細な技術レポート生成完了")
     
     # 出力ファイルの結果（独立したTOP10ファイルは削除し、最適化レポートに統合）
     result = {
