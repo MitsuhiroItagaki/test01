@@ -6449,12 +6449,27 @@ def refine_report_with_llm(raw_report: str, query_id: str) -> str:
     refinement_prompt = f"""
 あなたは技術文書の編集者として、Databricks SQLパフォーマンス分析レポートを読みやすく推敲してください。
 
+【重要な保持事項】
+- **TOP10表示の維持**: "TOP10"を"TOP5"に変更しないでください
+- **技術的アイコンの保持**: 🔍、📊、⚡、💡、🎯、📈、🔄、📋等のアイコンを削除しないでください
+- **構造化されたフォーマットの維持**: 表形式、箇条書き、番号付きリストをそのまま保持
+- **Source Scanノードの詳細保持**: クラスタリングキー、フィルタレート等の技術情報を削除しないでください
+- **メトリクス値の保持**: 実行時間、データ量、パフォーマンス指標を削除しないでください
+
 【推敲の方針】
-1. **重複内容の統合**: 同じ情報が複数箇所に記載されている場合は統合し、一箇所にまとめる
-2. **構成の最適化**: 情報の優先度に基づいて論理的な順序で再配置
-3. **読みやすさの向上**: 技術的内容を保持しつつ、読みやすい文章に改善
-4. **具体性の追加**: 可能な場合は具体的な数値や改善提案を強調
-5. **アクションアイテムの明確化**: 実装すべき対策を明確に提示
+1. **構文と表現の改善**: 文法エラーや不自然な表現を修正
+2. **論理的な流れの調整**: 情報の順序を最適化（削除はせず、並び替えのみ）
+3. **説明の明確化**: 技術的内容を保持しつつ、理解しやすい説明に調整
+4. **重複の軽減**: 同じ情報が複数回出現する場合のみ統合（技術情報は保持）
+5. **一貫性の確保**: 用語や表記の統一
+
+【禁止事項】
+- TOP10→TOP5への変更
+- 技術的アイコンの削除
+- メトリクス値やパフォーマンス指標の削除
+- クラスタリングキー、フィルタレート等の技術詳細の削除
+- 表形式やリスト形式の構造的フォーマットの変更
+- 具体的な数値やファイル名の削除
 
 【現在のレポート】
 ```
@@ -6462,14 +6477,13 @@ def refine_report_with_llm(raw_report: str, query_id: str) -> str:
 ```
 
 【出力要件】
-- Markdownフォーマットを維持
+- 元のMarkdownフォーマットと構造を完全に維持
+- 技術的アイコンとメトリクスをすべて保持
+- TOP10表示を維持
 - 技術的な正確性を保持
-- エグゼクティブサマリーを冒頭に追加
-- 重複を削除し、情報を論理的に整理
-- 実装のためのアクションプランを追加
-- 読みやすい構成で統合された最終レポートを出力
+- 読みやすさを向上させつつ、すべての技術情報を保持
 
-推敲後の読みやすいレポートを出力してください。
+上記の保持事項と禁止事項を厳守して、推敲後のレポートを出力してください。
 """
     
     try:
@@ -6579,20 +6593,23 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
             f.write("-- 以下は最適化分析の全結果です:\n\n")
             f.write(f"/*\n{optimized_result_main_content}\n*/")
     
-    # 分析レポートファイルの保存（詳細な技術情報を保持したオリジナルレポート）
+    # 分析レポートファイルの保存（LLMで推敲された読みやすいレポート）
     report_filename = f"output_optimization_report_{timestamp}.md"
     
-    print("📄 詳細な技術レポートを生成中...")
+    print("🤖 LLMによるレポート推敲を実行中...")
     
-    # 詳細レポートの生成（LLM修正を無効化）
-    detailed_report = generate_comprehensive_optimization_report(
+    # 初期レポートの生成
+    initial_report = generate_comprehensive_optimization_report(
         query_id, optimized_result_for_file, metrics, analysis_result
     )
     
-    with open(report_filename, 'w', encoding='utf-8') as f:
-        f.write(detailed_report)
+    # LLMでレポートを推敲（詳細な技術情報を保持）
+    refined_report = refine_report_with_llm(initial_report, query_id)
     
-    print("✅ 詳細な技術レポート生成完了")
+    with open(report_filename, 'w', encoding='utf-8') as f:
+        f.write(refined_report)
+    
+    print("✅ LLMによるレポート推敲完了")
     
     # 出力ファイルの結果（独立したTOP10ファイルは削除し、最適化レポートに統合）
     result = {
