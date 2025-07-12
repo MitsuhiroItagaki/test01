@@ -7200,3 +7200,166 @@ print(f"   3. パフォーマンス測定")
 print(f"   4. 本番環境への適用検討")
 
 print("🎉" * 25)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 📝 セル48: レポート推敲処理
+# MAGIC
+# MAGIC このセルでは以下の処理を実行します：
+# MAGIC - セル47で出力されたレポートファイルの読み込み
+# MAGIC - LLMによるレポートの推敲（読みやすく、簡潔に）
+# MAGIC - 推敲されたレポートファイルの生成
+
+# COMMAND ----------
+
+# 📝 セル48: レポート推敲処理
+print("\n📝 セル48: レポート推敲処理")
+print("-" * 40)
+
+def find_latest_report_file() -> str:
+    """最新のレポートファイルを見つける"""
+    import os
+    import glob
+    
+    # 現在のディレクトリでレポートファイルを検索
+    pattern = "output_optimization_report_*.md"
+    report_files = glob.glob(pattern)
+    
+    if not report_files:
+        return None
+    
+    # 最新のファイルを取得（タイムスタンプ順）
+    latest_file = max(report_files, key=os.path.getctime)
+    return latest_file
+
+def refine_report_content_with_llm(report_content: str) -> str:
+    """LLMを使ってレポートを推敲する"""
+    
+    # LLMプロバイダーの設定確認
+    if not LLM_CONFIG or not LLM_CONFIG.get('provider'):
+        print("❌ LLMプロバイダーが設定されていません")
+        return report_content
+    
+    refinement_prompt = f"""あなたは技術文書の編集者です。以下のDatabricks SQLパフォーマンス分析レポートを、読みやすく簡潔に推敲してください。
+
+【推敲の要件】
+1. 全体的な構成を整理し、情報を論理的に配置する
+2. 冗長な表現を削除し、簡潔で分かりやすい表現に修正する
+3. 重要な情報が埋もれないよう、適切な見出しレベルで構造化する
+4. 専門用語は残しつつ、分かりやすい説明を追加する
+5. 数値データやメトリクスは保持する
+6. 実用的な推奨事項を明確に提示する
+
+【現在のレポート内容】
+{report_content}
+
+【出力要件】
+- 推敲されたレポートをmarkdown形式で出力
+- 技術情報は維持しつつ、可読性を向上させる
+- 重要なポイントを強調し、アクションプランを明確にする
+"""
+    
+    try:
+        # 設定されたLLMプロバイダーに基づいて推敲を実行
+        provider = LLM_CONFIG.get('provider', 'databricks')
+        
+        if provider == 'databricks':
+            refined_content = _call_databricks_llm(refinement_prompt)
+        elif provider == 'openai':
+            refined_content = _call_openai_llm(refinement_prompt)
+        elif provider == 'azure_openai':
+            refined_content = _call_azure_openai_llm(refinement_prompt)
+        elif provider == 'anthropic':
+            refined_content = _call_anthropic_llm(refinement_prompt)
+        else:
+            print(f"❌ 未対応のLLMプロバイダー: {provider}")
+            return report_content
+        
+        # thinking_enabled対応: 結果がリストの場合の処理
+        if isinstance(refined_content, list):
+            refined_content = format_thinking_response(refined_content)
+        
+        return refined_content
+        
+    except Exception as e:
+        print(f"❌ LLMによるレポート推敲中にエラーが発生: {str(e)}")
+        return report_content
+
+def save_refined_report(refined_content: str, original_filename: str) -> str:
+    """推敲されたレポートを保存"""
+    from datetime import datetime
+    
+    # 推敲版のファイル名を生成
+    base_name = original_filename.replace('.md', '')
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    refined_filename = f"{base_name}_refined_{timestamp}.md"
+    
+    try:
+        with open(refined_filename, 'w', encoding='utf-8') as f:
+            f.write(refined_content)
+        
+        print(f"✅ 推敲されたレポートを保存: {refined_filename}")
+        return refined_filename
+        
+    except Exception as e:
+        print(f"❌ 推敲レポートの保存中にエラー: {str(e)}")
+        return None
+
+# メイン処理
+try:
+    # 最新のレポートファイルを検索
+    latest_report = find_latest_report_file()
+    
+    if not latest_report:
+        print("❌ レポートファイルが見つかりません")
+        print("⚠️ セル47 (最適化結果の保存) を先に実行してください")
+    else:
+        print(f"📄 対象レポートファイル: {latest_report}")
+        
+        # レポートファイルの内容を読み込み
+        with open(latest_report, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        print(f"📊 元レポートサイズ: {len(original_content):,} 文字")
+        
+        # LLMによる推敲を実行
+        print("🤖 LLMによる推敲を実行中...")
+        refined_content = refine_report_content_with_llm(original_content)
+        
+        if refined_content != original_content:
+            print(f"📊 推敲後サイズ: {len(refined_content):,} 文字")
+            
+            # 推敲されたレポートを保存
+            refined_filename = save_refined_report(refined_content, latest_report)
+            
+            if refined_filename:
+                print(f"📄 推敲版レポート: {refined_filename}")
+                
+                # ファイルサイズの確認
+                import os
+                if os.path.exists(refined_filename):
+                    file_size = os.path.getsize(refined_filename)
+                    print(f"📁 推敲版ファイルサイズ: {file_size:,} bytes")
+                
+                print("✅ レポート推敲処理が完了しました")
+                
+                # 推敲の結果を表示（最初の1000文字）
+                print("\n📋 推敲結果のプレビュー:")
+                print("-" * 50)
+                preview = refined_content[:1000]
+                print(preview)
+                if len(refined_content) > 1000:
+                    print(f"\n... (残り {len(refined_content) - 1000} 文字は {refined_filename} を参照)")
+                print("-" * 50)
+            else:
+                print("❌ 推敲レポートの保存に失敗しました")
+        else:
+            print("⚠️ 推敲による変更はありませんでした")
+            
+except Exception as e:
+    print(f"❌ レポート推敲処理中にエラーが発生: {str(e)}")
+    import traceback
+    traceback.print_exc()
+
+print()
