@@ -3309,12 +3309,29 @@ sorted_nodes = sorted(extracted_metrics['node_metrics'],
                      key=lambda x: x['key_metrics'].get('durationMs', 0), 
                      reverse=True)
 
-if sorted_nodes:
+# スキャンノードを優先表示するため、スキャンノードとその他のノードを分離
+scan_nodes = [node for node in sorted_nodes if 'scan' in node['name'].lower()]
+non_scan_nodes = [node for node in sorted_nodes if 'scan' not in node['name'].lower()]
+
+# スキャンノードを実行時間順でソート
+scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
+# その他のノードを実行時間順でソート
+non_scan_nodes.sort(key=lambda x: x['key_metrics'].get('durationMs', 0), reverse=True)
+
+# スキャンノードを優先して結合（最大5個のスキャンノード + 残りの枠でその他のノード）
+prioritized_nodes = scan_nodes[:5] + non_scan_nodes[:max(0, 10 - len(scan_nodes[:5]))]
+
+# 最終的に10個になるように調整
+final_sorted_nodes = prioritized_nodes[:10]
+
+if final_sorted_nodes:
     # 全体の実行時間を計算
     total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
     
     print(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
-    print(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes[:10]):,} ms")
+    print(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
+    if scan_nodes:
+        print(f"🔍 スキャンノード優先表示: {len(scan_nodes[:5])}個のスキャンノードを優先表示")
     print()
     
     for i, node in enumerate(final_sorted_nodes):
