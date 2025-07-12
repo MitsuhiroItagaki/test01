@@ -5334,36 +5334,49 @@ FROM cte1 c
 
 
 
-def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, Any]) -> str:
+def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, Any], limit_nodes: int = 10) -> str:
     """
-    最も時間がかかっている処理TOP10のレポートを文字列として生成
+    最も時間がかかっている処理のレポートを文字列として生成
+    
+    Args:
+        extracted_metrics: 抽出されたメトリクス
+        limit_nodes: 表示するノード数（デフォルト10、ファイル出力時は5）
+    
+    Returns:
+        str: 処理レポート
     """
     report_lines = []
-    report_lines.append("## 🐌 最も時間がかかっている処理TOP10")
+    
+    # タイトルをノード数に応じて調整
+    title = f"最も時間がかかっている処理TOP{limit_nodes}" if limit_nodes <= 10 else "最も時間がかかっている処理TOP10"
+    report_lines.append(f"## 🐌 {title}")
     report_lines.append("=" * 80)
     report_lines.append("📊 アイコン説明: ⏱️時間 💾メモリ 🔥🐌並列度 💿スピル ⚖️スキュー")
     report_lines.append('💿 スピル判定: "Num bytes spilled to disk due to memory pressure" または "Sink - Num bytes spilled to disk due to memory pressure" > 0')
     report_lines.append("🎯 スキュー判定: 'AQEShuffleRead - Number of skewed partitions' > 0")
     report_lines.append("")
 
-    # ノードを実行時間でソート（スキャンノードを優先的に表示）
+    # ノードを実行時間でソート
     sorted_nodes = sorted(extracted_metrics['node_metrics'], 
                          key=lambda x: x['key_metrics'].get('durationMs', 0), 
                          reverse=True)
     
-    # 最大10個のノードを処理
-    final_sorted_nodes = sorted_nodes[:10]
+    # 指定されたノード数まで処理
+    final_sorted_nodes = sorted_nodes[:limit_nodes]
 
     if final_sorted_nodes:
         # 全体の実行時間を計算（元のsorted_nodesから）
         total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
         
         report_lines.append(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
-        report_lines.append(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
+        report_lines.append(f"📈 TOP{limit_nodes}合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
 
         report_lines.append("")
         
         for i, node in enumerate(final_sorted_nodes):
+            # バグ修正：変数を正しく定義
+            duration_ms = node['key_metrics'].get('durationMs', 0)
+            rows_num = node['key_metrics'].get('numOutputRows', 0)
             memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
             
             # 全体に対する時間の割合を計算
@@ -6140,7 +6153,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         # 最も時間がかかっている処理TOP10を統合
         report += f"""
-## 🐌 2. 最も時間がかかっている処理TOP10
+## 🐌 2. 最も時間がかかっている処理TOP5
 
 ### 📊 詳細なボトルネック分析
 
@@ -6157,15 +6170,15 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 
 """
         
-        # TOP10レポートの生成と統合
+        # TOP5レポートの生成と統合（ファイル出力時はTOP5に制限）
         try:
-            top10_report = generate_top10_time_consuming_processes_report(metrics)
+            top5_report = generate_top10_time_consuming_processes_report(metrics, 5)
             # レポートからヘッダーを除去して統合
-            top10_lines = top10_report.split('\n')
-            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
+            top5_lines = top5_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP5"の行をスキップ
             filtered_lines = []
             skip_header = True
-            for line in top10_lines:
+            for line in top5_lines:
                 if skip_header and line.startswith("## 🐌"):
                     skip_header = False
                     continue
@@ -6175,7 +6188,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
             report += '\n'.join(filtered_lines)
             
         except Exception as e:
-            report += f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n"
+            report += f"⚠️ TOP5処理時間分析の生成でエラーが発生しました: {str(e)}\n"
         
         # SQL最適化分析結果の追加
         report += f"""
@@ -6299,7 +6312,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         # 最も時間がかかっている処理TOP10を統合（英語版）
         report += f"""
-## 🐌 2. Top 10 Most Time-Consuming Processes
+## 🐌 2. Top 5 Most Time-Consuming Processes
 
 ### 📊 Detailed Bottleneck Analysis
 
@@ -6316,15 +6329,15 @@ The following topics are analyzed for process evaluation:
 
 """
         
-        # TOP10レポートの生成と統合（英語版）
+        # TOP5レポートの生成と統合（ファイル出力時はTOP5に制限）（英語版）
         try:
-            top10_report = generate_top10_time_consuming_processes_report(metrics)
+            top5_report = generate_top10_time_consuming_processes_report(metrics, 5)
             # レポートからヘッダーを除去して統合
-            top10_lines = top10_report.split('\n')
-            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
+            top5_lines = top5_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP5"の行をスキップ
             filtered_lines = []
             skip_header = True
-            for line in top10_lines:
+            for line in top5_lines:
                 if skip_header and line.startswith("## 🐌"):
                     skip_header = False
                     continue
@@ -6334,7 +6347,7 @@ The following topics are analyzed for process evaluation:
             report += '\n'.join(filtered_lines)
             
         except Exception as e:
-            report += f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
+            report += f"⚠️ Error generating TOP5 analysis: {str(e)}\n"
         
         # Liquid Clustering分析結果の追加（英語版）
         if liquid_analysis:
