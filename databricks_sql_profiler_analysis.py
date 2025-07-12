@@ -953,6 +953,73 @@ def extract_shuffle_attributes(node: Dict[str, Any]) -> list:
     # 重複を削除
     return list(set(shuffle_attributes))
 
+def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    ノードからSize of files prunedとSize of files readメトリクスを抽出してフィルタ率を計算
+    
+    Args:
+        node: ノードデータ
+        
+    Returns:
+        Dict: フィルタ率計算結果
+    """
+    filter_rate = None
+    files_pruned_bytes = 0
+    files_read_bytes = 0
+    
+    # detailed_metricsから検索
+    detailed_metrics = node.get('detailed_metrics', {})
+    for metric_key, metric_info in detailed_metrics.items():
+        metric_label = metric_info.get('label', '')
+        metric_value = metric_info.get('value', 0)
+        
+        if metric_label == "Size of files pruned" and metric_value > 0:
+            files_pruned_bytes = metric_value
+        elif metric_label == "Size of files read" and metric_value > 0:
+            files_read_bytes = metric_value
+    
+    # raw_metricsから検索（フォールバック）
+    if files_pruned_bytes == 0 or files_read_bytes == 0:
+        raw_metrics = node.get('metrics', [])
+        for metric in raw_metrics:
+            metric_label = metric.get('label', '')
+            metric_value = metric.get('value', 0)
+            
+            if metric_label == "Size of files pruned" and metric_value > 0:
+                files_pruned_bytes = metric_value
+            elif metric_label == "Size of files read" and metric_value > 0:
+                files_read_bytes = metric_value
+    
+    # フィルタ率計算（両方の値が存在する場合のみ）
+    if files_read_bytes > 0 and files_pruned_bytes > 0:
+        filter_rate = files_pruned_bytes / files_read_bytes
+    
+    return {
+        "filter_rate": filter_rate,
+        "files_pruned_bytes": files_pruned_bytes,
+        "files_read_bytes": files_read_bytes,
+        "has_filter_metrics": files_read_bytes > 0 and files_pruned_bytes > 0
+    }
+
+def format_filter_rate_display(filter_result: Dict[str, Any]) -> str:
+    """
+    フィルタ率計算結果を表示用文字列に変換
+    
+    Args:
+        filter_result: calculate_filter_rate()の結果
+        
+    Returns:
+        str: 表示用文字列
+    """
+    if not filter_result["has_filter_metrics"]:
+        return None
+    
+    filter_rate = filter_result["filter_rate"]
+    files_read_gb = filter_result["files_read_bytes"] / (1024 * 1024 * 1024)
+    files_pruned_gb = filter_result["files_pruned_bytes"] / (1024 * 1024 * 1024)
+    
+    return f"📂 フィルタ率: {filter_rate:.1%} (読み込み: {files_read_gb:.2f}GB, プルーン: {files_pruned_gb:.2f}GB)"
+
 def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     セル33スタイルの詳細ボトルネック分析を実行し、構造化されたデータを返す
@@ -3358,6 +3425,12 @@ if sorted_nodes:
         if duration_ms > 0:
             rows_per_sec = (rows_num * 1000) / duration_ms
             print(f"    🚀 処理効率: {rows_per_sec:>8,.0f} 行/秒")
+        
+        # フィルタ率表示
+        filter_result = calculate_filter_rate(node)
+        filter_display = format_filter_rate_display(filter_result)
+        if filter_display:
+            print(f"    {filter_display}")
         
         # スピル詳細情報（シンプル表示）
         spill_display = ""
@@ -6803,75 +6876,3 @@ print(f"   3. パフォーマンス測定")
 print(f"   4. 本番環境への適用検討")
 
 print("🎉" * 25)
-
-
-
-
-
-def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    ノードからSize of files prunedとSize of files readメトリクスを抽出してフィルタ率を計算
-    
-    Args:
-        node: ノードデータ
-        
-    Returns:
-        Dict: フィルタ率計算結果
-    """
-    filter_rate = None
-    files_pruned_bytes = 0
-    files_read_bytes = 0
-    
-    # detailed_metricsから検索
-    detailed_metrics = node.get('detailed_metrics', {})
-    for metric_key, metric_info in detailed_metrics.items():
-        metric_label = metric_info.get('label', '')
-        metric_value = metric_info.get('value', 0)
-        
-        if metric_label == "Size of files pruned" and metric_value > 0:
-            files_pruned_bytes = metric_value
-        elif metric_label == "Size of files read" and metric_value > 0:
-            files_read_bytes = metric_value
-    
-    # raw_metricsから検索（フォールバック）
-    if files_pruned_bytes == 0 or files_read_bytes == 0:
-        raw_metrics = node.get('metrics', [])
-        for metric in raw_metrics:
-            metric_label = metric.get('label', '')
-            metric_value = metric.get('value', 0)
-            
-            if metric_label == "Size of files pruned" and metric_value > 0:
-                files_pruned_bytes = metric_value
-            elif metric_label == "Size of files read" and metric_value > 0:
-                files_read_bytes = metric_value
-    
-    # フィルタ率計算（両方の値が存在する場合のみ）
-    if files_read_bytes > 0 and files_pruned_bytes > 0:
-        filter_rate = files_pruned_bytes / files_read_bytes
-    
-    return {
-        "filter_rate": filter_rate,
-        "files_pruned_bytes": files_pruned_bytes,
-        "files_read_bytes": files_read_bytes,
-        "has_filter_metrics": files_read_bytes > 0 and files_pruned_bytes > 0
-    }
-
-def format_filter_rate_display(filter_result: Dict[str, Any]) -> str:
-    """
-    フィルタ率計算結果を表示用文字列に変換
-    
-    Args:
-        filter_result: calculate_filter_rate()の結果
-        
-    Returns:
-        str: 表示用文字列
-    """
-    if not filter_result["has_filter_metrics"]:
-        return None
-    
-    filter_rate = filter_result["filter_rate"]
-    files_read_gb = filter_result["files_read_bytes"] / (1024 * 1024 * 1024)
-    files_pruned_gb = filter_result["files_pruned_bytes"] / (1024 * 1024 * 1024)
-    
-    return f"📂 フィルタ率: {filter_rate:.1%} (読み込み: {files_read_gb:.2f}GB, プルーン: {files_pruned_gb:.2f}GB)"
-
