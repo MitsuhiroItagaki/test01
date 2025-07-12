@@ -1097,7 +1097,7 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             "has_filter_metrics": filter_result["has_filter_metrics"]
         })
         
-                detailed_analysis["top_bottleneck_nodes"].append(node_analysis)
+        detailed_analysis["top_bottleneck_nodes"].append(node_analysis)
         
         # スピル分析への追加
         if spill_detected:
