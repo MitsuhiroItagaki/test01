@@ -2312,165 +2312,303 @@ print("✅ 関数定義完了: analyze_liquid_clustering_opportunities, save_liq
 
 def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     """
-    設定されたLLMエンドポイントを使用してボトルネック分析を行う
+    包括的なパフォーマンス分析レポートを生成
+    セル33（TOP10プロセス）、セル35（Liquid Clustering）、セル47（最適化実行）の情報を統合
     """
+    from datetime import datetime
     
-    # メトリクス要約の準備（簡潔版）
-    # 主要なメトリクスのみを抽出してリクエストサイズを削減
-    total_time_sec = metrics['overall_metrics'].get('total_time_ms', 0) / 1000
-    read_gb = metrics['overall_metrics'].get('read_bytes', 0) / 1024 / 1024 / 1024
-    cache_ratio = metrics['bottleneck_indicators'].get('cache_hit_ratio', 0) * 100
-    data_selectivity = metrics['bottleneck_indicators'].get('data_selectivity', 0) * 100
+    print("📊 包括的パフォーマンス分析レポートを生成中...")
     
-    # Liquid Clustering分析情報の取得（LLMベース対応）
+    # レポート生成時刻
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # === 1. 基本メトリクスの取得 ===
+    overall_metrics = metrics.get('overall_metrics', {})
+    bottleneck_indicators = metrics.get('bottleneck_indicators', {})
+    
+    total_time_sec = overall_metrics.get('total_time_ms', 0) / 1000
+    read_gb = overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024
+    cache_hit_ratio = bottleneck_indicators.get('cache_hit_ratio', 0) * 100
+    data_selectivity = bottleneck_indicators.get('data_selectivity', 0) * 100
+    
+    # Photon情報
+    photon_enabled = overall_metrics.get('photon_enabled', False)
+    photon_utilization = min(overall_metrics.get('photon_utilization_ratio', 0) * 100, 100.0)
+    
+    # 並列度・シャッフル情報
+    shuffle_count = bottleneck_indicators.get('shuffle_operations_count', 0)
+    has_shuffle_bottleneck = bottleneck_indicators.get('has_shuffle_bottleneck', False)
+    has_low_parallelism = bottleneck_indicators.get('has_low_parallelism', False)
+    low_parallelism_count = bottleneck_indicators.get('low_parallelism_stages_count', 0)
+    
+    # スピル情報
+    has_spill = bottleneck_indicators.get('has_spill', False)
+    spill_bytes = bottleneck_indicators.get('spill_bytes', 0)
+    spill_gb = spill_bytes / 1024 / 1024 / 1024 if spill_bytes > 0 else 0
+    
+    # === 2. セル33: TOP10プロセス分析情報の取得 ===
+    # TOP10プロセスから主要ボトルネックを抽出
+    sorted_nodes = sorted(metrics['node_metrics'], 
+                         key=lambda x: x['key_metrics'].get('durationMs', 0), 
+                         reverse=True)[:5]  # TOP5のみ抽出
+    
+    critical_processes = []
+    for i, node in enumerate(sorted_nodes):
+        duration_ms = node['key_metrics'].get('durationMs', 0)
+        duration_sec = duration_ms / 1000
+        percentage = (duration_ms / max(overall_metrics.get('total_time_ms', 1), 1)) * 100
+        
+        # ボトルネックの重要度判定
+        severity = "CRITICAL" if duration_ms >= 10000 else "HIGH" if duration_ms >= 5000 else "MEDIUM"
+        
+        # 意味のあるノード名を取得
+        node_name = get_meaningful_node_name(node, metrics)
+        short_name = node_name[:80] + "..." if len(node_name) > 80 else node_name
+        
+        critical_processes.append({
+            'rank': i + 1,
+            'name': short_name,
+            'duration_sec': duration_sec,
+            'percentage': percentage,
+            'severity': severity
+        })
+    
+    # === 3. セル35: Liquid Clustering分析情報の取得 ===
     liquid_analysis = metrics.get('liquid_clustering_analysis', {})
     extracted_data = liquid_analysis.get('extracted_data', {})
-    metadata_summary = extracted_data.get('metadata_summary', {})
     
-    # テーブル情報の簡潔版
+    # テーブル情報
     table_info = extracted_data.get('table_info', {})
-    table_recommendations = []
-    if table_info:
-        for i, (table_name, table_details) in enumerate(list(table_info.items())[:3]):
-            table_recommendations.append(f"- {table_name}: LLM分析による推奨")
+    identified_tables = list(table_info.keys())[:5]  # TOP5テーブル
     
-    # フィルター・JOIN・GROUP BYカラム情報
-    filter_columns = extracted_data.get('filter_columns', [])
-    join_columns = extracted_data.get('join_columns', [])
-    groupby_columns = extracted_data.get('groupby_columns', [])
+    # フィルター・JOIN・GROUP BY情報
+    filter_columns = extracted_data.get('filter_columns', [])[:10]
+    join_columns = extracted_data.get('join_columns', [])[:10]
+    groupby_columns = extracted_data.get('groupby_columns', [])[:10]
     
-    high_impact_summary = []
-    if filter_columns:
-        high_impact_summary.append(f"- フィルター条件: {len(filter_columns)}個のカラム抽出")
-    if join_columns:
-        high_impact_summary.append(f"- JOIN条件: {len(join_columns)}個のカラム抽出")
-    if groupby_columns:
-        high_impact_summary.append(f"- GROUP BY条件: {len(groupby_columns)}個のカラム抽出")
-    
-    # Photonと並列度の情報を追加
-    photon_enabled = metrics['overall_metrics'].get('photon_enabled', False)
-    photon_utilization_ratio = metrics['overall_metrics'].get('photon_utilization_ratio', 0)
-    photon_utilization = min(photon_utilization_ratio * 100, 100.0)  # 最大100%に制限
-    shuffle_count = metrics['bottleneck_indicators'].get('shuffle_operations_count', 0)
-    has_shuffle_bottleneck = metrics['bottleneck_indicators'].get('has_shuffle_bottleneck', False)
-    has_low_parallelism = metrics['bottleneck_indicators'].get('has_low_parallelism', False)
-    low_parallelism_count = metrics['bottleneck_indicators'].get('low_parallelism_stages_count', 0)
-    
-    analysis_prompt = f"""
-あなたはDatabricksのSQLパフォーマンス分析の専門家です。以下のメトリクスを分析し、ボトルネックを特定して改善案を提示してください。
-
-【パフォーマンス概要】
-- 実行時間: {total_time_sec:.1f}秒
-- 読み込みデータ: {read_gb:.1f}GB
-- キャッシュ効率: {cache_ratio:.1f}%
-- データ選択性: {data_selectivity:.1f}%
-- スピル発生: {'あり' if metrics['bottleneck_indicators'].get('has_spill', False) else 'なし'}
-
-【Photonエンジン分析】
-- Photon有効: {'はい' if photon_enabled else 'いいえ'}
-- Photon利用率: {photon_utilization:.1f}%
-- Photon推奨: {'既に最適化済み' if photon_utilization > 80 else 'Photon有効化を推奨' if not photon_enabled else 'Photon利用率向上が必要'}
-
-【並列度・シャッフル分析】
-- シャッフル操作: {shuffle_count}回
-- シャッフルボトルネック: {'あり' if has_shuffle_bottleneck else 'なし'}
-- 低並列度ステージ: {low_parallelism_count}個
-- 並列度問題: {'あり' if has_low_parallelism else 'なし'}
-
-【Liquid Clustering推奨】
-テーブル数: {metadata_summary.get('tables_identified', 0)}個
-推奨カラム:
-{chr(10).join(table_recommendations) if table_recommendations else "LLM分析結果を参照"}
-
-カラム抽出状況:
-{chr(10).join(high_impact_summary) if high_impact_summary else "分析データが不足しています"}
-
-【重要指標】
-- 最遅ステージ: {metrics['bottleneck_indicators'].get('slowest_stage_id', 'N/A')}
-- 最高メモリ: {metrics['bottleneck_indicators'].get('highest_memory_bytes', 0)/1024/1024:.0f}MB
-- Photon使用率: {metrics['bottleneck_indicators'].get('photon_ratio', 0)*100:.0f}%
-
-【求める分析】
-主要ボトルネックと原因（Photon、並列度、シャッフルに焦点）
-
-**重要**: パーティショニングやZORDERは提案せず、Liquid Clusteringのみを推奨してください。
-Liquid Clustering実装時は、正しいDatabricks SQL構文を使用してください：
-- 新規テーブル作成時: CREATE TABLE ... CLUSTER BY (column1, column2, ...)
-- 既存テーブル変更時: ALTER TABLE table_name CLUSTER BY (column1, column2, ...)
-- Delta Liveテーブル: @dlt.table(cluster_by=["column1", "column2"])
-簡潔で実践的な改善提案を日本語で提供してください。
-"""
-    
+    # === 4. セル47: 詳細ボトルネック分析の取得 ===
     try:
-        # 設定されたLLMプロバイダーに基づいて分析実行
-        provider = LLM_CONFIG["provider"]
-        print(f"🤖 {provider}エンドポイントに分析リクエストを送信中...")
-        print("⏳ 大きなデータのため処理に時間がかかる場合があります...")
-        
-        # プロバイダー別の処理
-        if provider == "databricks":
-            return _call_databricks_llm(analysis_prompt)
-        elif provider == "openai":
-            return _call_openai_llm(analysis_prompt)
-        elif provider == "azure_openai":
-            return _call_azure_openai_llm(analysis_prompt)
-        elif provider == "anthropic":
-            return _call_anthropic_llm(analysis_prompt)
-        else:
-            return f"❌ サポートされていないLLMプロバイダー: {provider}"
-            
+        detailed_bottleneck = extract_detailed_bottleneck_analysis(metrics)
     except Exception as e:
-        error_msg = f"分析エラー: {str(e)}"
-        print(f"❌ {error_msg}")
+        print(f"⚠️ 詳細ボトルネック分析でエラー: {e}")
+        detailed_bottleneck = {
+            'top_bottleneck_nodes': [],
+            'performance_recommendations': []
+        }
+    
+    # === 5. 包括的レポートの生成 ===
+    
+    report_lines = []
+    
+    # タイトルとサマリー
+    report_lines.append("# 📊 Databricks SQLパフォーマンス包括分析レポート")
+    report_lines.append(f"**生成日時**: {timestamp}")
+    report_lines.append("")
+    
+    # パフォーマンス概要
+    report_lines.append("## 1. パフォーマンス概要")
+    report_lines.append("")
+    report_lines.append("### 基本メトリクス")
+    report_lines.append(f"- **実行時間**: {total_time_sec:.1f}秒")
+    report_lines.append(f"- **データ読み込み**: {read_gb:.2f}GB")
+    report_lines.append(f"- **キャッシュ効率**: {cache_hit_ratio:.1f}%")
+    report_lines.append(f"- **データ選択性**: {data_selectivity:.1f}%")
+    report_lines.append("")
+    
+    # 主要ボトルネック分析
+    report_lines.append("## 2. 主要ボトルネック分析")
+    report_lines.append("")
+    
+    # Photon分析
+    photon_status = "有効" if photon_enabled else "無効"
+    photon_recommendation = ""
+    if not photon_enabled:
+        photon_recommendation = " → **Photon有効化を強く推奨**"
+    elif photon_utilization < 50:
+        photon_recommendation = " → **Photon利用率向上が必要**"
+    elif photon_utilization < 80:
+        photon_recommendation = " → **Photon設定の最適化を推奨**"
+    else:
+        photon_recommendation = " → **最適化済み**"
+    
+    report_lines.append("### Photonエンジン")
+    report_lines.append(f"- **状態**: {photon_status} (利用率: {photon_utilization:.1f}%){photon_recommendation}")
+    report_lines.append("")
+    
+    # 並列度・シャッフル分析
+    report_lines.append("### 並列度・シャッフル")
+    shuffle_status = "❌ ボトルネックあり" if has_shuffle_bottleneck else "✅ 良好"
+    parallelism_status = "❌ 低並列度あり" if has_low_parallelism else "✅ 適切"
+    
+    report_lines.append(f"- **シャッフル操作**: {shuffle_count}回 ({shuffle_status})")
+    report_lines.append(f"- **並列度**: {parallelism_status}")
+    if has_low_parallelism:
+        report_lines.append(f"  - 低並列度ステージ: {low_parallelism_count}個")
+    report_lines.append("")
+    
+    # スピル分析
+    report_lines.append("### メモリ使用状況")
+    if has_spill:
+        report_lines.append(f"- **メモリスピル**: ❌ 発生中 ({spill_gb:.2f}GB)")
+        report_lines.append("  - **対応必要**: クラスター設定の見直し、クエリ最適化")
+    else:
+        report_lines.append("- **メモリスピル**: ✅ なし")
+    report_lines.append("")
+    
+    # TOP5処理時間ボトルネック
+    report_lines.append("## 3. TOP5処理時間ボトルネック")
+    report_lines.append("")
+    
+    for process in critical_processes:
+        severity_icon = "🔴" if process['severity'] == "CRITICAL" else "🟠" if process['severity'] == "HIGH" else "🟡"
+        report_lines.append(f"### {process['rank']}. {severity_icon} {process['name']}")
+        report_lines.append(f"   - **実行時間**: {process['duration_sec']:.1f}秒 (全体の{process['percentage']:.1f}%)")
+        report_lines.append(f"   - **重要度**: {process['severity']}")
+        report_lines.append("")
+    
+    # Liquid Clustering推奨事項
+    report_lines.append("## 4. Liquid Clustering推奨事項")
+    report_lines.append("")
+    
+    if identified_tables:
+        report_lines.append("### 対象テーブル")
+        for i, table_name in enumerate(identified_tables, 1):
+            report_lines.append(f"{i}. `{table_name}`")
+        report_lines.append("")
+    
+    if filter_columns or join_columns or groupby_columns:
+        report_lines.append("### 推奨クラスタリングキー")
         
-        # フォールバック: 基本的な分析結果を提供
-        fallback_analysis = f"""
-🔧 **基本的なボトルネック分析結果** ({provider} LLM利用不可のため簡易版)
-
-## 📊 パフォーマンス概要
-- **実行時間**: {total_time_sec:.1f}秒
-- **読み込みデータ量**: {read_gb:.1f}GB  
-- **キャッシュ効率**: {cache_ratio:.1f}%
-- **データ選択性**: {data_selectivity:.1f}%
-
-## ⚡ Photonエンジン分析
-- **Photon有効**: {'はい' if photon_enabled else 'いいえ'}
-- **Photon利用率**: {min(photon_utilization, 100.0):.1f}%
-- **推奨**: {'Photon利用率向上が必要' if photon_utilization < 80 else '最適化済み'}
-
-## � 並列度・シャッフル分析
-- **シャッフル操作**: {shuffle_count}回
-- **シャッフルボトルネック**: {'あり' if has_shuffle_bottleneck else 'なし'}
-- **低並列度ステージ**: {low_parallelism_count}個
-- **並列度問題**: {'あり' if has_low_parallelism else 'なし'}
-
-## 🗂️ Liquid Clustering推奨事項
-**対象テーブル数**: {metadata_summary.get('tables_identified', 0)}個
-
-**推奨実装**:
-{chr(10).join(table_recommendations) if table_recommendations else '- 推奨カラムが見つかりませんでした'}
-
-## ⚠️ 主要な問題点
-- {'メモリスピルが発生しています' if metrics['bottleneck_indicators'].get('has_spill', False) else 'メモリ使用は正常です'}
-- {'キャッシュ効率が低下しています' if cache_ratio < 50 else 'キャッシュ効率は良好です'}
-- {'データ選択性が低く、大量のデータを読み込んでいます' if data_selectivity < 10 else 'データ選択性は適切です'}
-- {'Photonエンジンが無効または利用率が低い' if not photon_enabled or photon_utilization < 50 else 'Photon利用は良好'}
-- {'シャッフルボトルネックが発生' if has_shuffle_bottleneck else 'シャッフル処理は正常'}
-- {'並列度が低いステージが存在' if has_low_parallelism else '並列度は適切'}
-
-## 🚀 推奨アクション
-1. **Liquid Clustering実装**: 上記推奨カラムでテーブルをクラスタリング（正しいDatabricks SQL構文: ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）
-2. **Photon有効化**: {'Photonエンジンを有効にする' if not photon_enabled else 'Photon設定を最適化'}
-3. **並列度最適化**: {'クラスターサイズ・並列度設定を見直し' if has_low_parallelism else '現在の並列度は適切'}
-4. **シャッフル最適化**: {'JOIN順序・GROUP BY最適化でシャッフル削減' if has_shuffle_bottleneck else 'シャッフル処理は最適'}
-5. **クエリ最適化**: WHERE句の条件を適切に設定
-6. **キャッシュ活用**: よく使用されるテーブルのキャッシュを検討
-
-**重要**: パーティショニングやZORDERは使用せず、正しいDatabricks SQL構文（ALTER TABLE table_name CLUSTER BY (column1, column2, ...)）を使用してLiquid Clusteringで最適化してください。
-
-**注意**: {provider} LLMエンドポイントの接続に問題があります。詳細な分析は手動で実施してください。
-        """
-        return fallback_analysis
+        if filter_columns:
+            report_lines.append("**フィルター条件カラム (高優先度)**:")
+            for i, col in enumerate(filter_columns[:5], 1):
+                expression = col.get('expression', 'Unknown')
+                report_lines.append(f"  {i}. `{expression}`")
+            report_lines.append("")
+        
+        if join_columns:
+            report_lines.append("**JOIN条件カラム (中優先度)**:")
+            for i, col in enumerate(join_columns[:5], 1):
+                expression = col.get('expression', 'Unknown')
+                key_type = col.get('key_type', '')
+                report_lines.append(f"  {i}. `{expression}` ({key_type})")
+            report_lines.append("")
+        
+        if groupby_columns:
+            report_lines.append("**GROUP BY条件カラム (中優先度)**:")
+            for i, col in enumerate(groupby_columns[:5], 1):
+                expression = col.get('expression', 'Unknown')
+                report_lines.append(f"  {i}. `{expression}`")
+            report_lines.append("")
+    
+    # 実装SQL例
+    if identified_tables:
+        report_lines.append("### 実装SQL例")
+        for table_name in identified_tables[:2]:  # TOP2テーブルのみ
+            report_lines.append(f"```sql")
+            report_lines.append(f"-- {table_name}テーブルにLiquid Clusteringを適用")
+            report_lines.append(f"ALTER TABLE {table_name}")
+            report_lines.append(f"CLUSTER BY (column1, column2, column3, column4);")
+            report_lines.append(f"```")
+            report_lines.append("")
+    
+    # 最適化推奨アクション
+    report_lines.append("## 5. 推奨最適化アクション")
+    report_lines.append("")
+    
+    # 優先度別の推奨事項
+    high_priority_actions = []
+    medium_priority_actions = []
+    low_priority_actions = []
+    
+    # CRITICAL/HIGH priorityアクション
+    if not photon_enabled:
+        high_priority_actions.append("**Photonエンジンの有効化** - 最大50%の性能向上期待")
+    
+    if has_spill:
+        high_priority_actions.append(f"**メモリスピル解決** - {spill_gb:.2f}GBのスピルを解消")
+    
+    if has_shuffle_bottleneck:
+        high_priority_actions.append("**シャッフル最適化** - JOIN順序とREPARTITION適用")
+    
+    # MEDIUMアクション
+    if photon_enabled and photon_utilization < 80:
+        medium_priority_actions.append("**Photon利用率向上** - 設定の最適化")
+    
+    if has_low_parallelism:
+        medium_priority_actions.append("**並列度向上** - クラスター設定の見直し")
+    
+    if cache_hit_ratio < 50:
+        medium_priority_actions.append("**キャッシュ効率改善** - データアクセスパターンの最適化")
+    
+    # Liquid Clustering
+    if identified_tables:
+        medium_priority_actions.append("**Liquid Clustering実装** - 主要テーブルのクラスタリング")
+    
+    # LOWアクション
+    if data_selectivity < 10:
+        low_priority_actions.append("**WHERE句最適化** - データ選択性の向上")
+    
+    # アクションの出力
+    if high_priority_actions:
+        report_lines.append("### 🚨 緊急対応 (HIGH優先度)")
+        for i, action in enumerate(high_priority_actions, 1):
+            report_lines.append(f"{i}. {action}")
+        report_lines.append("")
+    
+    if medium_priority_actions:
+        report_lines.append("### ⚠️ 重要改善 (MEDIUM優先度)")
+        for i, action in enumerate(medium_priority_actions, 1):
+            report_lines.append(f"{i}. {action}")
+        report_lines.append("")
+    
+    if low_priority_actions:
+        report_lines.append("### 📝 長期最適化 (LOW優先度)")
+        for i, action in enumerate(low_priority_actions, 1):
+            report_lines.append(f"{i}. {action}")
+        report_lines.append("")
+    
+    # 期待効果
+    report_lines.append("## 6. 期待されるパフォーマンス改善")
+    report_lines.append("")
+    
+    total_improvement_estimate = 0
+    improvement_details = []
+    
+    if not photon_enabled:
+        total_improvement_estimate += 40
+        improvement_details.append("- **Photon有効化**: 30-50%の実行時間短縮")
+    
+    if has_spill:
+        total_improvement_estimate += 25
+        improvement_details.append(f"- **スピル解消**: 20-30%の実行時間短縮 ({spill_gb:.2f}GBスピル削減)")
+    
+    if has_shuffle_bottleneck:
+        total_improvement_estimate += 20
+        improvement_details.append("- **シャッフル最適化**: 15-25%の実行時間短縮")
+    
+    if identified_tables:
+        total_improvement_estimate += 15
+        improvement_details.append("- **Liquid Clustering**: 10-20%の実行時間短縮")
+    
+    # 改善効果の上限設定
+    total_improvement_estimate = min(total_improvement_estimate, 80)
+    
+    if improvement_details:
+        for detail in improvement_details:
+            report_lines.append(detail)
+        report_lines.append("")
+        report_lines.append(f"**総合改善見込み**: 最大{total_improvement_estimate}%の実行時間短縮")
+    else:
+        report_lines.append("現在のパフォーマンスは比較的良好です。微細な最適化により5-10%の改善が期待できます。")
+    
+    report_lines.append("")
+    report_lines.append("---")
+    report_lines.append(f"*レポート生成: {timestamp} | 分析エンジン: Databricks SQL Profiler*")
+    
+    print("✅ 包括的パフォーマンス分析レポートが完成しました")
+    
+    return "\n".join(report_lines)
 
 # COMMAND ----------
 
