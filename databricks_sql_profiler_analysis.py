@@ -6153,7 +6153,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         # 最も時間がかかっている処理TOP10を統合
         report += f"""
-## 🐌 2. 最も時間がかかっている処理TOP5
+## 🐌 2. 最も時間がかかっている処理TOP10
 
 ### 📊 詳細なボトルネック分析
 
@@ -6170,15 +6170,15 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
 
 """
         
-        # TOP5レポートの生成と統合（ファイル出力時はTOP5に制限）
+        # TOP10レポートの生成と統合
         try:
-            top5_report = generate_top10_time_consuming_processes_report(metrics, 5)
+            top10_report = generate_top10_time_consuming_processes_report(metrics, 10)
             # レポートからヘッダーを除去して統合
-            top5_lines = top5_report.split('\n')
-            # "## 🐌 最も時間がかかっている処理TOP5"の行をスキップ
+            top10_lines = top10_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
             filtered_lines = []
             skip_header = True
-            for line in top5_lines:
+            for line in top10_lines:
                 if skip_header and line.startswith("## 🐌"):
                     skip_header = False
                     continue
@@ -6188,7 +6188,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
             report += '\n'.join(filtered_lines)
             
         except Exception as e:
-            report += f"⚠️ TOP5処理時間分析の生成でエラーが発生しました: {str(e)}\n"
+            report += f"⚠️ TOP10処理時間分析の生成でエラーが発生しました: {str(e)}\n"
         
         # SQL最適化分析結果の追加
         report += f"""
@@ -6312,7 +6312,7 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         
         # 最も時間がかかっている処理TOP10を統合（英語版）
         report += f"""
-## 🐌 2. Top 5 Most Time-Consuming Processes
+## 🐌 2. Top 10 Most Time-Consuming Processes
 
 ### 📊 Detailed Bottleneck Analysis
 
@@ -6329,15 +6329,15 @@ The following topics are analyzed for process evaluation:
 
 """
         
-        # TOP5レポートの生成と統合（ファイル出力時はTOP5に制限）（英語版）
+        # TOP10レポートの生成と統合（英語版）
         try:
-            top5_report = generate_top10_time_consuming_processes_report(metrics, 5)
+            top10_report = generate_top10_time_consuming_processes_report(metrics, 10)
             # レポートからヘッダーを除去して統合
-            top5_lines = top5_report.split('\n')
-            # "## 🐌 最も時間がかかっている処理TOP5"の行をスキップ
+            top10_lines = top10_report.split('\n')
+            # "## 🐌 最も時間がかかっている処理TOP10"の行をスキップ
             filtered_lines = []
             skip_header = True
-            for line in top5_lines:
+            for line in top10_lines:
                 if skip_header and line.startswith("## 🐌"):
                     skip_header = False
                     continue
@@ -6347,7 +6347,7 @@ The following topics are analyzed for process evaluation:
             report += '\n'.join(filtered_lines)
             
         except Exception as e:
-            report += f"⚠️ Error generating TOP5 analysis: {str(e)}\n"
+            report += f"⚠️ Error generating TOP10 analysis: {str(e)}\n"
         
         # Liquid Clustering分析結果の追加（英語版）
         if liquid_analysis:
