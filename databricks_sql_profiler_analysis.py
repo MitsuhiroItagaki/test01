@@ -7287,6 +7287,25 @@ def refine_report_content_with_llm(report_content: str) -> str:
         return report_content
 
 def save_refined_report(refined_content: str, original_filename: str) -> str:
+    """推敲されたレポートを保存"""
+    from datetime import datetime
+    
+    # 推敲版のファイル名を生成
+    base_name = original_filename.replace('.md', '')
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    refined_filename = f"{base_name}_refined_{timestamp}.md"
+    
+    try:
+        with open(refined_filename, 'w', encoding='utf-8') as f:
+            f.write(refined_content)
+        
+        print(f"✅ 推敲されたレポートを保存: {refined_filename}")
+        return refined_filename
+        
+    except Exception as e:
+        print(f"❌ 推敲レポートの保存中にエラー: {str(e)}")
+        return None
+
 def finalize_report_files(original_filename: str, refined_filename: str) -> str:
     """元のファイルを削除し、推敲版ファイルを元のファイル名にリネーム"""
     import os
@@ -7310,24 +7329,6 @@ def finalize_report_files(original_filename: str, refined_filename: str) -> str:
         print(f"❌ ファイル操作中にエラー: {str(e)}")
         return None
 
-    """推敲されたレポートを保存"""
-    from datetime import datetime
-    
-    # 推敲版のファイル名を生成
-    base_name = original_filename.replace('.md', '')
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    refined_filename = f"{base_name}_refined_{timestamp}.md"
-    
-    try:
-        with open(refined_filename, 'w', encoding='utf-8') as f:
-            f.write(refined_content)
-        
-        print(f"✅ 推敲されたレポートを保存: {refined_filename}")
-        return refined_filename
-        
-    except Exception as e:
-        print(f"❌ 推敲レポートの保存中にエラー: {str(e)}")
-        return None
 
 # メイン処理
 try:
@@ -7376,6 +7377,7 @@ try:
                         final_file_size = os.path.getsize(final_filename)
                         print(f"📁 最終ファイルサイズ: {final_file_size:,} bytes")
                 
+                print("✅ レポート推敲処理が完了しました")
                 
                 # 推敲の結果を表示（最初の1000文字）
                 print("\n📋 推敲結果のプレビュー:")
@@ -7384,15 +7386,6 @@ try:
                 print(preview)
                 if len(refined_content) > 1000:
                     print(f"\n... (残り {len(refined_content) - 1000} 文字は {final_filename or latest_report} を参照)")
-                print("-" * 50)
-                
-                # 推敲の結果を表示（最初の1000文字）
-                print("\n📋 推敲結果のプレビュー:")
-                print("-" * 50)
-                preview = refined_content[:1000]
-                print(preview)
-                if len(refined_content) > 1000:
-                    print(f"\n... (残り {len(refined_content) - 1000} 文字は {refined_filename} を参照)")
                 print("-" * 50)
             else:
                 print("❌ 推敲レポートの保存に失敗しました")
