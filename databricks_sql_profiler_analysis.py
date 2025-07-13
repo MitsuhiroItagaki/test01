@@ -7534,12 +7534,12 @@ missing_summary_vars = []
 try:
     result_output_path
 except NameError:
-            missing_summary_vars.append("result_output_path")
+    missing_summary_vars.append("result_output_path")
 
 try:
     saved_files
 except NameError:
-            missing_summary_vars.append("saved_files")
+    missing_summary_vars.append("saved_files")
     saved_files = {}
 
 print(f"\n📁 出力ファイル一覧:")
@@ -7547,7 +7547,7 @@ print(f"\n📁 出力ファイル一覧:")
 if 'result_output_path' in globals():
     print(f"   📄 ボトルネック分析レポート: {result_output_path}")
 else:
-            print("   📄 ボトルネック分析レポート: 未実行")
+    print("   📄 ボトルネック分析レポート: 未実行")
 
 if saved_files:
     for file_type, filename in saved_files.items():
