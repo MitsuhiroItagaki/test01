@@ -62,10 +62,17 @@
 # 
 # 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
 
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'  # デフォルト
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'  # デフォルト
 
 # 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
-OUTPUT_LANGUAGE = 'ja'  # デフォルト: 日本語
+OUTPUT_LANGUAGE = 'ja'
+
+# 🔍 EXPLAIN文実行設定（EXPLAIN_ENABLED: 'Y' = 実行する, 'N' = 実行しない）
+EXPLAIN_ENABLED = 'Y'
+
+# 🗂️ カタログとデータベース設定（EXPLAIN文実行時に使用）
+CATALOG = 'main'
+DATABASE = 'default'  # デフォルト: 日本語
 
 # 💡 使用例:
 # OUTPUT_LANGUAGE = 'ja'  # 日本語でファイル出力
@@ -7423,3 +7430,206 @@ except Exception as e:
     traceback.print_exc()
 
 print()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🔍 EXPLAIN文実行とファイル出力
+# MAGIC
+# MAGIC このセルでは以下の処理を実行します：
+# MAGIC - セル43で抽出したオリジナルクエリを取得
+# MAGIC - EXPLAIN文を生成してDatabricksで実行
+# MAGIC - 実行プランの詳細をファイルに出力
+# MAGIC - エラーハンドリングと結果の確認
+
+# COMMAND ----------
+
+def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
+    """
+    オリジナルクエリのEXPLAIN文を実行し、結果をファイルに保存
+    """
+    from datetime import datetime
+    import os
+    
+    if not original_query or not original_query.strip():
+        print("❌ オリジナルクエリが空です")
+        return {}
+    
+    # ファイル名の生成
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    explain_filename = f"output_explain_plan_{timestamp}.txt"
+    sql_filename = f"output_explain_query_{timestamp}.sql"
+    
+    # EXPLAIN文の生成
+    explain_query = f"EXPLAIN {original_query}"
+    
+    # SQL文をファイルに保存
+    try:
+        with open(sql_filename, 'w', encoding='utf-8') as f:
+            f.write(explain_query)
+        print(f"✅ EXPLAIN文を保存: {sql_filename}")
+    except Exception as e:
+        print(f"❌ EXPLAIN文の保存に失敗: {str(e)}")
+    
+    # EXPLAIN文の実行
+    try:
+        print("🔄 EXPLAIN文を実行中...")
+        
+        # カタログとデータベースの設定を取得
+        catalog = globals().get('CATALOG', 'main')
+        database = globals().get('DATABASE', 'default')
+        
+        print(f"📂 使用カタログ: {catalog}")
+        print(f"🗂️ 使用データベース: {database}")
+        
+        # カタログとデータベースを設定
+        spark.sql(f"USE CATALOG {catalog}")
+        spark.sql(f"USE DATABASE {database}")
+        
+        # Databricks環境でSpark SQLを実行
+        result = spark.sql(explain_query)
+        
+        # 結果を収集
+        explain_result = result.collect()
+        
+        # 結果をファイルに保存
+        with open(explain_filename, 'w', encoding='utf-8') as f:
+            f.write(f"# EXPLAIN実行結果\n")
+            f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"オリジナルクエリ文字数: {len(original_query):,}\n")
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("EXPLAIN結果:\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for row in explain_result:
+                f.write(str(row[0]) + "\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("元のクエリ:\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(original_query)
+        
+        print(f"✅ EXPLAIN結果を保存: {explain_filename}")
+        print(f"📊 実行プラン行数: {len(explain_result):,}")
+        
+        # 結果のプレビュー表示
+        print("\n📋 EXPLAIN結果のプレビュー:")
+        print("-" * 50)
+        preview_lines = min(10, len(explain_result))
+        for i, row in enumerate(explain_result[:preview_lines]):
+            print(f"{i+1:2d}: {str(row[0])[:100]}...")
+        
+        if len(explain_result) > preview_lines:
+            print(f"... (残り {len(explain_result) - preview_lines} 行は {explain_filename} を参照)")
+        print("-" * 50)
+        
+        return {
+            'explain_file': explain_filename,
+            'sql_file': sql_filename,
+            'plan_lines': len(explain_result)
+        }
+        
+    except Exception as e:
+        print(f"❌ EXPLAIN文の実行に失敗: {str(e)}")
+        
+        # エラーの詳細をファイルに記録
+        error_filename = f"output_explain_error_{timestamp}.txt"
+        try:
+            with open(error_filename, 'w', encoding='utf-8') as f:
+                f.write(f"# EXPLAIN実行エラー\n")
+                f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"エラー内容: {str(e)}\n")
+                f.write("\n" + "=" * 80 + "\n")
+                f.write("実行しようとしたEXPLAIN文:\n")
+                f.write("=" * 80 + "\n\n")
+                f.write(explain_query)
+            
+            print(f"📄 エラー詳細を保存: {error_filename}")
+            
+        except Exception as file_error:
+            print(f"❌ エラーファイルの保存にも失敗: {str(file_error)}")
+        
+        return {
+            'error_file': error_filename,
+            'error_message': str(e)
+        }
+
+# EXPLAIN文実行の実行
+print("\n🔍 EXPLAIN文実行処理")
+print("-" * 40)
+
+# セル43で抽出したオリジナルクエリが変数に残っているかチェック
+try:
+    # original_queryが既に定義されているか確認
+    original_query_for_explain = original_query
+    print(f"✅ オリジナルクエリを取得しました ({len(original_query_for_explain)} 文字)")
+    
+except NameError:
+    print("⚠️ オリジナルクエリが見つかりません")
+    print("   セル43 (オリジナルクエリ抽出) を先に実行してください")
+    
+    # フォールバック: プロファイラーデータから再抽出
+    try:
+        print("🔄 プロファイラーデータから再抽出を試行中...")
+        original_query_for_explain = extract_original_query_from_profiler_data(profiler_data)
+        
+        if original_query_for_explain:
+            print(f"✅ 再抽出成功 ({len(original_query_for_explain)} 文字)")
+        else:
+            print("❌ 再抽出に失敗しました")
+            original_query_for_explain = None
+            
+    except Exception as e:
+        print(f"❌ 再抽出中にエラー: {str(e)}")
+        original_query_for_explain = None
+
+# EXPLAIN実行フラグの確認
+explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
+print(f"🔍 EXPLAIN実行設定: {explain_enabled}")
+
+if explain_enabled.upper() != 'Y':
+    print("⚠️ EXPLAIN実行が無効化されています")
+    print("   EXPLAIN文を実行する場合は、最初のセルでEXPLAIN_ENABLED = 'Y'に設定してください")
+elif original_query_for_explain and original_query_for_explain.strip():
+    print("\n🚀 EXPLAIN文を実行します...")
+    
+    # Spark環境の確認
+    try:
+        spark_version = spark.version
+        print(f"📊 Spark環境: {spark_version}")
+    except Exception as e:
+        print(f"❌ Spark環境の確認に失敗: {str(e)}")
+        print("   Databricks環境で実行してください")
+        spark = None
+    
+    if spark:
+        # EXPLAIN文の実行
+        explain_results = execute_explain_and_save_to_file(original_query_for_explain)
+        
+        if explain_results:
+            print("\n📁 生成されたファイル:")
+            for file_type, filename in explain_results.items():
+                if file_type == 'explain_file':
+                    print(f"   📄 EXPLAIN結果: {filename}")
+                elif file_type == 'sql_file':
+                    print(f"   📄 EXPLAIN SQL: {filename}")
+                elif file_type == 'error_file':
+                    print(f"   📄 エラーログ: {filename}")
+                elif file_type == 'plan_lines':
+                    print(f"   📊 実行プラン行数: {filename}")
+                elif file_type == 'error_message':
+                    print(f"   ❌ エラーメッセージ: {filename}")
+        
+        print("\n✅ EXPLAIN文実行処理が完了しました")
+        
+    else:
+        print("❌ Spark環境が利用できないため、EXPLAIN文は実行できません")
+        print("   Databricks環境で実行してください")
+        
+else:
+    print("❌ 実行可能なオリジナルクエリが見つかりません")
+    print("   セル43でオリジナルクエリを抽出してから実行してください")
+
+print()
+print("🎉 すべての処理が完了しました！")
+print("📁 生成されたファイルを確認して、分析結果を活用してください。")
