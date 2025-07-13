@@ -7411,7 +7411,7 @@ missing_variables = []
 try:
     original_query
 except NameError:
-            missing_variables.append("original_query")
+    missing_variables.append("original_query")
     original_query = ""
 
 # optimized_result のチェック  
@@ -7437,7 +7437,7 @@ except NameError:
 try:
     analysis_result
 except NameError:
-            missing_variables.append("analysis_result")
+    missing_variables.append("analysis_result")
     analysis_result = ""
 
 if missing_variables:
