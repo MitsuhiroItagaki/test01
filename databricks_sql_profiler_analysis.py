@@ -70,6 +70,9 @@ OUTPUT_LANGUAGE = 'ja'
 # 🔍 EXPLAIN文実行設定（EXPLAIN_ENABLED: 'Y' = 実行する, 'N' = 実行しない）
 EXPLAIN_ENABLED = 'Y'
 
+# 🐛 デバッグモード設定（DEBUG_ENABLE: 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持）
+DEBUG_ENABLE = 'N'
+
 # 🗂️ カタログとデータベース設定（EXPLAIN文実行時に使用）
 CATALOG = 'tpcds'
 DATABASE = 'tpcds_sf1000_delta_lc'  # デフォルト: 日本語
@@ -7076,9 +7079,77 @@ else:
 
 # COMMAND ----------
 
+def extract_select_from_ctas(query: str) -> str:
+    """
+    CREATE TABLE AS SELECT (CTAS) クエリからAS以降の部分のみを抽出
+    
+    対応パターン:
+    - CREATE TABLE ... AS SELECT ...
+    - CREATE OR REPLACE TABLE ... AS SELECT ...
+    - CREATE TABLE ... AS WITH ... SELECT ...
+    - AS の後ろに括弧がない場合
+    - 複数行にまたがる場合
+    - テーブル定義の複雑なパターン（USING、PARTITIONED BY、TBLPROPERTIES等）
+    
+    Args:
+        query: 元のクエリ
+    
+    Returns:
+        str: AS以降の部分のみのクエリ、またはCTASでない場合は元のクエリ
+    """
+    import re
+    
+    # クエリを正規化（改行・空白を統一）
+    normalized_query = re.sub(r'\s+', ' ', query.strip())
+    
+    # CTAS パターンの検出（包括的なパターン）
+    # CREATE [OR REPLACE] TABLE ... AS ... の形式を検出
+    # ASキーワードの位置を正確に特定する
+    
+    # CREATE [OR REPLACE] TABLE部分の検出
+    create_patterns = [
+        r'CREATE\s+OR\s+REPLACE\s+TABLE',
+        r'CREATE\s+TABLE'
+    ]
+    
+    for create_pattern in create_patterns:
+        # CREATE TABLE部分を検出
+        create_match = re.search(create_pattern, normalized_query, re.IGNORECASE)
+        if create_match:
+            # CREATE TABLE以降の部分を取得
+            after_create = normalized_query[create_match.end():].strip()
+            
+            # AS キーワードの位置を検索（大文字小文字を区別しない）
+            # AS は単語境界で区切られている必要がある
+            as_pattern = r'\bAS\b'
+            as_match = re.search(as_pattern, after_create, re.IGNORECASE)
+            
+            if as_match:
+                # AS以降の部分を取得
+                as_part = after_create[as_match.end():].strip()
+                
+                if as_part:
+                    print(f"✅ CTAS検出: AS以降の部分をEXPLAIN文に使用")
+                    print(f"📊 元のクエリ長: {len(query):,} 文字")
+                    print(f"📊 AS以降部分長: {len(as_part):,} 文字")
+                    
+                    # WITH句で始まる場合やSELECT句で始まる場合を判定
+                    if as_part.upper().startswith('WITH'):
+                        print("📋 WITH句で始まるクエリを検出")
+                    elif as_part.upper().startswith('SELECT'):
+                        print("📋 SELECT句で始まるクエリを検出")
+                    else:
+                        print("📋 その他のクエリ形式を検出")
+                    
+                    return as_part
+    
+    print("📋 通常のクエリ: そのままEXPLAIN文に使用")
+    return query
+
 def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
     """
     オリジナルクエリのEXPLAIN文を実行し、結果をファイルに保存
+    CTASの場合はSELECT部分のみを抽出してEXPLAIN文に渡す
     """
     from datetime import datetime
     import os
@@ -7091,8 +7162,11 @@ def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     explain_filename = f"output_explain_plan_{timestamp}.txt"
     
+    # CTASの場合はSELECT部分のみを抽出
+    query_for_explain = extract_select_from_ctas(original_query)
+    
     # EXPLAIN文の生成
-    explain_query = f"EXPLAIN {original_query}"
+    explain_query = f"EXPLAIN {query_for_explain}"
     
     # EXPLAIN文の実行
     try:
@@ -7786,36 +7860,61 @@ except Exception as e:
 
 print()
 
-# 🧹 EXPLAIN結果ファイルの削除（LLMによる最適化とレポート推敲処理完了後）
+# 🧹 中間ファイルの削除処理（DEBUG_ENABLEフラグに基づく）
+debug_enabled = globals().get('DEBUG_ENABLE', 'N')
 explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
-if explain_enabled.upper() == 'Y':
-    print("\n🧹 EXPLAIN結果ファイルの削除処理")
+
+if debug_enabled.upper() == 'Y':
+    print("\n🐛 デバッグモード有効: 中間ファイルを保持します")
     print("-" * 40)
+    print("💡 DEBUG_ENABLE=Y のため、すべての中間ファイルが保持されます")
+    print("📁 以下のファイルが保持されます:")
     
     import glob
     import os
     
-    # EXPLAIN結果ファイルを検索
-    explain_files = glob.glob("output_explain_plan_*.txt")
+    # 保持されるファイル一覧を表示
+    explain_files = glob.glob("output_explain_plan_*.txt") if explain_enabled.upper() == 'Y' else []
     
     if explain_files:
-        print(f"📁 削除対象のEXPLAIN結果ファイル: {len(explain_files)} 個")
-        
-        deleted_count = 0
-        for file_path in explain_files:
-            try:
-                os.remove(file_path)
-                print(f"✅ 削除完了: {file_path}")
-                deleted_count += 1
-            except Exception as e:
-                print(f"❌ 削除失敗: {file_path} - {str(e)}")
-        
-        print(f"🗑️ 削除完了: {deleted_count}/{len(explain_files)} ファイル")
-        print("💡 EXPLAIN結果はLLMによる最適化処理で使用済みのため削除しました")
-    else:
-        print("📁 削除対象のEXPLAIN結果ファイルが見つかりませんでした")
+        print(f"   🔍 EXPLAIN結果ファイル: {len(explain_files)} 個")
+        for file_path in explain_files[:3]:  # 最大3個まで表示
+            print(f"      📄 {file_path}")
+        if len(explain_files) > 3:
+            print(f"      ... 他 {len(explain_files) - 3} 個")
+    
+    print("✅ デバッグモード: ファイル削除処理をスキップしました")
 else:
-    print("\n⚠️ EXPLAIN実行が無効化されているため、ファイル削除処理をスキップしました")
+    print("\n🧹 中間ファイルの削除処理")
+    print("-" * 40)
+    print("💡 DEBUG_ENABLE=N のため、中間ファイルを削除します")
+    print("📁 保持されるファイル: output_optimization_report_*.md, output_optimized_query_*.sql")
+    
+    import glob
+    import os
+    
+    if explain_enabled.upper() == 'Y':
+        # EXPLAIN結果ファイルを検索
+        explain_files = glob.glob("output_explain_plan_*.txt")
+        
+        if explain_files:
+            print(f"📁 削除対象のEXPLAIN結果ファイル: {len(explain_files)} 個")
+            
+            deleted_count = 0
+            for file_path in explain_files:
+                try:
+                    os.remove(file_path)
+                    print(f"✅ 削除完了: {file_path}")
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"❌ 削除失敗: {file_path} - {str(e)}")
+            
+            print(f"🗑️ 削除完了: {deleted_count}/{len(explain_files)} ファイル")
+            print("💡 EXPLAIN結果はLLMによる最適化処理で使用済みのため削除しました")
+        else:
+            print("📁 削除対象のEXPLAIN結果ファイルが見つかりませんでした")
+    else:
+        print("⚠️ EXPLAIN実行が無効化されているため、EXPLAIN結果ファイルの削除処理をスキップしました")
 
 print()
 
