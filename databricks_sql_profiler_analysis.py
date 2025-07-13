@@ -7090,18 +7090,9 @@ def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
     # ファイル名の生成
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     explain_filename = f"output_explain_plan_{timestamp}.txt"
-    sql_filename = f"output_explain_query_{timestamp}.sql"
     
     # EXPLAIN文の生成
     explain_query = f"EXPLAIN {original_query}"
-    
-    # SQL文をファイルに保存
-    try:
-        with open(sql_filename, 'w', encoding='utf-8') as f:
-            f.write(explain_query)
-        print(f"✅ EXPLAIN文を保存: {sql_filename}")
-    except Exception as e:
-        print(f"❌ EXPLAIN文の保存に失敗: {str(e)}")
     
     # EXPLAIN文の実行
     try:
@@ -7152,7 +7143,6 @@ def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
         
         return {
             'explain_file': explain_filename,
-            'sql_file': sql_filename,
             'plan_lines': len(explain_result)
         }
         
@@ -7238,8 +7228,6 @@ elif original_query_for_explain and original_query_for_explain.strip():
             for file_type, filename in explain_results.items():
                 if file_type == 'explain_file':
                     print(f"   📄 EXPLAIN結果: {filename}")
-                elif file_type == 'sql_file':
-                    print(f"   📄 EXPLAIN SQL: {filename}")
                 elif file_type == 'error_file':
                     print(f"   📄 エラーログ: {filename}")
                 elif file_type == 'plan_lines':
@@ -7795,6 +7783,39 @@ except Exception as e:
     print(f"❌ レポート推敲処理中にエラーが発生: {str(e)}")
     import traceback
     traceback.print_exc()
+
+print()
+
+# 🧹 EXPLAIN結果ファイルの削除（LLMによる最適化とレポート推敲処理完了後）
+explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
+if explain_enabled.upper() == 'Y':
+    print("\n🧹 EXPLAIN結果ファイルの削除処理")
+    print("-" * 40)
+    
+    import glob
+    import os
+    
+    # EXPLAIN結果ファイルを検索
+    explain_files = glob.glob("output_explain_plan_*.txt")
+    
+    if explain_files:
+        print(f"📁 削除対象のEXPLAIN結果ファイル: {len(explain_files)} 個")
+        
+        deleted_count = 0
+        for file_path in explain_files:
+            try:
+                os.remove(file_path)
+                print(f"✅ 削除完了: {file_path}")
+                deleted_count += 1
+            except Exception as e:
+                print(f"❌ 削除失敗: {file_path} - {str(e)}")
+        
+        print(f"🗑️ 削除完了: {deleted_count}/{len(explain_files)} ファイル")
+        print("💡 EXPLAIN結果はLLMによる最適化処理で使用済みのため削除しました")
+    else:
+        print("📁 削除対象のEXPLAIN結果ファイルが見つかりませんでした")
+else:
+    print("\n⚠️ EXPLAIN実行が無効化されているため、ファイル削除処理をスキップしました")
 
 print()
 
