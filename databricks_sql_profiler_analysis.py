@@ -7241,6 +7241,28 @@ def refine_report_content_with_llm(report_content: str) -> str:
         print("❌ LLMプロバイダーが設定されていません")
         return report_content
     
+    # Photon利用率の抽出と評価判定
+    import re
+    photon_pattern = r'利用率[：:]\s*(\d+(?:\.\d+)?)%'
+    photon_match = re.search(photon_pattern, report_content)
+    
+    photon_evaluation_instruction = ""
+    if photon_match:
+        photon_utilization = float(photon_match.group(1))
+        if photon_utilization <= 80:
+            photon_evaluation_instruction = """
+【Photon利用率評価指示】
+- Photon利用率が80%以下の場合は「要改善」または「不良」の評価を明確に表示してください
+- 80%以下の場合は、改善の必要性を強調し、具体的な改善アクションを提示してください
+- 評価例: 「Photon利用率: XX% (評価: 要改善)」
+"""
+        else:
+            photon_evaluation_instruction = """
+【Photon利用率評価指示】
+- Photon利用率が80%以上の場合は「良好」の評価を表示してください
+- 評価例: 「Photon利用率: XX% (評価: 良好)」
+"""
+    
     refinement_prompt = f"""あなたは技術文書の編集者です。以下のDatabricks SQLパフォーマンス分析レポートを、読みやすく簡潔に推敲してください。
 
 【推敲の要件】
@@ -7251,6 +7273,8 @@ def refine_report_content_with_llm(report_content: str) -> str:
 5. 数値データやメトリクスは保持する
 6. 実用的な推奨事項を明確に提示する
 
+{photon_evaluation_instruction}
+
 【現在のレポート内容】
 {report_content}
 
@@ -7258,6 +7282,7 @@ def refine_report_content_with_llm(report_content: str) -> str:
 - 推敲されたレポートをmarkdown形式で出力
 - 技術情報は維持しつつ、可読性を向上させる
 - 重要なポイントを強調し、アクションプランを明確にする
+- Photon利用率の評価を明確に表示する
 """
     
     try:
