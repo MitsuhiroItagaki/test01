@@ -51,6 +51,17 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 
 ## 🚀 Latest Enhancements
 
+### 🐛 DEBUG_ENABLE Flag Addition
+- **Debug Mode Control**: `DEBUG_ENABLE = 'Y'` retains intermediate files, `'N'` auto-deletes them
+- **File Management Optimization**: Only retains final outputs (`output_optimization_report_*.md`, `output_optimized_query_*.sql`)
+- **Development & Production Support**: Detailed file retention for debugging, efficient file management for production
+
+### 🔍 EXPLAIN Statement Execution and Enhanced CTAS Support
+- **Automatic EXPLAIN Execution**: `EXPLAIN_ENABLED = 'Y'` automates execution plan analysis
+- **Comprehensive CTAS Support**: Accurately extracts SELECT portions from complex CREATE TABLE AS SELECT statements
+- **Catalog & Database Configuration**: Flexible execution environment setup with `CATALOG` and `DATABASE` variables
+- **Complex Pattern Support**: Handles complex syntax including WITH clauses, CREATE OR REPLACE, PARTITIONED BY, etc.
+
 ### 📈 Cell 47: Comprehensive Bottleneck Analysis
 - **Integrated Data Analysis**: Combines TOP10 time-consuming processes, Liquid Clustering analysis, and SQL optimization execution
 - **Prioritized Reporting**: HIGH/MEDIUM/LOW priority action classification
@@ -134,10 +145,20 @@ LLM_CONFIG = {
 ### 3. Basic Configuration
 ```python
 # Analysis target file path configuration
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'
 
 # Output language configuration
 OUTPUT_LANGUAGE = 'en'  # 'ja' = Japanese, 'en' = English
+
+# EXPLAIN statement execution configuration
+EXPLAIN_ENABLED = 'Y'  # 'Y' = execute, 'N' = skip
+
+# Debug mode configuration
+DEBUG_ENABLE = 'N'  # 'Y' = retain intermediate files, 'N' = keep only final files
+
+# Catalog and database configuration (used for EXPLAIN statement execution)
+CATALOG = 'main'
+DATABASE = 'default'
 ```
 
 ## 📊 Usage
@@ -147,8 +168,11 @@ OUTPUT_LANGUAGE = 'en'  # 'ja' = Japanese, 'en' = English
 1. **Cells 1-32**: Basic configuration and analysis function definition
 2. **Cell 33**: TOP10 time-consuming process analysis
 3. **Cell 35**: Liquid Clustering opportunity analysis
-4. **Cell 47**: Comprehensive bottleneck analysis (integrated report generation)
-5. **Cell 48**: Automatic report refinement and readability improvement
+4. **Cell 43**: Original query extraction
+5. **EXPLAIN Execution Cell**: Execution plan analysis (when EXPLAIN_ENABLED='Y')
+6. **Cell 45**: LLM-based SQL optimization (utilizing EXPLAIN results)
+7. **Cell 47**: Comprehensive bottleneck analysis (integrated report generation)
+8. **Cell 48**: Automatic report refinement and readability improvement
 
 ### Execution Example
 ```python
@@ -204,6 +228,39 @@ CLUSTER BY (product_id, sales_date);
 ```
 
 ## 🔧 Configuration Options
+
+### Basic Configuration Items
+```python
+# 🌐 Output language configuration
+OUTPUT_LANGUAGE = 'en'  # 'ja' = Japanese, 'en' = English
+
+# 🔍 EXPLAIN statement execution configuration
+EXPLAIN_ENABLED = 'Y'  # 'Y' = execute, 'N' = skip
+
+# 🐛 Debug mode configuration
+DEBUG_ENABLE = 'N'  # 'Y' = retain intermediate files, 'N' = keep only final files
+
+# 🗂️ Catalog and database configuration
+CATALOG = 'main'
+DATABASE = 'default'
+```
+
+### File Management Behavior
+- **DEBUG_ENABLE='N' (Default)**: 
+  - Retained files: `output_optimization_report_*.md`, `output_optimized_query_*.sql`
+  - Deleted files: `output_explain_plan_*.txt` and other intermediate files
+
+- **DEBUG_ENABLE='Y' (Debug Mode)**: 
+  - Retains all intermediate files
+  - Enables detailed analysis process review
+
+### EXPLAIN Statement Execution and CTAS Support
+- **Supported Query Patterns**:
+  - `CREATE TABLE table_name AS SELECT ...`
+  - `CREATE OR REPLACE TABLE schema.table_name AS SELECT ...`
+  - `CREATE TABLE table_name AS WITH ... SELECT ...`
+  - `CREATE TABLE ... USING DELTA AS SELECT ...`
+  - `CREATE TABLE ... PARTITIONED BY (...) AS SELECT ...`
 
 ### Advanced Configuration
 ```python

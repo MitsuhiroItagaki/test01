@@ -51,6 +51,17 @@
 
 ## 🚀 最新の機能強化
 
+### 🐛 DEBUG_ENABLEフラグ追加
+- **デバッグモード制御**: `DEBUG_ENABLE = 'Y'`で中間ファイルを保持、`'N'`で自動削除
+- **ファイル管理最適化**: 最終成果物（`output_optimization_report_*.md`, `output_optimized_query_*.sql`）のみ保持
+- **開発・運用両対応**: デバッグ時は詳細ファイル保持、本番時は効率的なファイル管理
+
+### 🔍 EXPLAIN文実行とCTAS対応強化
+- **EXPLAIN文自動実行**: `EXPLAIN_ENABLED = 'Y'`で実行プラン解析を自動化
+- **包括的CTAS対応**: 複雑なCREATE TABLE AS SELECT文からSELECT部分を正確に抽出
+- **カタログ・データベース設定**: `CATALOG`と`DATABASE`変数で実行環境を柔軟に設定
+- **複雑パターン対応**: WITH句、CREATE OR REPLACE、PARTITIONED BY等の複雑な構文に対応
+
 ### 📈 セル47: 包括的なボトルネック分析
 - **統合データ分析**: TOP10時間消費処理、Liquid Clustering分析、SQL最適化実行の3つのセクションを統合
 - **優先度付きレポート**: HIGH/MEDIUM/LOW優先度によるアクション分類
@@ -134,10 +145,20 @@ LLM_CONFIG = {
 ### 3. 基本設定
 ```python
 # 分析対象ファイルのパス設定
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'
 
 # 出力言語設定
 OUTPUT_LANGUAGE = 'ja'  # 'ja' = 日本語, 'en' = 英語
+
+# EXPLAIN文実行設定
+EXPLAIN_ENABLED = 'Y'  # 'Y' = 実行する, 'N' = 実行しない
+
+# デバッグモード設定
+DEBUG_ENABLE = 'N'  # 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持
+
+# カタログとデータベース設定（EXPLAIN文実行時に使用）
+CATALOG = 'main'
+DATABASE = 'default'
 ```
 
 ## 📊 使用方法
@@ -147,8 +168,11 @@ OUTPUT_LANGUAGE = 'ja'  # 'ja' = 日本語, 'en' = 英語
 1. **セル1-32**: 基本設定と分析関数の定義
 2. **セル33**: TOP10時間消費処理の分析
 3. **セル35**: Liquid Clustering機会の分析
-4. **セル47**: 包括的なボトルネック分析（統合レポート生成）
-5. **セル48**: レポートの自動精製と可読性向上
+4. **セル43**: オリジナルクエリの抽出
+5. **EXPLAIN実行セル**: 実行プラン解析（EXPLAIN_ENABLED='Y'の場合）
+6. **セル45**: LLMによるSQL最適化（EXPLAIN結果を活用）
+7. **セル47**: 包括的なボトルネック分析（統合レポート生成）
+8. **セル48**: レポートの自動精製と可読性向上
 
 ### 実行例
 ```python
@@ -204,6 +228,39 @@ CLUSTER BY (product_id, sales_date);
 ```
 
 ## 🔧 設定オプション
+
+### 基本設定項目
+```python
+# 🌐 出力言語設定
+OUTPUT_LANGUAGE = 'ja'  # 'ja' = 日本語, 'en' = 英語
+
+# 🔍 EXPLAIN文実行設定
+EXPLAIN_ENABLED = 'Y'  # 'Y' = 実行する, 'N' = 実行しない
+
+# 🐛 デバッグモード設定
+DEBUG_ENABLE = 'N'  # 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持
+
+# 🗂️ カタログとデータベース設定
+CATALOG = 'main'
+DATABASE = 'default'
+```
+
+### ファイル管理動作
+- **DEBUG_ENABLE='N'（デフォルト）**: 
+  - 保持ファイル: `output_optimization_report_*.md`, `output_optimized_query_*.sql`
+  - 削除ファイル: `output_explain_plan_*.txt`等の中間ファイル
+
+- **DEBUG_ENABLE='Y'（デバッグ時）**: 
+  - すべての中間ファイルを保持
+  - 分析プロセスの詳細確認が可能
+
+### EXPLAIN文実行とCTAS対応
+- **対応クエリパターン**:
+  - `CREATE TABLE table_name AS SELECT ...`
+  - `CREATE OR REPLACE TABLE schema.table_name AS SELECT ...`
+  - `CREATE TABLE table_name AS WITH ... SELECT ...`
+  - `CREATE TABLE ... USING DELTA AS SELECT ...`
+  - `CREATE TABLE ... PARTITIONED BY (...) AS SELECT ...`
 
 ### 高度な設定
 ```python
