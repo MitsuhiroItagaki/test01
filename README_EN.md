@@ -10,6 +10,7 @@
 
 - [Overview](#overview)
 - [Key Features](#key-features)
+- [Latest Enhancements](#latest-enhancements)
 - [Requirements](#requirements)
 - [Setup](#setup)
 - [Usage](#usage)
@@ -27,14 +28,15 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 - **Liquid Clustering Recommendations**: Concrete implementation code generation for table optimization
 - **BROADCAST Analysis**: Table size estimation from execution plans and JOIN optimization
 - **SQL Query Optimization**: Automatic generation of improved versions of original queries
+- **Automatic Report Refinement**: Automatic readability improvement of generated reports
 
 ## ✨ Key Features
 
 ### 🔍 Comprehensive Analysis Capabilities
 - **Execution Plan Analysis**: Detailed analysis of Spark execution plans
-- **Photon Engine Analysis**: Photon utilization status and optimization recommendations
+- **Photon Engine Analysis**: Photon utilization status and optimization recommendations (target 90%+)
 - **Parallelism & Shuffle Analysis**: Detailed evaluation of processing efficiency
-- **Memory Spill Detection**: Identification of memory usage issues
+- **Memory Spill Detection**: Identification of memory usage issues with GB-level quantification
 
 ### 🤖 AI-Driven Analysis
 - **Multi-LLM Support**: Compatible with Databricks, OpenAI, Azure OpenAI, and Anthropic
@@ -45,6 +47,27 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 - **Liquid Clustering**: Implementation using correct Databricks SQL syntax
 - **BROADCAST Optimization**: Recommendations considering existing optimization status
 - **Query Optimization**: Generation of improved versions of original SQL queries
+- **Filter Rate Calculation**: Detailed analysis of processing efficiency for each node
+
+## 🚀 Latest Enhancements
+
+### 📈 Cell 47: Comprehensive Bottleneck Analysis
+- **Integrated Data Analysis**: Combines TOP10 time-consuming processes, Liquid Clustering analysis, and SQL optimization execution
+- **Prioritized Reporting**: HIGH/MEDIUM/LOW priority action classification
+- **Quantitative Improvement Predictions**: Quantitative predictions up to 80% execution time reduction
+- **PHOTON Engine Optimization**: Specific recommendations for achieving 90%+ utilization target
+
+### 🎯 Cell 48: Automatic Report Refinement
+- **Automatic Report Detection**: Auto-detection of latest `output_optimization_report_*.md` files
+- **LLM Refinement**: Improvement using "Make this report more readable and concise" prompt
+- **Automatic File Management**: Deletion of original files and automatic renaming of refined versions
+- **Error Handling**: Comprehensive error handling and preview functionality
+
+### 🔧 Liquid Clustering Enhancements
+- **WHERE Condition Rewriting**: Implementation includes optimization of filtering conditions
+- **Clustering Key Extraction**: Optimal key selection based on JOIN, GROUP BY, and WHERE conditions
+- **Prioritized Recommendations**: Clear implementation order through HIGH/MEDIUM/LOW priorities
+- **SQL Implementation Examples**: Concrete implementation code generation with CLUSTER BY syntax
 
 ## 📋 Requirements
 
@@ -100,7 +123,7 @@ LLM_CONFIG = {
 LLM_CONFIG = {
     "provider": "openai",
     "openai": {
-        "api_key": "your-openai-api-key",
+        "api_key": "your-api-key",
         "model": "gpt-4o",
         "max_tokens": 16000,
         "temperature": 0.0
@@ -110,246 +133,134 @@ LLM_CONFIG = {
 
 ### 3. Basic Configuration
 ```python
-# Target file path
-JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler.json'
+# Analysis target file path configuration
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'
 
-# Output language setting
+# Output language configuration
 OUTPUT_LANGUAGE = 'en'  # 'ja' = Japanese, 'en' = English
 ```
 
-## 💻 Usage
+## 📊 Usage
 
-### Basic Usage
+### Basic Analysis Flow
 
-1. **Load JSON File**
+1. **Cells 1-32**: Basic configuration and analysis function definition
+2. **Cell 33**: TOP10 time-consuming process analysis
+3. **Cell 35**: Liquid Clustering opportunity analysis
+4. **Cell 47**: Comprehensive bottleneck analysis (integrated report generation)
+5. **Cell 48**: Automatic report refinement and readability improvement
+
+### Execution Example
 ```python
-profiler_data = load_profiler_json(JSON_FILE_PATH)
-```
-
-2. **Extract Metrics**
-```python
-metrics = extract_performance_metrics(profiler_data)
-```
-
-3. **AI-Powered Analysis**
-```python
-analysis_result = analyze_bottlenecks_with_llm(metrics)
-```
-
-4. **Generate Optimized Query**
-```python
-original_query = extract_original_query_from_profiler_data(profiler_data)
-optimized_query = generate_optimized_query_with_llm(original_query, analysis_result, metrics)
-```
-
-### Complete Analysis Flow
-
-```python
-# 1. Data Loading
+# Basic analysis execution
 profiler_data = load_profiler_json(JSON_FILE_PATH)
 extracted_metrics = extract_performance_metrics(profiler_data)
 
-# 2. Bottleneck Analysis
-analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
+# TOP10 time-consuming process analysis
+top10_report = generate_top10_time_consuming_processes_report(extracted_metrics)
 
-# 3. Liquid Clustering Analysis
+# Liquid Clustering analysis
 clustering_analysis = analyze_liquid_clustering_opportunities(profiler_data, extracted_metrics)
 
-# 4. BROADCAST Analysis
-original_query = extract_original_query_from_profiler_data(profiler_data)
-plan_info = extract_execution_plan_info(profiler_data)
-broadcast_analysis = analyze_broadcast_feasibility(extracted_metrics, original_query, plan_info)
+# Comprehensive bottleneck analysis
+bottleneck_analysis = analyze_bottlenecks_with_llm(extracted_metrics)
 
-# 5. Optimized Query Generation
-optimized_query = generate_optimized_query_with_llm(original_query, analysis_result, extracted_metrics)
-
-# 6. Report Generation
-save_optimized_sql_files(original_query, optimized_query, extracted_metrics)
+# Automatic report refinement
+refined_report = refine_report_content_with_llm(bottleneck_analysis)
 ```
 
-## ⚙️ Configuration Options
+## 🎯 Output Examples
 
-### LLM Provider Configuration
+### Comprehensive Analysis Report
+```markdown
+# Databricks SQL Profiler Bottleneck Analysis Results
 
-| Provider | Configuration Key | Description |
-|----------|------------------|-------------|
-| Databricks | `endpoint_name` | Model Serving endpoint name |
-| OpenAI | `api_key`, `model` | API key and model name |
-| Azure OpenAI | `api_key`, `endpoint`, `deployment_name` | Azure-specific configuration |
-| Anthropic | `api_key`, `model` | Anthropic API key and model |
+## 1. Performance Overview
+- Execution Time: 45.67 seconds
+- Data Read: 1.2GB
+- Cache Efficiency: 78%
+- Data Selectivity: 45%
 
-### Analysis Options
+## 2. Main Bottleneck Analysis (Focus on Photon, Parallelism, Shuffle)
+- **Photon Engine**: 65% utilization → Optimization needed to achieve 90%+ target
+- **Parallelism**: 128 tasks → Recommend increasing to 256 tasks
+- **Shuffle**: 2.3GB detected → Optimization needed with BROADCAST JOIN
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `OUTPUT_LANGUAGE` | 'ja' | Output language ('ja' or 'en') |
-| `max_tokens` | 131072 | Maximum LLM tokens |
-| `temperature` | 0.0 | LLM output randomness |
-
-## 📊 Output Examples
-
-### Bottleneck Analysis Results
-```
-🔧 **Databricks SQL Profiler Bottleneck Analysis Results**
-
-## 📊 Performance Overview
-- **Execution Time**: 45.2 seconds
-- **Data Read**: 2.1GB
-- **Cache Efficiency**: 85.3%
-- **Data Selectivity**: 12.4%
-
-## ⚡ Photon Engine Analysis
-- **Photon Enabled**: Yes
-- **Photon Utilization**: 92.1%
-- **Recommendation**: Optimized
-
-## 🗂️ Liquid Clustering Recommendations
-**Target Tables**: 3 tables
-
-**Recommended Implementation**:
-- orders table: ALTER TABLE orders CLUSTER BY (customer_id, order_date)
-- customers table: ALTER TABLE customers CLUSTER BY (region, customer_type)
+## 3. TOP5 Processing Time Bottlenecks
+1. **CRITICAL**: FileScan processing (25.2 seconds)
+2. **HIGH**: ShuffleExchange processing (12.4 seconds)
+3. **MEDIUM**: HashAggregate processing (5.8 seconds)
 ```
 
-### Optimized SQL Query
+### Liquid Clustering Recommendations
 ```sql
--- Before optimization
-SELECT customer_id, SUM(amount) 
-FROM orders 
-WHERE order_date >= '2023-01-01' 
-GROUP BY customer_id;
+-- HIGH priority: user_transactions table
+ALTER TABLE user_transactions 
+CLUSTER BY (user_id, transaction_date);
 
--- After optimization
-SELECT /*+ BROADCAST(c) */ 
-    o.customer_id, 
-    SUM(o.amount) as total_amount
-FROM orders o
-JOIN customers c ON o.customer_id = c.customer_id
-WHERE o.order_date >= '2023-01-01'
-    AND c.status = 'active'
-GROUP BY o.customer_id
-ORDER BY total_amount DESC;
+-- MEDIUM priority: product_sales table
+ALTER TABLE product_sales 
+CLUSTER BY (product_id, sales_date);
 ```
 
-## 🛠️ Troubleshooting
+## 🔧 Configuration Options
 
-### Common Issues and Solutions
-
-#### 1. LLM Endpoint Error
-```
-❌ Analysis Error: Connection timeout
-```
-**Solution**:
-- Databricks: Check Model Serving endpoint status
-- OpenAI/Azure/Anthropic: Verify API key and quota
-- Check network connectivity
-
-#### 2. File Loading Error
-```
-❌ File loading error: FileNotFoundError
-```
-**Solution**:
+### Advanced Configuration
 ```python
-# Check file existence
-dbutils.fs.ls("/FileStore/shared_uploads/")
+# Photon optimization configuration
+PHOTON_CONFIG = {
+    "target_utilization": 0.9,  # Target 90% utilization
+    "enable_vectorized_execution": True,
+    "optimize_shuffle_partitions": True
+}
 
-# Verify path format
-# Correct: '/FileStore/shared_uploads/username/file.json'
-# Correct: '/Volumes/catalog/schema/volume/file.json'
-```
+# Liquid Clustering configuration
+CLUSTERING_CONFIG = {
+    "analyze_where_conditions": True,
+    "include_join_keys": True,
+    "priority_threshold": 0.8
+}
 
-#### 3. Memory Error
-```
-❌ OutOfMemoryError: Java heap space
-```
-**Solution**:
-- Increase cluster memory settings
-- Use larger instance types
-- Process multiple profiler files separately
-
-#### 4. Multi-language Character Encoding
-```
-❌ UnicodeDecodeError
-```
-**Solution**:
-```python
-# Verify UTF-8 encoding
-with open(file_path, 'r', encoding='utf-8') as file:
-    data = json.load(file)
-```
-
-## 📈 Performance Optimization Tips
-
-### 1. LLM Provider Selection
-- **Fast Processing**: Databricks Model Serving
-- **High-Quality Analysis**: OpenAI GPT-4o
-- **Enterprise**: Azure OpenAI
-- **Cost-Effective**: Anthropic Claude
-
-### 2. Large File Processing
-```python
-# Check file size
-import os
-file_size = os.path.getsize(JSON_FILE_PATH)
-print(f"File size: {file_size / 1024 / 1024:.1f}MB")
-
-# Consider split processing for large files
-```
-
-### 3. Parallel Processing
-```python
-# Parallel processing of multiple files
-from concurrent.futures import ThreadPoolExecutor
-
-profiler_files = [file1, file2, file3]
-with ThreadPoolExecutor(max_workers=3) as executor:
-    results = list(executor.map(analyze_single_file, profiler_files))
-```
-
-## 🔧 Customization
-
-### Adding Analysis Metrics
-```python
-def extract_performance_metrics(profiler_data):
-    # Add custom metrics
-    metrics["custom_indicators"] = {
-        "custom_metric_1": calculate_custom_metric_1(profiler_data),
-        "custom_metric_2": calculate_custom_metric_2(profiler_data)
-    }
-    return metrics
-```
-
-### Adding New LLM Providers
-```python
-def _call_custom_llm(prompt: str) -> str:
-    # Custom LLM provider implementation
-    pass
-
-# Add to LLM_CONFIG
-LLM_CONFIG["custom_provider"] = {
-    "api_key": "your-api-key",
-    "endpoint": "your-endpoint"
+# Report refinement configuration
+REFINEMENT_CONFIG = {
+    "auto_cleanup": True,
+    "preserve_original": False,
+    "max_refinement_attempts": 3
 }
 ```
 
-## 📝 License
+## 📈 Performance Improvement Examples
+
+### Before and After Comparison
+- **Execution Time**: 45.67 seconds → 12.34 seconds (73% improvement)
+- **Photon Utilization**: 65% → 92% (target achieved)
+- **Memory Spill**: 2.3GB → 0GB (completely resolved)
+- **Shuffle Amount**: 1.8GB → 0.5GB (72% reduction)
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+1. **LLM Endpoint Errors**
+   - Check endpoint name and API key
+   - Verify network connectivity
+
+2. **Memory Shortage Errors**
+   - Test with smaller datasets
+   - Review cluster configuration
+
+3. **Report Generation Errors**
+   - Check input data format
+   - Check log files for error details
+
+## 📄 License
 
 MIT License
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-feature`)
-3. Commit your changes (`git commit -am 'Add new feature'`)
-4. Push to the branch (`git push origin feature/new-feature`)
-5. Create a Pull Request
+Pull requests and issue reports are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📞 Support
 
-- Issues: [GitHub Issues](https://github.com/your-username/databricks-sql-profiler-analysis/issues)
-- Documentation: [Wiki](https://github.com/your-username/databricks-sql-profiler-analysis/wiki)
-- Email: support@example.com
-
----
-
-**Note**: This tool provides analysis and recommendations only. Always validate recommendations before executing in production environments. 
+For questions or support, please report at [Issues](https://github.com/your-repo/issues). 

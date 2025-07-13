@@ -10,6 +10,7 @@
 
 - [概要](#概要)
 - [主要機能](#主要機能)
+- [最新の機能強化](#最新の機能強化)
 - [要件](#要件)
 - [セットアップ](#セットアップ)
 - [使用方法](#使用方法)
@@ -27,14 +28,15 @@
 - **Liquid Clustering推奨**: テーブル最適化のための具体的な実装コード生成
 - **BROADCAST分析**: 実行プランからのテーブルサイズ推定とJOIN最適化
 - **SQLクエリ最適化**: 元のクエリの改善版を自動生成
+- **自動レポート精製**: 生成されたレポートの自動的な可読性向上
 
 ## ✨ 主要機能
 
 ### 🔍 包括的な分析機能
 - **実行プラン分析**: Spark実行プランの詳細解析
-- **Photonエンジン分析**: Photon利用状況と最適化提案
+- **Photonエンジン分析**: Photon利用状況と最適化提案（目標90%以上）
 - **並列度・シャッフル分析**: 処理効率の詳細評価
-- **メモリスピル検出**: メモリ使用量の問題特定
+- **メモリスピル検出**: メモリ使用量の問題特定とGB単位での定量化
 
 ### 🤖 AI駆動の分析
 - **マルチLLMサポート**: Databricks、OpenAI、Azure OpenAI、Anthropic対応
@@ -45,6 +47,27 @@
 - **Liquid Clustering**: Databricks SQL準拠の正しい構文での実装
 - **BROADCAST最適化**: 既存の最適化状況を考慮した推奨
 - **クエリ最適化**: 元のSQLクエリの改善版生成
+- **フィルタリング率計算**: 各ノードの処理効率詳細分析
+
+## 🚀 最新の機能強化
+
+### 📈 セル47: 包括的なボトルネック分析
+- **統合データ分析**: TOP10時間消費処理、Liquid Clustering分析、SQL最適化実行の3つのセクションを統合
+- **優先度付きレポート**: HIGH/MEDIUM/LOW優先度によるアクション分類
+- **定量的な改善予測**: 最大80%の実行時間短縮の定量的予測
+- **PHOTONエンジン最適化**: 目標90%以上の利用率達成のための具体的推奨
+
+### 🎯 セル48: レポート自動精製
+- **自動レポート検出**: 最新の`output_optimization_report_*.md`ファイルの自動検出
+- **LLMによる精製**: 「このレポートをもっと読みやすく、簡潔にしてください」プロンプトによる改善
+- **自動ファイル管理**: 元ファイルの削除と精製版の自動リネーム
+- **エラーハンドリング**: 包括的なエラー処理とプレビュー機能
+
+### 🔧 Liquid Clustering強化
+- **Where条件書き換え**: フィルタリング条件の最適化を含む検討実施
+- **クラスタリングキー抽出**: JOIN、GROUP BY、WHERE条件に基づく最適なキー選択
+- **優先度付き推奨**: HIGH/MEDIUM/LOW優先度による実装順序の明確化
+- **SQL実装例**: 具体的なCLUSTER BY構文での実装コード生成
 
 ## 📋 要件
 
@@ -100,7 +123,7 @@ LLM_CONFIG = {
 LLM_CONFIG = {
     "provider": "openai",
     "openai": {
-        "api_key": "your-openai-api-key",
+        "api_key": "your-api-key",
         "model": "gpt-4o",
         "max_tokens": 16000,
         "temperature": 0.0
@@ -110,246 +133,134 @@ LLM_CONFIG = {
 
 ### 3. 基本設定
 ```python
-# 分析対象ファイルのパス
-JSON_FILE_PATH = '/FileStore/shared_uploads/your_username/profiler.json'
+# 分析対象ファイルのパス設定
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'
 
 # 出力言語設定
 OUTPUT_LANGUAGE = 'ja'  # 'ja' = 日本語, 'en' = 英語
 ```
 
-## 💻 使用方法
+## 📊 使用方法
 
-### 基本的な使用方法
+### 基本的な分析フロー
 
-1. **JSONファイルの読み込み**
+1. **セル1-32**: 基本設定と分析関数の定義
+2. **セル33**: TOP10時間消費処理の分析
+3. **セル35**: Liquid Clustering機会の分析
+4. **セル47**: 包括的なボトルネック分析（統合レポート生成）
+5. **セル48**: レポートの自動精製と可読性向上
+
+### 実行例
 ```python
-profiler_data = load_profiler_json(JSON_FILE_PATH)
-```
-
-2. **メトリクス抽出**
-```python
-metrics = extract_performance_metrics(profiler_data)
-```
-
-3. **AIによる分析**
-```python
-analysis_result = analyze_bottlenecks_with_llm(metrics)
-```
-
-4. **最適化クエリ生成**
-```python
-original_query = extract_original_query_from_profiler_data(profiler_data)
-optimized_query = generate_optimized_query_with_llm(original_query, analysis_result, metrics)
-```
-
-### 完全な分析フロー
-
-```python
-# 1. データ読み込み
+# 基本分析の実行
 profiler_data = load_profiler_json(JSON_FILE_PATH)
 extracted_metrics = extract_performance_metrics(profiler_data)
 
-# 2. ボトルネック分析
-analysis_result = analyze_bottlenecks_with_llm(extracted_metrics)
+# TOP10時間消費処理分析
+top10_report = generate_top10_time_consuming_processes_report(extracted_metrics)
 
-# 3. Liquid Clustering分析
+# Liquid Clustering分析
 clustering_analysis = analyze_liquid_clustering_opportunities(profiler_data, extracted_metrics)
 
-# 4. BROADCAST分析
-original_query = extract_original_query_from_profiler_data(profiler_data)
-plan_info = extract_execution_plan_info(profiler_data)
-broadcast_analysis = analyze_broadcast_feasibility(extracted_metrics, original_query, plan_info)
+# 包括的なボトルネック分析
+bottleneck_analysis = analyze_bottlenecks_with_llm(extracted_metrics)
 
-# 5. 最適化クエリ生成
-optimized_query = generate_optimized_query_with_llm(original_query, analysis_result, extracted_metrics)
-
-# 6. レポート生成
-save_optimized_sql_files(original_query, optimized_query, extracted_metrics)
+# レポートの自動精製
+refined_report = refine_report_content_with_llm(bottleneck_analysis)
 ```
 
-## ⚙️ 設定オプション
+## 🎯 出力例
 
-### LLMプロバイダー設定
+### 包括的分析レポート
+```markdown
+# Databricks SQLプロファイラー ボトルネック分析結果
 
-| プロバイダー | 設定キー | 説明 |
-|-------------|----------|------|
-| Databricks | `endpoint_name` | Model Servingエンドポイント名 |
-| OpenAI | `api_key`, `model` | APIキーとモデル名 |
-| Azure OpenAI | `api_key`, `endpoint`, `deployment_name` | Azure固有の設定 |
-| Anthropic | `api_key`, `model` | AnthropicのAPIキーとモデル |
+## 1. パフォーマンス概要
+- 実行時間: 45.67秒
+- データ読み込み: 1.2GB
+- キャッシュ効率: 78%
+- データ選択性: 45%
 
-### 分析オプション
+## 2. 主要ボトルネック分析（Photon、並列度、シャッフルに焦点）
+- **Photonエンジン**: 利用率65% → 目標90%以上に向けた最適化が必要
+- **並列度**: 128タスク → 256タスクへの増加を推奨
+- **シャッフル**: 2.3GB検出 → BROADCAST JOINでの最適化が必要
 
-| オプション | デフォルト | 説明 |
-|-----------|-----------|------|
-| `OUTPUT_LANGUAGE` | 'ja' | 出力言語（'ja'または'en'） |
-| `max_tokens` | 131072 | LLMの最大トークン数 |
-| `temperature` | 0.0 | LLMの出力ランダム性 |
-
-## 📊 出力例
-
-### ボトルネック分析結果
-```
-🔧 **Databricks SQLプロファイラー ボトルネック分析結果**
-
-## 📊 パフォーマンス概要
-- **実行時間**: 45.2秒
-- **読み込みデータ量**: 2.1GB
-- **キャッシュ効率**: 85.3%
-- **データ選択性**: 12.4%
-
-## ⚡ Photonエンジン分析
-- **Photon有効**: はい
-- **Photon利用率**: 92.1%
-- **推奨**: 最適化済み
-
-## 🗂️ Liquid Clustering推奨事項
-**対象テーブル**: 3個
-
-**推奨実装**:
-- orders テーブル: ALTER TABLE orders CLUSTER BY (customer_id, order_date)
-- customers テーブル: ALTER TABLE customers CLUSTER BY (region, customer_type)
+## 3. TOP5処理時間ボトルネック
+1. **CRITICAL**: FileScan処理 (25.2秒)
+2. **HIGH**: ShuffleExchange処理 (12.4秒)
+3. **MEDIUM**: HashAggregate処理 (5.8秒)
 ```
 
-### 最適化されたSQLクエリ
+### Liquid Clustering推奨
 ```sql
--- 最適化前
-SELECT customer_id, SUM(amount) 
-FROM orders 
-WHERE order_date >= '2023-01-01' 
-GROUP BY customer_id;
+-- HIGH優先度: user_transactions テーブル
+ALTER TABLE user_transactions 
+CLUSTER BY (user_id, transaction_date);
 
--- 最適化後
-SELECT /*+ BROADCAST(c) */ 
-    o.customer_id, 
-    SUM(o.amount) as total_amount
-FROM orders o
-JOIN customers c ON o.customer_id = c.customer_id
-WHERE o.order_date >= '2023-01-01'
-    AND c.status = 'active'
-GROUP BY o.customer_id
-ORDER BY total_amount DESC;
+-- MEDIUM優先度: product_sales テーブル
+ALTER TABLE product_sales 
+CLUSTER BY (product_id, sales_date);
 ```
 
-## 🛠️ トラブルシューティング
+## 🔧 設定オプション
 
-### よくある問題と解決方法
-
-#### 1. LLMエンドポイントエラー
-```
-❌ 分析エラー: Connection timeout
-```
-**解決方法**:
-- Databricks: Model Servingエンドポイントの状態確認
-- OpenAI/Azure/Anthropic: APIキーとクォータ確認
-- ネットワーク接続の確認
-
-#### 2. ファイル読み込みエラー
-```
-❌ ファイル読み込みエラー: FileNotFoundError
-```
-**解決方法**:
+### 高度な設定
 ```python
-# ファイル存在確認
-dbutils.fs.ls("/FileStore/shared_uploads/")
+# Photon最適化設定
+PHOTON_CONFIG = {
+    "target_utilization": 0.9,  # 目標利用率90%
+    "enable_vectorized_execution": True,
+    "optimize_shuffle_partitions": True
+}
 
-# パス形式の確認
-# 正しい: '/FileStore/shared_uploads/username/file.json'
-# 正しい: '/Volumes/catalog/schema/volume/file.json'
-```
+# Liquid Clustering設定
+CLUSTERING_CONFIG = {
+    "analyze_where_conditions": True,
+    "include_join_keys": True,
+    "priority_threshold": 0.8
+}
 
-#### 3. メモリエラー
-```
-❌ OutOfMemoryError: Java heap space
-```
-**解決方法**:
-- クラスタのメモリ設定を増加
-- より大きなインスタンスタイプを使用
-- 複数のプロファイラーファイルを分割処理
-
-#### 4. 多言語文字化け
-```
-❌ UnicodeDecodeError
-```
-**解決方法**:
-```python
-# UTF-8エンコーディングの確認
-with open(file_path, 'r', encoding='utf-8') as file:
-    data = json.load(file)
-```
-
-## 📈 パフォーマンス最適化のヒント
-
-### 1. LLMプロバイダーの選択
-- **高速処理**: Databricks Model Serving
-- **高品質分析**: OpenAI GPT-4o
-- **エンタープライズ**: Azure OpenAI
-- **コスト効率**: Anthropic Claude
-
-### 2. 大容量ファイルの処理
-```python
-# ファイルサイズ確認
-import os
-file_size = os.path.getsize(JSON_FILE_PATH)
-print(f"ファイルサイズ: {file_size / 1024 / 1024:.1f}MB")
-
-# 大容量ファイルの場合は分割処理を検討
-```
-
-### 3. 並列処理
-```python
-# 複数ファイルの並列処理
-from concurrent.futures import ThreadPoolExecutor
-
-profiler_files = [file1, file2, file3]
-with ThreadPoolExecutor(max_workers=3) as executor:
-    results = list(executor.map(analyze_single_file, profiler_files))
-```
-
-## 🔧 カスタマイズ
-
-### 分析メトリクスの追加
-```python
-def extract_performance_metrics(profiler_data):
-    # カスタムメトリクスの追加
-    metrics["custom_indicators"] = {
-        "custom_metric_1": calculate_custom_metric_1(profiler_data),
-        "custom_metric_2": calculate_custom_metric_2(profiler_data)
-    }
-    return metrics
-```
-
-### 新しいLLMプロバイダーの追加
-```python
-def _call_custom_llm(prompt: str) -> str:
-    # カスタムLLMプロバイダーの実装
-    pass
-
-# LLM_CONFIGに追加
-LLM_CONFIG["custom_provider"] = {
-    "api_key": "your-api-key",
-    "endpoint": "your-endpoint"
+# レポート精製設定
+REFINEMENT_CONFIG = {
+    "auto_cleanup": True,
+    "preserve_original": False,
+    "max_refinement_attempts": 3
 }
 ```
 
-## 📝 ライセンス
+## 📈 パフォーマンス改善例
+
+### 改善前後の比較
+- **実行時間**: 45.67秒 → 12.34秒（73%改善）
+- **Photon利用率**: 65% → 92%（目標達成）
+- **メモリスピル**: 2.3GB → 0GB（完全解消）
+- **シャッフル量**: 1.8GB → 0.5GB（72%削減）
+
+## 🛠️ トラブルシューティング
+
+### よくある問題
+
+1. **LLMエンドポイントエラー**
+   - エンドポイント名とAPIキーを確認
+   - ネットワーク接続を確認
+
+2. **メモリ不足エラー**
+   - より小さなデータセットでテスト
+   - クラスター設定を見直し
+
+3. **レポート生成エラー**
+   - 入力データの形式を確認
+   - ログファイルでエラー詳細を確認
+
+## 📄 ライセンス
 
 MIT License
 
-## 🤝 コントリビューション
+## 🤝 貢献
 
-1. フォークする
-2. 機能ブランチを作成 (`git checkout -b feature/new-feature`)
-3. コミット (`git commit -am 'Add new feature'`)
-4. プッシュ (`git push origin feature/new-feature`)
-5. プルリクエストを作成
+プルリクエストや課題報告を歓迎します。詳細は[CONTRIBUTING.md](CONTRIBUTING.md)をご覧ください。
 
 ## 📞 サポート
 
-- Issues: [GitHub Issues](https://github.com/your-username/databricks-sql-profiler-analysis/issues)
-- ドキュメント: [Wiki](https://github.com/your-username/databricks-sql-profiler-analysis/wiki)
-- メール: support@example.com
-
----
-
-**注意**: このツールは分析と推奨事項の提供のみを行います。本番環境での実行前に、必ず推奨事項を検証してください。
+質問やサポートが必要な場合は、[Issues](https://github.com/your-repo/issues)で報告してください。
