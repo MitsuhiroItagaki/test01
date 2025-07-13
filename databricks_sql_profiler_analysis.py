@@ -2904,7 +2904,7 @@ except Exception as e:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 🚀 メイン処理実行セクション
+# MAGIC # 🚀 クエリプロファイル分析セクション
 # MAGIC
 # MAGIC **ここからメインの分析処理が開始されます**
 # MAGIC
@@ -7017,7 +7017,7 @@ print("✅ 関数定義完了: SQL最適化関連関数（実行プランサイ�
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🚀 SQLクエリ最適化の実行（ステップ1: クエリ抽出）
+# MAGIC ## 🚀 クエリ抽出
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからオリジナルクエリの抽出
@@ -7324,7 +7324,7 @@ print()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🤖 LLMによるSQL最適化（ステップ2: 最適化実行）
+# MAGIC ## 🤖 LLMによるSQL最適化
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLMを使用した抽出クエリの最適化
@@ -7391,7 +7391,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 💾 最適化結果の保存（ステップ3: ファイル生成）
+# MAGIC ## 💾 最適化結果の保存
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 最適化されたSQLクエリのファイル保存（接頭語: output_）
@@ -7411,7 +7411,7 @@ missing_variables = []
 try:
     original_query
 except NameError:
-    missing_variables.append("original_query (セル19を実行してください)")
+            missing_variables.append("original_query")
     original_query = ""
 
 # optimized_result のチェック  
@@ -7437,7 +7437,7 @@ except NameError:
 try:
     analysis_result
 except NameError:
-    missing_variables.append("analysis_result (セル16を実行してください)")
+            missing_variables.append("analysis_result")
     analysis_result = ""
 
 if missing_variables:
@@ -7491,76 +7491,6 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🧪 Databricks Notebookでの実行ガイド（ステップ4: 実行方法）
-# MAGIC
-# MAGIC このセルでは以下の処理を実行します：
-# MAGIC - 生成されたファイルの使用方法説明
-# MAGIC - Databricks Notebookでの実行手順ガイド
-# MAGIC - SQLクエリの直接実行方法
-# MAGIC - 重要な注意事項の表示
-
-# COMMAND ----------
-
-# 🧪 ステップ4: Databricks Notebookでの実行ガイド
-print("\n🧪 ステップ4: Databricks Notebookでの実行ガイド")
-print("-" * 40)
-
-# saved_files変数が定義されているかチェック
-try:
-    saved_files
-except NameError:
-    print("❌ saved_files変数が定義されていません。")
-    print("⚠️ セル21 (最適化結果の保存) を先に実行してください。")
-    saved_files = {}
-
-if saved_files:
-    original_file = saved_files.get('original_file', '')
-    optimized_file = saved_files.get('optimized_file', '')
-    report_file = saved_files.get('report_file', '')
-    
-    print("🚀 Databricks Notebookでの実行手順:")
-    print("1. 生成されたSQLファイルの内容を確認")
-    print("2. 必要に応じてクエリを手動調整")
-    print("3. Notebook内で直接SQLクエリを実行")
-    print("4. パフォーマンス測定と比較")
-    
-    print(f"\n📝 生成ファイル一覧:")
-    if original_file:
-        print(f"   📄 オリジナルクエリ: {original_file}")
-    if optimized_file:
-        print(f"   🚀 最適化クエリ: {optimized_file}")
-    if report_file:
-        print(f"   📊 分析レポート: {report_file}")
-    
-    if optimized_file:
-        print(f"\n🔧 Databrics Notebookでの実行方法:")
-        print(f"   # ファイルからSQLを読み込んで実行")
-        print(f"   optimized_sql = open('{optimized_file}').read()")
-        print(f"   df = spark.sql(optimized_sql)")
-        print(f"   df.show()")
-        print(f"   ")
-        print(f"   # または %sql マジックコマンドを使用")
-        print(f"   # %sql [ファイルの内容をコピー&ペースト]")
-        print(f"   ")
-        print(f"   # パフォーマンス測定例")
-        print(f"   import time")
-        print(f"   start_time = time.time()")
-        print(f"   result_count = df.count()")
-        print(f"   execution_time = time.time() - start_time")
-        print(f"   print(f'実行時間: {{execution_time:.2f}} 秒, 行数: {{result_count:,}}')")
-    
-    print(f"\n⚠️ 重要な注意事項:")
-    print(f"   • 本番環境での実行前に、必ずテスト環境で検証してください")
-    print(f"   • データベースの構造やサイズによって結果は変わる可能性があります")
-    print(f"   • クエリプランの確認: EXPLAIN 文を使用してください")
-    print(f"   • Databricks SQLエディタでの実行も可能です")
-
-else:
-    print("⚠️ 実行用ファイルが生成されていません")
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 🏁 最終処理完了サマリー
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
@@ -7604,12 +7534,12 @@ missing_summary_vars = []
 try:
     result_output_path
 except NameError:
-    missing_summary_vars.append("result_output_path (セル16を実行してください)")
+            missing_summary_vars.append("result_output_path")
 
 try:
     saved_files
 except NameError:
-    missing_summary_vars.append("saved_files (セル19を実行してください)")
+            missing_summary_vars.append("saved_files")
     saved_files = {}
 
 print(f"\n📁 出力ファイル一覧:")
@@ -7617,7 +7547,7 @@ print(f"\n📁 出力ファイル一覧:")
 if 'result_output_path' in globals():
     print(f"   📄 ボトルネック分析レポート: {result_output_path}")
 else:
-    print("   📄 ボトルネック分析レポート: (セル16を実行してください)")
+            print("   📄 ボトルネック分析レポート: 未実行")
 
 if saved_files:
     for file_type, filename in saved_files.items():
