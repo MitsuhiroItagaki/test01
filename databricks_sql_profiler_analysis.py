@@ -1054,6 +1054,7 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
         "aqe_shuffle_data_size": 0,
         "aqe_shuffle_avg_partition_size": 0,
         "aqe_shuffle_skew_warning": False,
+        "aqe_detected_and_handled": False,
         "aqe_shuffle_metrics": []
     }
     
@@ -1201,6 +1202,10 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
         threshold_512mb = 512 * 1024 * 1024
         if avg_partition_size >= threshold_512mb:
             parallelism_metrics["aqe_shuffle_skew_warning"] = True
+        else:
+            # AQEShuffleReadメトリクスが存在し、平均パーティションサイズが512MB未満の場合、
+            # AQEがスキューを検出して対応済みと判定
+            parallelism_metrics["aqe_detected_and_handled"] = True
     
     return parallelism_metrics
 
@@ -1748,13 +1753,17 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     
     # AQEShuffleRead警告の検出
     aqe_shuffle_skew_warning_detected = False
+    aqe_detected_and_handled = False
+    
     for node in metrics.get('node_metrics', []):
         parallelism_data = extract_parallelism_metrics(node)
         if parallelism_data.get('aqe_shuffle_skew_warning', False):
             aqe_shuffle_skew_warning_detected = True
-            break
+        if parallelism_data.get('aqe_detected_and_handled', False):
+            aqe_detected_and_handled = True
     
     indicators['has_aqe_shuffle_skew_warning'] = aqe_shuffle_skew_warning_detected
+    indicators['has_skew'] = aqe_detected_and_handled
     
     return indicators
 
@@ -6715,6 +6724,8 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
         
         if bottleneck_indicators.get('has_skew', False):
             bottlenecks.append("**データスキュー**: AQEで検出・対応済 - Sparkが自動的に最適化実行")
+        elif bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False):
+            bottlenecks.append("**データスキュー**: 潜在的なスキューの可能性あり - パーティションサイズが512MB以上")
         
         if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
             bottlenecks.append("**キャッシュ効率低下**: データ再利用効率が低い")
@@ -6901,6 +6912,8 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
         
         if bottleneck_indicators.get('has_skew', False):
             bottlenecks.append("**Data Skew**: AQE Detected & Handled - Spark automatically optimized execution")
+        elif bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False):
+            bottlenecks.append("**Data Skew**: Potential skew possibility - Partition size ≥ 512MB")
         
         if bottleneck_indicators.get('cache_hit_ratio', 0) < 0.5:
             bottlenecks.append("**Cache Inefficiency**: Low data reuse efficiency")
