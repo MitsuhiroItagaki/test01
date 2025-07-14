@@ -1746,6 +1746,16 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
         avg_parallelism = sum(s['num_tasks'] for s in low_parallelism_stages) / len(low_parallelism_stages)
         indicators['average_low_parallelism'] = avg_parallelism
     
+    # AQEShuffleRead警告の検出
+    aqe_shuffle_skew_warning_detected = False
+    for node in metrics.get('node_metrics', []):
+        parallelism_data = extract_parallelism_metrics(node)
+        if parallelism_data.get('aqe_shuffle_skew_warning', False):
+            aqe_shuffle_skew_warning_detected = True
+            break
+    
+    indicators['has_aqe_shuffle_skew_warning'] = aqe_shuffle_skew_warning_detected
+    
     return indicators
 
 print("✅ 関数定義完了: calculate_bottleneck_indicators")
@@ -6687,7 +6697,7 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
 | データ選択性 | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ 良好' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ 改善必要'} |
 | シャッフル操作 | {bottleneck_indicators.get('shuffle_operations_count', 0)}回 | {'✅ 良好' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ 多数'} |
 | スピル発生 | {'はい' if bottleneck_indicators.get('has_spill', False) else 'いいえ'} | {'❌ 問題あり' if bottleneck_indicators.get('has_spill', False) else '✅ 良好'} |
-| スキュー検出 | {'AQEで検出・対応済' if bottleneck_indicators.get('has_skew', False) else '未検出'} | {'🔧 AQE対応済' if bottleneck_indicators.get('has_skew', False) else '✅ 良好'} |
+| スキュー検出 | {'AQEで検出・対応済' if bottleneck_indicators.get('has_skew', False) else '潜在的なスキューの可能性あり' if bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False) else '未検出'} | {'🔧 AQE対応済' if bottleneck_indicators.get('has_skew', False) else '⚠️ 改善必要' if bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False) else '✅ 良好'} |
 
 ### 🚨 主要ボトルネック
 
