@@ -2584,11 +2584,23 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
                          key=lambda x: x['key_metrics'].get('durationMs', 0), 
                          reverse=True)[:5]  # TOP5のみ抽出
     
+    # 適切な全体時間を計算
+    total_time_ms = overall_metrics.get('total_time_ms', 0)
+    if total_time_ms <= 0:
+        # overall_metricsに適切な値がない場合、全ノードの実行時間の合計を使用
+        total_time_ms = sum([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes])
+        # 合計が0の場合は最大値を使用
+        if total_time_ms <= 0:
+            max_node_time = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
+            total_time_ms = max_node_time
+    
     critical_processes = []
     for i, node in enumerate(sorted_nodes):
         duration_ms = node['key_metrics'].get('durationMs', 0)
         duration_sec = duration_ms / 1000
-        percentage = (duration_ms / max(overall_metrics.get('total_time_ms', 1), 1)) * 100
+        
+        # パーセンテージ計算（100%を上限とする）
+        percentage = min((duration_ms / max(total_time_ms, 1)) * 100, 100.0)
         
         # ボトルネックの重要度判定
         severity = "CRITICAL" if duration_ms >= 10000 else "HIGH" if duration_ms >= 5000 else "MEDIUM"
