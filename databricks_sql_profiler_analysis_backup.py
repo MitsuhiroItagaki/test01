@@ -62,20 +62,10 @@
 # 
 # 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
 
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'  # デフォルト
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'  # デフォルト
 
 # 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
-OUTPUT_LANGUAGE = 'ja'
-
-# 🔍 EXPLAIN文実行設定（EXPLAIN_ENABLED: 'Y' = 実行する, 'N' = 実行しない）
-EXPLAIN_ENABLED = 'Y'
-
-# 🐛 デバッグモード設定（DEBUG_ENABLE: 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持）
-DEBUG_ENABLE = 'N'
-
-# 🗂️ カタログとデータベース設定（EXPLAIN文実行時に使用）
-CATALOG = 'tpcds'
-DATABASE = 'tpcds_sf1000_delta_lc'  # デフォルト: 日本語
+OUTPUT_LANGUAGE = 'ja'  # デフォルト: 日本語
 
 # 💡 使用例:
 # OUTPUT_LANGUAGE = 'ja'  # 日本語でファイル出力
@@ -1017,116 +1007,6 @@ def extract_cluster_attributes(node: Dict[str, Any]) -> list:
     # 重複を削除
     return list(set(cluster_attributes))
 
-def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    ノードから複数のTasks totalメトリクスを抽出
-    
-    シャッフル操作などでは以下の複数のメトリクスが存在する可能性があります：
-    - Tasks total
-    - Sink - Tasks total
-    - Source - Tasks total
-    
-    Args:
-        node: ノード情報
-        
-    Returns:
-        dict: 検出されたTasks totalメトリクス
-            {
-                "tasks_total": 値,
-                "sink_tasks_total": 値,
-                "source_tasks_total": 値,
-                "all_tasks_metrics": [{"name": "Tasks total", "value": 値}, ...]
-            }
-    """
-    parallelism_metrics = {
-        "tasks_total": 0,
-        "sink_tasks_total": 0,
-        "source_tasks_total": 0,
-        "all_tasks_metrics": []
-    }
-    
-    # 対象となるTasks totalメトリクス名のパターン
-    tasks_total_patterns = [
-        "Tasks total",
-        "Sink - Tasks total",
-        "Source - Tasks total"
-    ]
-    
-    # 1. detailed_metricsから検索
-    detailed_metrics = node.get('detailed_metrics', {})
-    for metric_key, metric_info in detailed_metrics.items():
-        metric_value = metric_info.get('value', 0)
-        metric_label = metric_info.get('label', '')
-        
-        # 各Tasks totalパターンをチェック
-        for pattern in tasks_total_patterns:
-            if metric_key == pattern or metric_label == pattern:
-                # 特定のメトリクスにマッピング
-                if pattern == "Tasks total":
-                    parallelism_metrics["tasks_total"] = metric_value
-                elif pattern == "Sink - Tasks total":
-                    parallelism_metrics["sink_tasks_total"] = metric_value
-                elif pattern == "Source - Tasks total":
-                    parallelism_metrics["source_tasks_total"] = metric_value
-                
-                # 全メトリクスリストに追加
-                parallelism_metrics["all_tasks_metrics"].append({
-                    "name": pattern,
-                    "value": metric_value
-                })
-    
-    # 2. raw_metricsから検索（フォールバック）
-    raw_metrics = node.get('metrics', [])
-    if isinstance(raw_metrics, list):
-        for metric in raw_metrics:
-            if isinstance(metric, dict):
-                metric_key = metric.get('key', '')
-                metric_label = metric.get('label', '')
-                metric_value = metric.get('value', 0)
-                
-                # 各Tasks totalパターンをチェック
-                for pattern in tasks_total_patterns:
-                    if metric_key == pattern or metric_label == pattern:
-                        # 既にdetailed_metricsで見つかっている場合はスキップ
-                        if not any(m["name"] == pattern for m in parallelism_metrics["all_tasks_metrics"]):
-                            # 特定のメトリクスにマッピング
-                            if pattern == "Tasks total":
-                                parallelism_metrics["tasks_total"] = metric_value
-                            elif pattern == "Sink - Tasks total":
-                                parallelism_metrics["sink_tasks_total"] = metric_value
-                            elif pattern == "Source - Tasks total":
-                                parallelism_metrics["source_tasks_total"] = metric_value
-                            
-                            # 全メトリクスリストに追加
-                            parallelism_metrics["all_tasks_metrics"].append({
-                                "name": pattern,
-                                "value": metric_value
-                            })
-    
-    # 3. key_metricsから検索（最後のフォールバック）
-    key_metrics = node.get('key_metrics', {})
-    if isinstance(key_metrics, dict):
-        for metric_key, metric_value in key_metrics.items():
-            for pattern in tasks_total_patterns:
-                if metric_key == pattern:
-                    # 既に見つかっている場合はスキップ
-                    if not any(m["name"] == pattern for m in parallelism_metrics["all_tasks_metrics"]):
-                        # 特定のメトリクスにマッピング
-                        if pattern == "Tasks total":
-                            parallelism_metrics["tasks_total"] = metric_value
-                        elif pattern == "Sink - Tasks total":
-                            parallelism_metrics["sink_tasks_total"] = metric_value
-                        elif pattern == "Source - Tasks total":
-                            parallelism_metrics["source_tasks_total"] = metric_value
-                        
-                        # 全メトリクスリストに追加
-                        parallelism_metrics["all_tasks_metrics"].append({
-                            "name": pattern,
-                            "value": metric_value
-                        })
-    
-    return parallelism_metrics
-
 def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
     """
     ノードからSize of files prunedとSize of files readメトリクスを抽出してフィルタ率を計算
@@ -1278,18 +1158,11 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
         memory_mb = node.get('key_metrics', {}).get('peakMemoryBytes', 0) / 1024 / 1024
         rows_num = node.get('key_metrics', {}).get('rowsNum', 0)
         
-        # 並列度情報の取得（修正版: 複数のTasks totalメトリクスを取得）
-        parallelism_data = extract_parallelism_metrics(node)
-        
-        # 従来の単一値（互換性のため）
-        num_tasks = parallelism_data.get('tasks_total', 0)
-        
-        # フォールバック: Sink - Tasks totalまたはSource - Tasks totalがある場合
-        if num_tasks == 0:
-            if parallelism_data.get('sink_tasks_total', 0) > 0:
-                num_tasks = parallelism_data.get('sink_tasks_total', 0)
-            elif parallelism_data.get('source_tasks_total', 0) > 0:
-                num_tasks = parallelism_data.get('source_tasks_total', 0)
+        # 並列度情報の取得
+        num_tasks = 0
+        for stage in extracted_metrics.get('stage_metrics', []):
+            if duration_ms > 0:
+                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
         
         # スピル検出（セル33と同じロジック）
         spill_detected = False
@@ -1352,7 +1225,6 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             "memory_mb": memory_mb,
             "rows_processed": rows_num,
             "num_tasks": num_tasks,
-            "parallelism_data": parallelism_data,  # 複数のTasks totalメトリクス情報を追加
             "spill_detected": spill_detected,
             "spill_bytes": spill_bytes,
             "spill_gb": spill_bytes / 1024 / 1024 / 1024 if spill_bytes > 0 else 0,
@@ -3022,7 +2894,7 @@ except Exception as e:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 🚀 クエリプロファイル分析セクション
+# MAGIC # 🚀 メイン処理実行セクション
 # MAGIC
 # MAGIC **ここからメインの分析処理が開始されます**
 # MAGIC
@@ -3587,18 +3459,11 @@ if final_sorted_nodes:
         node_name = get_meaningful_node_name(node, extracted_metrics)
         short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
         
-        # 並列度情報の取得（修正版: 複数のTasks totalメトリクスを取得）
-        parallelism_data = extract_parallelism_metrics(node)
-        
-        # 従来の単一値（互換性のため）
-        num_tasks = parallelism_data.get('tasks_total', 0)
-        
-        # フォールバック: Sink - Tasks totalまたはSource - Tasks totalがある場合
-        if num_tasks == 0:
-            if parallelism_data.get('sink_tasks_total', 0) > 0:
-                num_tasks = parallelism_data.get('sink_tasks_total', 0)
-            elif parallelism_data.get('source_tasks_total', 0) > 0:
-                num_tasks = parallelism_data.get('source_tasks_total', 0)
+        # 並列度情報の取得
+        num_tasks = 0
+        for stage in extracted_metrics.get('stage_metrics', []):
+            if duration_ms > 0:  # このノードに関連するステージを推定
+                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
         
         # ディスクスピルアウトの検出（メモリプレッシャーによるスピルメトリクス対応改善版）
         spill_detected = False
@@ -3786,17 +3651,7 @@ if final_sorted_nodes:
         print(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
         print(f"    📊 処理行数: {rows_num:>8,} 行")
         print(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-        # 複数のTasks totalメトリクスを表示
-        parallelism_display = []
-        for task_metric in parallelism_data.get('all_tasks_metrics', []):
-            parallelism_display.append(f"{task_metric['name']}: {task_metric['value']}")
-        
-        if parallelism_display:
-            print(f"    🔧 並列度: {' | '.join(parallelism_display)}")
-        else:
-            print(f"    🔧 並列度: {num_tasks:>3d} タスク")
-        
-        print(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
+        print(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
         
         # 効率性指標（行/秒）を計算
         if duration_ms > 0:
@@ -5067,49 +4922,7 @@ def analyze_broadcast_feasibility(metrics: Dict[str, Any], original_query: str, 
 def generate_optimized_query_with_llm(original_query: str, analysis_result: str, metrics: Dict[str, Any]) -> str:
     """
     セル33の詳細ボトルネック分析結果に基づいてSQLクエリを最適化（処理速度重視）
-    EXPLAIN実行フラグがYの場合は、EXPLAIN結果ファイルも活用
     """
-    
-    # EXPLAIN結果ファイルの読み込み（EXPLAIN_ENABLEDがYの場合）
-    explain_content = ""
-    physical_plan = ""
-    photon_explanation = ""
-    
-    explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
-    if explain_enabled.upper() == 'Y':
-        # 最新のEXPLAIN結果ファイルを検索
-        import glob
-        import os
-        
-        explain_files = glob.glob("output_explain_plan_*.txt")
-        if explain_files:
-            # 最新のファイルを取得
-            latest_explain_file = max(explain_files, key=os.path.getctime)
-            try:
-                with open(latest_explain_file, 'r', encoding='utf-8') as f:
-                    explain_content = f.read()
-                    print(f"✅ EXPLAIN結果ファイルを読み込み: {latest_explain_file}")
-                
-                # Physical Planの抽出
-                if "== Physical Plan ==" in explain_content:
-                    physical_plan_start = explain_content.find("== Physical Plan ==")
-                    physical_plan_end = explain_content.find("== Photon", physical_plan_start)
-                    if physical_plan_end == -1:
-                        physical_plan_end = len(explain_content)
-                    physical_plan = explain_content[physical_plan_start:physical_plan_end].strip()
-                    print(f"📊 Physical Plan情報を抽出: {len(physical_plan)} 文字")
-                
-                # Photon Explanationの抽出
-                if "== Photon Explanation ==" in explain_content:
-                    photon_start = explain_content.find("== Photon Explanation ==")
-                    photon_explanation = explain_content[photon_start:].strip()
-                    print(f"🚀 Photon Explanation情報を抽出: {len(photon_explanation)} 文字")
-                    
-            except Exception as e:
-                print(f"⚠️ EXPLAIN結果ファイルの読み込みに失敗: {str(e)}")
-                explain_content = ""
-        else:
-            print("⚠️ EXPLAIN結果ファイルが見つかりません")
     
     # 実行プラン情報の抽出（メトリクスから）
     profiler_data = metrics.get('raw_profiler_data', {})
@@ -5332,32 +5145,6 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 【パフォーマンス分析結果（サマリー）】
 {analysis_summary}
 
-【🔍 EXPLAIN結果分析（EXPLAIN_ENABLED=Yの場合のみ）】
-{f'''
-**Physical Plan分析:**
-```
-{physical_plan}
-```
-
-**Photon Explanation分析:**
-```
-{photon_explanation}
-```
-
-**Physical Plan最適化の重要ポイント:**
-- ファイルスキャンの効率性
-- ジョイン戦略の妥当性
-- シャッフル操作の最小化
-- プロジェクション（列選択）の最適化
-- フィルタープッシュダウンの活用
-
-**Photon最適化の重要ポイント:**
-- Photon未対応関数の検出と代替関数への変更
-- ベクトル化処理に適した関数の選択
-- Photon利用率向上のための書式変更
-- コンパイル時最適化の活用
-''' if explain_enabled.upper() == 'Y' and (physical_plan or photon_explanation) else '(EXPLAIN実行が無効、またはEXPLAIN結果が利用できません)'}
-
 【🎯 処理速度重視の最適化要求】
 **最重要**: 以下の順序で処理速度の改善を優先してください
 
@@ -5393,21 +5180,9 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
    - 中間結果のキャッシュ活用
 
 7. **🔧 実行プラン最適化**
-   - PHOTONエンジン最適化（目標はPhoton利用率90%以上)
-   - Liquid Clustering活用 (Where条件の書き換え含む検討を実施）
+   - PHOTONエンジン最適化
+   - Liquid Clustering活用
    - CTE活用による共通化
-
-8. **📊 EXPLAIN結果に基づく最適化**（EXPLAIN_ENABLED=Yの場合）
-   - **Physical Plan分析に基づく最適化**: 
-     - 非効率なスキャン操作の改善
-     - ジョイン順序の最適化
-     - 不要なシャッフル操作の削除
-     - プロジェクションプッシュダウンの適用
-   - **Photon未対応関数の最適化**:
-     - Photon Explanationで検出された未対応関数の代替関数への変更
-     - ベクトル化処理に適した関数への書き換え
-     - Photon利用率向上のための関数選択
-     - コンパイル時最適化の活用
 
 【🔄 REPARTITIONヒント適用ルール】
 - **スピルが検出された場合のみ適用**
@@ -5749,18 +5524,11 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             node_name = get_meaningful_node_name(node, extracted_metrics)
             short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
             
-            # 並列度情報の取得（修正版: 複数のTasks totalメトリクスを取得）
-            parallelism_data = extract_parallelism_metrics(node)
-            
-            # 従来の単一値（互換性のため）
-            num_tasks = parallelism_data.get('tasks_total', 0)
-            
-            # フォールバック: Sink - Tasks totalまたはSource - Tasks totalがある場合
-            if num_tasks == 0:
-                if parallelism_data.get('sink_tasks_total', 0) > 0:
-                    num_tasks = parallelism_data.get('sink_tasks_total', 0)
-                elif parallelism_data.get('source_tasks_total', 0) > 0:
-                    num_tasks = parallelism_data.get('source_tasks_total', 0)
+            # 並列度情報の取得
+            num_tasks = 0
+            for stage in extracted_metrics.get('stage_metrics', []):
+                if duration_ms > 0:  # このノードに関連するステージを推定
+                    num_tasks = max(num_tasks, stage.get('num_tasks', 0))
             
             # スピル検出（セル33と同じロジック - 正確なメトリクス名のみ）
             spill_detected = False
@@ -5834,17 +5602,7 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             report_lines.append(f"    ⏱️  実行時間: {duration_ms:>8,} ms ({duration_ms/1000:>6.1f} sec) - 全体の {time_percentage:>5.1f}%")
             report_lines.append(f"    📊 処理行数: {rows_num:>8,} 行")
             report_lines.append(f"    💾 ピークメモリ: {memory_mb:>6.1f} MB")
-            # 複数のTasks totalメトリクスを表示
-            parallelism_display = []
-            for task_metric in parallelism_data.get('all_tasks_metrics', []):
-                parallelism_display.append(f"{task_metric['name']}: {task_metric['value']}")
-            
-            if parallelism_display:
-                report_lines.append(f"    🔧 並列度: {' | '.join(parallelism_display)}")
-            else:
-                report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク")
-            
-            report_lines.append(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
+            report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク | 💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
             
             # 効率性指標（行/秒）を計算
             if duration_ms > 0:
@@ -6399,7 +6157,6 @@ def generate_execution_plan_markdown_report_en(plan_info: Dict[str, Any]) -> str
 def generate_comprehensive_optimization_report(query_id: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> str:
     """
     包括的な最適化レポートを生成
-    EXPLAIN実行フラグがYの場合は、EXPLAIN結果も含める
     
     Args:
         query_id: クエリID
@@ -6411,91 +6168,6 @@ def generate_comprehensive_optimization_report(query_id: str, optimized_result: 
         str: 読みやすく構成されたレポート
     """
     from datetime import datetime
-    
-    # EXPLAIN結果ファイルの読み込み（EXPLAIN_ENABLEDがYの場合）
-    explain_section = ""
-    explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
-    
-    if explain_enabled.upper() == 'Y':
-        # 最新のEXPLAIN結果ファイルを検索
-        import glob
-        import os
-        
-        explain_files = glob.glob("output_explain_plan_*.txt")
-        if explain_files:
-            # 最新のファイルを取得
-            latest_explain_file = max(explain_files, key=os.path.getctime)
-            try:
-                with open(latest_explain_file, 'r', encoding='utf-8') as f:
-                    explain_content = f.read()
-                
-                if OUTPUT_LANGUAGE == 'ja':
-                    explain_section = f"""
-
-## 🔍 6. EXPLAIN実行結果
-
-### 📄 実行プラン詳細
-
-**ファイル**: {latest_explain_file}
-
-```
-{explain_content}
-```
-
-### 📊 Physical Plan分析ポイント
-
-以下の観点から実行プランを分析しました：
-
-1. **ファイルスキャン効率**: テーブルスキャンのフィルタープッシュダウン適用状況
-2. **ジョイン戦略**: BROADCAST、SortMerge、HashJoinの適切な選択
-3. **シャッフル最適化**: データ移動の最小化とパーティション戦略
-4. **プロジェクション**: 不要なカラム読み込みの削除
-5. **Photon利用状況**: ベクトル化処理の適用範囲
-
-### 🚀 Photon Explanation分析
-
-Photon未対応操作や最適化機会について詳細な分析を実施しました。
-
-"""
-                else:
-                    explain_section = f"""
-
-## 🔍 6. EXPLAIN Execution Results
-
-### 📄 Execution Plan Details
-
-**File**: {latest_explain_file}
-
-```
-{explain_content}
-```
-
-### 📊 Physical Plan Analysis Points
-
-The execution plan was analyzed from the following perspectives:
-
-1. **File Scan Efficiency**: Filter pushdown application status for table scans
-2. **Join Strategy**: Appropriate selection of BROADCAST, SortMerge, HashJoin
-3. **Shuffle Optimization**: Data movement minimization and partitioning strategy
-4. **Projection**: Removal of unnecessary column reads
-5. **Photon Utilization**: Vectorized processing application scope
-
-### 🚀 Photon Explanation Analysis
-
-Detailed analysis of Photon-incompatible operations and optimization opportunities was performed.
-
-"""
-                    
-            except Exception as e:
-                if OUTPUT_LANGUAGE == 'ja':
-                    explain_section = f"\n\n## 🔍 6. EXPLAIN実行結果\n\n⚠️ EXPLAIN結果ファイルの読み込みに失敗: {str(e)}\n"
-                else:
-                    explain_section = f"\n\n## 🔍 6. EXPLAIN Execution Results\n\n⚠️ Failed to load EXPLAIN result file: {str(e)}\n"
-        else:
-            if OUTPUT_LANGUAGE == 'ja':
-                explain_section = f"\n\n## 🔍 6. EXPLAIN実行結果\n\n⚠️ EXPLAIN結果ファイルが見つかりません。\n"
-            else:
-                explain_section = f"\n\n## 🔍 6. EXPLAIN Execution Results\n\n⚠️ EXPLAIN result file not found.\n"
     
     # 基本情報の取得
     overall_metrics = metrics.get('overall_metrics', {})
@@ -6692,8 +6364,6 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
 2. **中優先度**: インデックス最適化、パーティション戦略
 3. **低優先度**: 統計情報更新、キャッシュ戦略
 
-{explain_section}
-
 ---
 
 *レポート生成時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
@@ -6876,8 +6546,6 @@ The following topics are analyzed for process evaluation:
 1. **High Priority**: Photon enablement, Memory spill resolution
 2. **Medium Priority**: Index optimization, Partitioning strategy
 3. **Low Priority**: Statistics update, Cache strategy
-
-{explain_section}
 
 ---
 
@@ -7169,7 +6837,7 @@ print("✅ 関数定義完了: SQL最適化関連関数（実行プランサイ�
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🚀 クエリ抽出
+# MAGIC ## 🚀 SQLクエリ最適化の実行（ステップ1: クエリ抽出）
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - プロファイラーデータからオリジナルクエリの抽出
@@ -7221,266 +6889,10 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 🔍 EXPLAIN文実行とファイル出力
-# MAGIC
-# MAGIC このセルでは以下の処理を実行します：
-# MAGIC - セル43で抽出したオリジナルクエリを取得
-# MAGIC - EXPLAIN文を生成してDatabricksで実行
-# MAGIC - 実行プランの詳細をファイルに出力
-# MAGIC - エラーハンドリングと結果の確認
-
-# COMMAND ----------
-
-def extract_select_from_ctas(query: str) -> str:
-    """
-    CREATE TABLE AS SELECT (CTAS) クエリからAS以降の部分のみを抽出
-    
-    対応パターン:
-    - CREATE TABLE ... AS SELECT ...
-    - CREATE OR REPLACE TABLE ... AS SELECT ...
-    - CREATE TABLE ... AS WITH ... SELECT ...
-    - AS の後ろに括弧がない場合
-    - 複数行にまたがる場合
-    - テーブル定義の複雑なパターン（USING、PARTITIONED BY、TBLPROPERTIES等）
-    
-    Args:
-        query: 元のクエリ
-    
-    Returns:
-        str: AS以降の部分のみのクエリ、またはCTASでない場合は元のクエリ
-    """
-    import re
-    
-    # クエリを正規化（改行・空白を統一）
-    normalized_query = re.sub(r'\s+', ' ', query.strip())
-    
-    # CTAS パターンの検出（包括的なパターン）
-    # CREATE [OR REPLACE] TABLE ... AS ... の形式を検出
-    # ASキーワードの位置を正確に特定する
-    
-    # CREATE [OR REPLACE] TABLE部分の検出
-    create_patterns = [
-        r'CREATE\s+OR\s+REPLACE\s+TABLE',
-        r'CREATE\s+TABLE'
-    ]
-    
-    for create_pattern in create_patterns:
-        # CREATE TABLE部分を検出
-        create_match = re.search(create_pattern, normalized_query, re.IGNORECASE)
-        if create_match:
-            # CREATE TABLE以降の部分を取得
-            after_create = normalized_query[create_match.end():].strip()
-            
-            # AS キーワードの位置を検索（大文字小文字を区別しない）
-            # AS は単語境界で区切られている必要がある
-            as_pattern = r'\bAS\b'
-            as_match = re.search(as_pattern, after_create, re.IGNORECASE)
-            
-            if as_match:
-                # AS以降の部分を取得
-                as_part = after_create[as_match.end():].strip()
-                
-                if as_part:
-                    print(f"✅ CTAS検出: AS以降の部分をEXPLAIN文に使用")
-                    print(f"📊 元のクエリ長: {len(query):,} 文字")
-                    print(f"📊 AS以降部分長: {len(as_part):,} 文字")
-                    
-                    # WITH句で始まる場合やSELECT句で始まる場合を判定
-                    if as_part.upper().startswith('WITH'):
-                        print("📋 WITH句で始まるクエリを検出")
-                    elif as_part.upper().startswith('SELECT'):
-                        print("📋 SELECT句で始まるクエリを検出")
-                    else:
-                        print("📋 その他のクエリ形式を検出")
-                    
-                    return as_part
-    
-    print("📋 通常のクエリ: そのままEXPLAIN文に使用")
-    return query
-
-def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
-    """
-    オリジナルクエリのEXPLAIN文を実行し、結果をファイルに保存
-    CTASの場合はSELECT部分のみを抽出してEXPLAIN文に渡す
-    """
-    from datetime import datetime
-    import os
-    
-    if not original_query or not original_query.strip():
-        print("❌ オリジナルクエリが空です")
-        return {}
-    
-    # ファイル名の生成
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    explain_filename = f"output_explain_plan_{timestamp}.txt"
-    
-    # CTASの場合はSELECT部分のみを抽出
-    query_for_explain = extract_select_from_ctas(original_query)
-    
-    # EXPLAIN文の生成
-    explain_query = f"EXPLAIN {query_for_explain}"
-    
-    # EXPLAIN文の実行
-    try:
-        print("🔄 EXPLAIN文を実行中...")
-        
-        # カタログとデータベースの設定を取得
-        catalog = globals().get('CATALOG', 'main')
-        database = globals().get('DATABASE', 'default')
-        
-        print(f"📂 使用カタログ: {catalog}")
-        print(f"🗂️ 使用データベース: {database}")
-        
-        # カタログとデータベースを設定
-        spark.sql(f"USE CATALOG {catalog}")
-        spark.sql(f"USE DATABASE {database}")
-        
-        # Databricks環境でSpark SQLを実行
-        result = spark.sql(explain_query)
-        
-        # 結果を収集
-        explain_result = result.collect()
-        
-        # 結果をファイルに保存
-        with open(explain_filename, 'w', encoding='utf-8') as f:
-            f.write(f"# EXPLAIN実行結果\n")
-            f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"オリジナルクエリ文字数: {len(original_query):,}\n")
-            f.write("\n" + "=" * 80 + "\n")
-            f.write("EXPLAIN結果:\n")
-            f.write("=" * 80 + "\n\n")
-            
-            for row in explain_result:
-                f.write(str(row[0]) + "\n")
-        
-        print(f"✅ EXPLAIN結果を保存: {explain_filename}")
-        print(f"📊 実行プラン行数: {len(explain_result):,}")
-        
-        # 結果のプレビュー表示
-        print("\n📋 EXPLAIN結果のプレビュー:")
-        print("-" * 50)
-        preview_lines = min(10, len(explain_result))
-        for i, row in enumerate(explain_result[:preview_lines]):
-            print(f"{i+1:2d}: {str(row[0])[:100]}...")
-        
-        if len(explain_result) > preview_lines:
-            print(f"... (残り {len(explain_result) - preview_lines} 行は {explain_filename} を参照)")
-        print("-" * 50)
-        
-        return {
-            'explain_file': explain_filename,
-            'plan_lines': len(explain_result)
-        }
-        
-    except Exception as e:
-        print(f"❌ EXPLAIN文の実行に失敗: {str(e)}")
-        
-        # エラーの詳細をファイルに記録
-        error_filename = f"output_explain_error_{timestamp}.txt"
-        try:
-            with open(error_filename, 'w', encoding='utf-8') as f:
-                f.write(f"# EXPLAIN実行エラー\n")
-                f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"エラー内容: {str(e)}\n")
-                f.write("\n" + "=" * 80 + "\n")
-                f.write("実行しようとしたEXPLAIN文:\n")
-                f.write("=" * 80 + "\n\n")
-                f.write(explain_query)
-            
-            print(f"📄 エラー詳細を保存: {error_filename}")
-            
-        except Exception as file_error:
-            print(f"❌ エラーファイルの保存にも失敗: {str(file_error)}")
-        
-        return {
-            'error_file': error_filename,
-            'error_message': str(e)
-        }
-
-# EXPLAIN文実行の実行
-print("\n🔍 EXPLAIN文実行処理")
-print("-" * 40)
-
-# セル43で抽出したオリジナルクエリが変数に残っているかチェック
-try:
-    # original_queryが既に定義されているか確認
-    original_query_for_explain = original_query
-    print(f"✅ オリジナルクエリを取得しました ({len(original_query_for_explain)} 文字)")
-    
-except NameError:
-    print("⚠️ オリジナルクエリが見つかりません")
-    print("   セル43 (オリジナルクエリ抽出) を先に実行してください")
-    
-    # フォールバック: プロファイラーデータから再抽出
-    try:
-        print("🔄 プロファイラーデータから再抽出を試行中...")
-        original_query_for_explain = extract_original_query_from_profiler_data(profiler_data)
-        
-        if original_query_for_explain:
-            print(f"✅ 再抽出成功 ({len(original_query_for_explain)} 文字)")
-        else:
-            print("❌ 再抽出に失敗しました")
-            original_query_for_explain = None
-            
-    except Exception as e:
-        print(f"❌ 再抽出中にエラー: {str(e)}")
-        original_query_for_explain = None
-
-# EXPLAIN実行フラグの確認
-explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
-print(f"🔍 EXPLAIN実行設定: {explain_enabled}")
-
-if explain_enabled.upper() != 'Y':
-    print("⚠️ EXPLAIN実行が無効化されています")
-    print("   EXPLAIN文を実行する場合は、最初のセルでEXPLAIN_ENABLED = 'Y'に設定してください")
-elif original_query_for_explain and original_query_for_explain.strip():
-    print("\n🚀 EXPLAIN文を実行します...")
-    
-    # Spark環境の確認
-    try:
-        spark_version = spark.version
-        print(f"📊 Spark環境: {spark_version}")
-    except Exception as e:
-        print(f"❌ Spark環境の確認に失敗: {str(e)}")
-        print("   Databricks環境で実行してください")
-        spark = None
-    
-    if spark:
-        # EXPLAIN文の実行
-        explain_results = execute_explain_and_save_to_file(original_query_for_explain)
-        
-        if explain_results:
-            print("\n📁 生成されたファイル:")
-            for file_type, filename in explain_results.items():
-                if file_type == 'explain_file':
-                    print(f"   📄 EXPLAIN結果: {filename}")
-                elif file_type == 'error_file':
-                    print(f"   📄 エラーログ: {filename}")
-                elif file_type == 'plan_lines':
-                    print(f"   📊 実行プラン行数: {filename}")
-                elif file_type == 'error_message':
-                    print(f"   ❌ エラーメッセージ: {filename}")
-        
-        print("\n✅ EXPLAIN文実行処理が完了しました")
-        
-    else:
-        print("❌ Spark環境が利用できないため、EXPLAIN文は実行できません")
-        print("   Databricks環境で実行してください")
-        
-else:
-    print("❌ 実行可能なオリジナルクエリが見つかりません")
-    print("   セル43でオリジナルクエリを抽出してから実行してください")
-
-print()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 🤖 LLMによるSQL最適化
+# MAGIC ## 🤖 LLMによるSQL最適化（ステップ2: 最適化実行）
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - LLMを使用した抽出クエリの最適化
-# MAGIC - EXPLAIN結果をINPUTとして活用
 # MAGIC - 最適化結果の詳細表示（1000行まで）
 # MAGIC - エラーハンドリングと代替処理
 
@@ -7543,7 +6955,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 💾 最適化結果の保存
+# MAGIC ## 💾 最適化結果の保存（ステップ3: ファイル生成）
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
 # MAGIC - 最適化されたSQLクエリのファイル保存（接頭語: output_）
@@ -7563,7 +6975,7 @@ missing_variables = []
 try:
     original_query
 except NameError:
-    missing_variables.append("original_query")
+    missing_variables.append("original_query (セル19を実行してください)")
     original_query = ""
 
 # optimized_result のチェック  
@@ -7589,7 +7001,7 @@ except NameError:
 try:
     analysis_result
 except NameError:
-    missing_variables.append("analysis_result")
+    missing_variables.append("analysis_result (セル16を実行してください)")
     analysis_result = ""
 
 if missing_variables:
@@ -7643,6 +7055,76 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 🧪 Databricks Notebookでの実行ガイド（ステップ4: 実行方法）
+# MAGIC
+# MAGIC このセルでは以下の処理を実行します：
+# MAGIC - 生成されたファイルの使用方法説明
+# MAGIC - Databricks Notebookでの実行手順ガイド
+# MAGIC - SQLクエリの直接実行方法
+# MAGIC - 重要な注意事項の表示
+
+# COMMAND ----------
+
+# 🧪 ステップ4: Databricks Notebookでの実行ガイド
+print("\n🧪 ステップ4: Databricks Notebookでの実行ガイド")
+print("-" * 40)
+
+# saved_files変数が定義されているかチェック
+try:
+    saved_files
+except NameError:
+    print("❌ saved_files変数が定義されていません。")
+    print("⚠️ セル21 (最適化結果の保存) を先に実行してください。")
+    saved_files = {}
+
+if saved_files:
+    original_file = saved_files.get('original_file', '')
+    optimized_file = saved_files.get('optimized_file', '')
+    report_file = saved_files.get('report_file', '')
+    
+    print("🚀 Databricks Notebookでの実行手順:")
+    print("1. 生成されたSQLファイルの内容を確認")
+    print("2. 必要に応じてクエリを手動調整")
+    print("3. Notebook内で直接SQLクエリを実行")
+    print("4. パフォーマンス測定と比較")
+    
+    print(f"\n📝 生成ファイル一覧:")
+    if original_file:
+        print(f"   📄 オリジナルクエリ: {original_file}")
+    if optimized_file:
+        print(f"   🚀 最適化クエリ: {optimized_file}")
+    if report_file:
+        print(f"   📊 分析レポート: {report_file}")
+    
+    if optimized_file:
+        print(f"\n🔧 Databrics Notebookでの実行方法:")
+        print(f"   # ファイルからSQLを読み込んで実行")
+        print(f"   optimized_sql = open('{optimized_file}').read()")
+        print(f"   df = spark.sql(optimized_sql)")
+        print(f"   df.show()")
+        print(f"   ")
+        print(f"   # または %sql マジックコマンドを使用")
+        print(f"   # %sql [ファイルの内容をコピー&ペースト]")
+        print(f"   ")
+        print(f"   # パフォーマンス測定例")
+        print(f"   import time")
+        print(f"   start_time = time.time()")
+        print(f"   result_count = df.count()")
+        print(f"   execution_time = time.time() - start_time")
+        print(f"   print(f'実行時間: {{execution_time:.2f}} 秒, 行数: {{result_count:,}}')")
+    
+    print(f"\n⚠️ 重要な注意事項:")
+    print(f"   • 本番環境での実行前に、必ずテスト環境で検証してください")
+    print(f"   • データベースの構造やサイズによって結果は変わる可能性があります")
+    print(f"   • クエリプランの確認: EXPLAIN 文を使用してください")
+    print(f"   • Databricks SQLエディタでの実行も可能です")
+
+else:
+    print("⚠️ 実行用ファイルが生成されていません")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 🏁 最終処理完了サマリー
 # MAGIC
 # MAGIC このセルでは以下の処理を実行します：
@@ -7686,12 +7168,12 @@ missing_summary_vars = []
 try:
     result_output_path
 except NameError:
-    missing_summary_vars.append("result_output_path")
+    missing_summary_vars.append("result_output_path (セル16を実行してください)")
 
 try:
     saved_files
 except NameError:
-    missing_summary_vars.append("saved_files")
+    missing_summary_vars.append("saved_files (セル19を実行してください)")
     saved_files = {}
 
 print(f"\n📁 出力ファイル一覧:")
@@ -7699,7 +7181,7 @@ print(f"\n📁 出力ファイル一覧:")
 if 'result_output_path' in globals():
     print(f"   📄 ボトルネック分析レポート: {result_output_path}")
 else:
-    print("   📄 ボトルネック分析レポート: 未実行")
+    print("   📄 ボトルネック分析レポート: (セル16を実行してください)")
 
 if saved_files:
     for file_type, filename in saved_files.items():
@@ -7731,8 +7213,8 @@ print("🎉" * 25)
 
 # COMMAND ----------
 
-# 📝 レポート推敲処理
-print("\n📝 レポート推敲処理")
+# 📝 セル48: レポート推敲処理
+print("\n📝 セル48: レポート推敲処理")
 print("-" * 40)
 
 def find_latest_report_file() -> str:
@@ -7759,28 +7241,6 @@ def refine_report_content_with_llm(report_content: str) -> str:
         print("❌ LLMプロバイダーが設定されていません")
         return report_content
     
-    # Photon利用率の抽出と評価判定
-    import re
-    photon_pattern = r'利用率[：:]\s*(\d+(?:\.\d+)?)%'
-    photon_match = re.search(photon_pattern, report_content)
-    
-    photon_evaluation_instruction = ""
-    if photon_match:
-        photon_utilization = float(photon_match.group(1))
-        if photon_utilization <= 80:
-            photon_evaluation_instruction = """
-【Photon利用率評価指示】
-- Photon利用率が80%以下の場合は「要改善」または「不良」の評価を明確に表示してください
-- 80%以下の場合は、改善の必要性を強調し、具体的な改善アクションを提示してください
-- 評価例: 「Photon利用率: XX% (評価: 要改善)」
-"""
-        else:
-            photon_evaluation_instruction = """
-【Photon利用率評価指示】
-- Photon利用率が80%以上の場合は「良好」の評価を表示してください
-- 評価例: 「Photon利用率: XX% (評価: 良好)」
-"""
-    
     refinement_prompt = f"""あなたは技術文書の編集者です。以下のDatabricks SQLパフォーマンス分析レポートを、読みやすく簡潔に推敲してください。
 
 【推敲の要件】
@@ -7791,8 +7251,6 @@ def refine_report_content_with_llm(report_content: str) -> str:
 5. 数値データやメトリクスは保持する
 6. 実用的な推奨事項を明確に提示する
 
-{photon_evaluation_instruction}
-
 【現在のレポート内容】
 {report_content}
 
@@ -7800,7 +7258,6 @@ def refine_report_content_with_llm(report_content: str) -> str:
 - 推敲されたレポートをmarkdown形式で出力
 - 技術情報は維持しつつ、可読性を向上させる
 - 重要なポイントを強調し、アクションプランを明確にする
-- Photon利用率の評価を明確に表示する
 """
     
     try:
@@ -7849,30 +7306,6 @@ def save_refined_report(refined_content: str, original_filename: str) -> str:
         print(f"❌ 推敲レポートの保存中にエラー: {str(e)}")
         return None
 
-def finalize_report_files(original_filename: str, refined_filename: str) -> str:
-    """元のファイルを削除し、推敲版ファイルを元のファイル名にリネーム"""
-    import os
-    
-    try:
-        # 元のファイルを削除
-        if os.path.exists(original_filename):
-            os.remove(original_filename)
-            print(f"🗑️ 元のファイルを削除: {original_filename}")
-        
-        # 推敲版ファイルを元のファイル名にリネーム
-        if os.path.exists(refined_filename):
-            os.rename(refined_filename, original_filename)
-            print(f"📝 推敲版ファイルをリネーム: {refined_filename} → {original_filename}")
-            return original_filename
-        else:
-            print(f"❌ 推敲版ファイルが見つかりません: {refined_filename}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ ファイル操作中にエラー: {str(e)}")
-        return None
-
-
 # メイン処理
 try:
     # 最新のレポートファイルを検索
@@ -7909,17 +7342,6 @@ try:
                     file_size = os.path.getsize(refined_filename)
                     print(f"📁 推敲版ファイルサイズ: {file_size:,} bytes")
                 
-                # 元のファイルを削除し、推敲版ファイルを元のファイル名にリネーム
-                final_filename = finalize_report_files(latest_report, refined_filename)
-                
-                if final_filename:
-                    print(f"📄 最終レポートファイル: {final_filename}")
-                    
-                    # 最終ファイルサイズの確認
-                    if os.path.exists(final_filename):
-                        final_file_size = os.path.getsize(final_filename)
-                        print(f"📁 最終ファイルサイズ: {final_file_size:,} bytes")
-                
                 print("✅ レポート推敲処理が完了しました")
                 
                 # 推敲の結果を表示（最初の1000文字）
@@ -7928,7 +7350,7 @@ try:
                 preview = refined_content[:1000]
                 print(preview)
                 if len(refined_content) > 1000:
-                    print(f"\n... (残り {len(refined_content) - 1000} 文字は {final_filename or latest_report} を参照)")
+                    print(f"\n... (残り {len(refined_content) - 1000} 文字は {refined_filename} を参照)")
                 print("-" * 50)
             else:
                 print("❌ 推敲レポートの保存に失敗しました")
@@ -7941,65 +7363,3 @@ except Exception as e:
     traceback.print_exc()
 
 print()
-
-# 🧹 中間ファイルの削除処理（DEBUG_ENABLEフラグに基づく）
-debug_enabled = globals().get('DEBUG_ENABLE', 'N')
-explain_enabled = globals().get('EXPLAIN_ENABLED', 'N')
-
-if debug_enabled.upper() == 'Y':
-    print("\n🐛 デバッグモード有効: 中間ファイルを保持します")
-    print("-" * 40)
-    print("💡 DEBUG_ENABLE=Y のため、すべての中間ファイルが保持されます")
-    print("📁 以下のファイルが保持されます:")
-    
-    import glob
-    import os
-    
-    # 保持されるファイル一覧を表示
-    explain_files = glob.glob("output_explain_plan_*.txt") if explain_enabled.upper() == 'Y' else []
-    
-    if explain_files:
-        print(f"   🔍 EXPLAIN結果ファイル: {len(explain_files)} 個")
-        for file_path in explain_files[:3]:  # 最大3個まで表示
-            print(f"      📄 {file_path}")
-        if len(explain_files) > 3:
-            print(f"      ... 他 {len(explain_files) - 3} 個")
-    
-    print("✅ デバッグモード: ファイル削除処理をスキップしました")
-else:
-    print("\n🧹 中間ファイルの削除処理")
-    print("-" * 40)
-    print("💡 DEBUG_ENABLE=N のため、中間ファイルを削除します")
-    print("📁 保持されるファイル: output_optimization_report_*.md, output_optimized_query_*.sql")
-    
-    import glob
-    import os
-    
-    if explain_enabled.upper() == 'Y':
-        # EXPLAIN結果ファイルを検索
-        explain_files = glob.glob("output_explain_plan_*.txt")
-        
-        if explain_files:
-            print(f"📁 削除対象のEXPLAIN結果ファイル: {len(explain_files)} 個")
-            
-            deleted_count = 0
-            for file_path in explain_files:
-                try:
-                    os.remove(file_path)
-                    print(f"✅ 削除完了: {file_path}")
-                    deleted_count += 1
-                except Exception as e:
-                    print(f"❌ 削除失敗: {file_path} - {str(e)}")
-            
-            print(f"🗑️ 削除完了: {deleted_count}/{len(explain_files)} ファイル")
-            print("💡 EXPLAIN結果はLLMによる最適化処理で使用済みのため削除しました")
-        else:
-            print("📁 削除対象のEXPLAIN結果ファイルが見つかりませんでした")
-    else:
-        print("⚠️ EXPLAIN実行が無効化されているため、EXPLAIN結果ファイルの削除処理をスキップしました")
-
-print()
-
-
-print("🎉 すべての処理が完了しました！")
-print("📁 生成されたファイルを確認して、分析結果を活用してください。")
