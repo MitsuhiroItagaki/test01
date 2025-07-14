@@ -5657,6 +5657,37 @@ FROM (
   JOIN table2 t2 ON t1.join_key = t2.join_key
 ```
 
+【🚨 NULLリテラルの適切な型キャスト】
+- SELECT句でNULLリテラルが使用されている場合は、適切なデータ型で明示的にCASTしてください
+- 例: `SELECT null as col01` → `SELECT cast(null as String) as col01`
+- データ型が不明な場合は、String型を使用してください
+- 他の同等なカラムがある場合は、その型に合わせてCASTしてください
+
+**NULLリテラル最適化の例:**
+```sql
+-- ❌ 改善前: データ型が不明
+SELECT 
+  null as col01,
+  null as col02,
+  column1,
+  column2
+FROM table1
+
+-- ✅ 改善後: 適切なデータ型でCASTを明示
+SELECT 
+  cast(null as String) as col01,
+  cast(null as Int) as col02,
+  column1,
+  column2
+FROM table1
+```
+
+**推奨データ型:**
+- 文字列系: `cast(null as String)`
+- 数値系: `cast(null as Int)`, `cast(null as Long)`, `cast(null as Double)`
+- 日付系: `cast(null as Date)`, `cast(null as Timestamp)`
+- 他のカラムと同じテーブル内にある場合: 同じデータ型を使用
+
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
 - すべてのカラム名、テーブル名、CTE名を完全に記述してください
