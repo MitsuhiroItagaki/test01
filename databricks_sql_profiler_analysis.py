@@ -1419,6 +1419,10 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
         node_name = get_meaningful_node_name(node, extracted_metrics)
         time_percentage = (duration_ms / max(total_duration, 1)) * 100
         
+        # スキュー判定（AQEスキュー検出とAQEShuffleRead平均パーティションサイズの両方を考慮）
+        aqe_shuffle_skew_warning = parallelism_data.get('aqe_shuffle_skew_warning', False)
+        combined_skew_detected = skew_detected or aqe_shuffle_skew_warning
+        
         # ノード分析結果を構造化
         node_analysis = {
             "rank": i + 1,
@@ -1433,7 +1437,9 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
             "spill_detected": spill_detected,
             "spill_bytes": spill_bytes,
             "spill_gb": spill_bytes / 1024 / 1024 / 1024 if spill_bytes > 0 else 0,
-            "skew_detected": skew_detected,
+            "skew_detected": combined_skew_detected,  # AQEスキュー検出とAQEShuffleRead警告の両方を考慮
+            "aqe_skew_detected": skew_detected,  # 従来のAQEスキュー検出のみ
+            "aqe_shuffle_skew_warning": aqe_shuffle_skew_warning,  # AQEShuffleRead平均パーティションサイズ警告
             "skewed_partitions": skewed_partitions,
             "is_shuffle_node": "shuffle" in node_name.lower(),
             "severity": "CRITICAL" if duration_ms >= 10000 else "HIGH" if duration_ms >= 5000 else "MEDIUM" if duration_ms >= 1000 else "LOW"
@@ -3873,7 +3879,17 @@ if final_sorted_nodes:
         else:
             print(f"    🔧 並列度: {num_tasks:>3d} タスク")
         
-        print(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
+        # スキュー判定（AQEスキュー検出とAQEShuffleRead平均パーティションサイズの両方を考慮）
+        aqe_shuffle_skew_warning = parallelism_data.get('aqe_shuffle_skew_warning', False)
+        
+        if skew_detected:
+            skew_status = "AQEで検出・対応済"
+        elif aqe_shuffle_skew_warning:
+            skew_status = "潜在的なスキューの可能性あり"
+        else:
+            skew_status = "なし"
+        
+        print(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {skew_status}")
         
         # AQEShuffleReadメトリクスの表示
         aqe_shuffle_metrics = parallelism_data.get('aqe_shuffle_metrics', [])
@@ -5944,7 +5960,17 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             else:
                 report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク")
             
-            report_lines.append(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
+            # スキュー判定（AQEスキュー検出とAQEShuffleRead平均パーティションサイズの両方を考慮）
+            aqe_shuffle_skew_warning = parallelism_data.get('aqe_shuffle_skew_warning', False)
+            
+            if skew_detected:
+                skew_status = "AQEで検出・対応済"
+            elif aqe_shuffle_skew_warning:
+                skew_status = "潜在的なスキューの可能性あり"
+            else:
+                skew_status = "なし"
+            
+            report_lines.append(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {skew_status}")
             
             # AQEShuffleReadメトリクスの表示
             aqe_shuffle_metrics = parallelism_data.get('aqe_shuffle_metrics', [])
