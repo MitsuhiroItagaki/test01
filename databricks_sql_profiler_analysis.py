@@ -1762,8 +1762,10 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
         if parallelism_data.get('aqe_detected_and_handled', False):
             aqe_detected_and_handled = True
     
+    # 優先順位: 512MB以上の警告があれば、それを優先
+    # 警告がない場合のみ、AQE対応済みと判定
     indicators['has_aqe_shuffle_skew_warning'] = aqe_shuffle_skew_warning_detected
-    indicators['has_skew'] = aqe_detected_and_handled
+    indicators['has_skew'] = aqe_detected_and_handled and not aqe_shuffle_skew_warning_detected
     
     return indicators
 
