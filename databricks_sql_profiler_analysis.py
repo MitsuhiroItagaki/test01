@@ -1168,11 +1168,23 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
         memory_mb = node.get('key_metrics', {}).get('peakMemoryBytes', 0) / 1024 / 1024
         rows_num = node.get('key_metrics', {}).get('rowsNum', 0)
         
-        # 並列度情報の取得
+        # 並列度情報の取得（修正版: 各ノードの実際のTasks totalを取得）
         num_tasks = 0
-        for stage in extracted_metrics.get('stage_metrics', []):
-            if duration_ms > 0:
-                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+        
+        # 各ノードのメトリクスから"Tasks total"を直接取得
+        detailed_metrics = node.get('detailed_metrics', {})
+        for metric_key, metric_info in detailed_metrics.items():
+            if metric_key == "Tasks total":
+                num_tasks = metric_info.get('value', 0)
+                break
+        
+        # フォールバック: raw_metricsから検索
+        if num_tasks == 0:
+            raw_metrics = node.get('metrics', [])
+            for metric in raw_metrics:
+                if metric.get('key') == "Tasks total" or metric.get('label') == "Tasks total":
+                    num_tasks = metric.get('value', 0)
+                    break
         
         # スピル検出（セル33と同じロジック）
         spill_detected = False
@@ -3469,11 +3481,23 @@ if final_sorted_nodes:
         node_name = get_meaningful_node_name(node, extracted_metrics)
         short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
         
-        # 並列度情報の取得
+        # 並列度情報の取得（修正版: 各ノードの実際のTasks totalを取得）
         num_tasks = 0
-        for stage in extracted_metrics.get('stage_metrics', []):
-            if duration_ms > 0:  # このノードに関連するステージを推定
-                num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+        
+        # 各ノードのメトリクスから"Tasks total"を直接取得
+        detailed_metrics = node.get('detailed_metrics', {})
+        for metric_key, metric_info in detailed_metrics.items():
+            if metric_key == "Tasks total":
+                num_tasks = metric_info.get('value', 0)
+                break
+        
+        # フォールバック: raw_metricsから検索
+        if num_tasks == 0:
+            raw_metrics = node.get('metrics', [])
+            for metric in raw_metrics:
+                if metric.get('key') == "Tasks total" or metric.get('label') == "Tasks total":
+                    num_tasks = metric.get('value', 0)
+                    break
         
         # ディスクスピルアウトの検出（メモリプレッシャーによるスピルメトリクス対応改善版）
         spill_detected = False
@@ -5614,11 +5638,23 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             node_name = get_meaningful_node_name(node, extracted_metrics)
             short_name = node_name[:100] + "..." if len(node_name) > 100 else node_name
             
-            # 並列度情報の取得
+            # 並列度情報の取得（修正版: 各ノードの実際のTasks totalを取得）
             num_tasks = 0
-            for stage in extracted_metrics.get('stage_metrics', []):
-                if duration_ms > 0:  # このノードに関連するステージを推定
-                    num_tasks = max(num_tasks, stage.get('num_tasks', 0))
+            
+            # 各ノードのメトリクスから"Tasks total"を直接取得
+            detailed_metrics = node.get('detailed_metrics', {})
+            for metric_key, metric_info in detailed_metrics.items():
+                if metric_key == "Tasks total":
+                    num_tasks = metric_info.get('value', 0)
+                    break
+            
+            # フォールバック: raw_metricsから検索
+            if num_tasks == 0:
+                raw_metrics = node.get('metrics', [])
+                for metric in raw_metrics:
+                    if metric.get('key') == "Tasks total" or metric.get('label') == "Tasks total":
+                        num_tasks = metric.get('value', 0)
+                        break
             
             # スピル検出（セル33と同じロジック - 正確なメトリクス名のみ）
             spill_detected = False
