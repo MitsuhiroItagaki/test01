@@ -1019,30 +1019,42 @@ def extract_cluster_attributes(node: Dict[str, Any]) -> list:
 
 def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
     """
-    ノードから複数のTasks totalメトリクスを抽出
+    ノードから複数のTasks totalメトリクスとAQEShuffleReadメトリクスを抽出
     
     シャッフル操作などでは以下の複数のメトリクスが存在する可能性があります：
     - Tasks total
     - Sink - Tasks total
     - Source - Tasks total
+    - AQEShuffleRead - Number of partitions
+    - AQEShuffleRead - Partition data size
     
     Args:
         node: ノード情報
         
     Returns:
-        dict: 検出されたTasks totalメトリクス
+        dict: 検出されたメトリクス
             {
                 "tasks_total": 値,
                 "sink_tasks_total": 値,
                 "source_tasks_total": 値,
-                "all_tasks_metrics": [{"name": "Tasks total", "value": 値}, ...]
+                "all_tasks_metrics": [{"name": "Tasks total", "value": 値}, ...],
+                "aqe_shuffle_partitions": 値,
+                "aqe_shuffle_data_size": 値,
+                "aqe_shuffle_avg_partition_size": 値,
+                "aqe_shuffle_skew_warning": bool,
+                "aqe_shuffle_metrics": [{"name": "AQE...", "value": 値}, ...]
             }
     """
     parallelism_metrics = {
         "tasks_total": 0,
         "sink_tasks_total": 0,
         "source_tasks_total": 0,
-        "all_tasks_metrics": []
+        "all_tasks_metrics": [],
+        "aqe_shuffle_partitions": 0,
+        "aqe_shuffle_data_size": 0,
+        "aqe_shuffle_avg_partition_size": 0,
+        "aqe_shuffle_skew_warning": False,
+        "aqe_shuffle_metrics": []
     }
     
     # 対象となるTasks totalメトリクス名のパターン
@@ -1050,6 +1062,12 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
         "Tasks total",
         "Sink - Tasks total",
         "Source - Tasks total"
+    ]
+    
+    # 対象となるAQEShuffleReadメトリクス名のパターン
+    aqe_shuffle_patterns = [
+        "AQEShuffleRead - Number of partitions",
+        "AQEShuffleRead - Partition data size"
     ]
     
     # 1. detailed_metricsから検索
@@ -1071,6 +1089,21 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
                 
                 # 全メトリクスリストに追加
                 parallelism_metrics["all_tasks_metrics"].append({
+                    "name": pattern,
+                    "value": metric_value
+                })
+        
+        # AQEShuffleReadメトリクスをチェック
+        for pattern in aqe_shuffle_patterns:
+            if metric_key == pattern or metric_label == pattern:
+                # 特定のメトリクスにマッピング
+                if pattern == "AQEShuffleRead - Number of partitions":
+                    parallelism_metrics["aqe_shuffle_partitions"] = metric_value
+                elif pattern == "AQEShuffleRead - Partition data size":
+                    parallelism_metrics["aqe_shuffle_data_size"] = metric_value
+                
+                # 全メトリクスリストに追加
+                parallelism_metrics["aqe_shuffle_metrics"].append({
                     "name": pattern,
                     "value": metric_value
                 })
@@ -1102,6 +1135,23 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
                                 "name": pattern,
                                 "value": metric_value
                             })
+                
+                # AQEShuffleReadメトリクスをチェック
+                for pattern in aqe_shuffle_patterns:
+                    if metric_key == pattern or metric_label == pattern:
+                        # 既にdetailed_metricsで見つかっている場合はスキップ
+                        if not any(m["name"] == pattern for m in parallelism_metrics["aqe_shuffle_metrics"]):
+                            # 特定のメトリクスにマッピング
+                            if pattern == "AQEShuffleRead - Number of partitions":
+                                parallelism_metrics["aqe_shuffle_partitions"] = metric_value
+                            elif pattern == "AQEShuffleRead - Partition data size":
+                                parallelism_metrics["aqe_shuffle_data_size"] = metric_value
+                            
+                            # 全メトリクスリストに追加
+                            parallelism_metrics["aqe_shuffle_metrics"].append({
+                                "name": pattern,
+                                "value": metric_value
+                            })
     
     # 3. key_metricsから検索（最後のフォールバック）
     key_metrics = node.get('key_metrics', {})
@@ -1124,6 +1174,33 @@ def extract_parallelism_metrics(node: Dict[str, Any]) -> Dict[str, Any]:
                             "name": pattern,
                             "value": metric_value
                         })
+            
+            # AQEShuffleReadメトリクスをチェック
+            for pattern in aqe_shuffle_patterns:
+                if metric_key == pattern:
+                    # 既に見つかっている場合はスキップ
+                    if not any(m["name"] == pattern for m in parallelism_metrics["aqe_shuffle_metrics"]):
+                        # 特定のメトリクスにマッピング
+                        if pattern == "AQEShuffleRead - Number of partitions":
+                            parallelism_metrics["aqe_shuffle_partitions"] = metric_value
+                        elif pattern == "AQEShuffleRead - Partition data size":
+                            parallelism_metrics["aqe_shuffle_data_size"] = metric_value
+                        
+                        # 全メトリクスリストに追加
+                        parallelism_metrics["aqe_shuffle_metrics"].append({
+                            "name": pattern,
+                            "value": metric_value
+                        })
+    
+    # 平均パーティションサイズの計算と警告設定
+    if parallelism_metrics["aqe_shuffle_partitions"] > 0 and parallelism_metrics["aqe_shuffle_data_size"] > 0:
+        avg_partition_size = parallelism_metrics["aqe_shuffle_data_size"] / parallelism_metrics["aqe_shuffle_partitions"]
+        parallelism_metrics["aqe_shuffle_avg_partition_size"] = avg_partition_size
+        
+        # 512MB = 512 * 1024 * 1024 bytes
+        threshold_512mb = 512 * 1024 * 1024
+        if avg_partition_size >= threshold_512mb:
+            parallelism_metrics["aqe_shuffle_skew_warning"] = True
     
     return parallelism_metrics
 
@@ -3798,6 +3875,29 @@ if final_sorted_nodes:
         
         print(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
         
+        # AQEShuffleReadメトリクスの表示
+        aqe_shuffle_metrics = parallelism_data.get('aqe_shuffle_metrics', [])
+        if aqe_shuffle_metrics:
+            aqe_display = []
+            for aqe_metric in aqe_shuffle_metrics:
+                if aqe_metric['name'] == "AQEShuffleRead - Number of partitions":
+                    aqe_display.append(f"パーティション数: {aqe_metric['value']}")
+                elif aqe_metric['name'] == "AQEShuffleRead - Partition data size":
+                    aqe_display.append(f"データサイズ: {aqe_metric['value']:,} bytes")
+            
+            if aqe_display:
+                print(f"    🔄 AQEShuffleRead: {' | '.join(aqe_display)}")
+                
+                # 平均パーティションサイズと警告表示
+                avg_partition_size = parallelism_data.get('aqe_shuffle_avg_partition_size', 0)
+                if avg_partition_size > 0:
+                    avg_size_mb = avg_partition_size / (1024 * 1024)
+                    print(f"    📊 平均パーティションサイズ: {avg_size_mb:.2f} MB")
+                    
+                    # 512MB以上の場合に警告
+                    if parallelism_data.get('aqe_shuffle_skew_warning', False):
+                        print(f"    ⚠️  【警告】 平均パーティションサイズが512MB以上 - 潜在的なスキューの可能性あり")
+        
         # 効率性指標（行/秒）を計算
         if duration_ms > 0:
             rows_per_sec = (rows_num * 1000) / duration_ms
@@ -5845,6 +5945,29 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
                 report_lines.append(f"    🔧 並列度: {num_tasks:>3d} タスク")
             
             report_lines.append(f"    💿 スピル: {'あり' if spill_detected else 'なし'} | ⚖️ スキュー: {'AQEで検出・対応済' if skew_detected else 'なし'}")
+            
+            # AQEShuffleReadメトリクスの表示
+            aqe_shuffle_metrics = parallelism_data.get('aqe_shuffle_metrics', [])
+            if aqe_shuffle_metrics:
+                aqe_display = []
+                for aqe_metric in aqe_shuffle_metrics:
+                    if aqe_metric['name'] == "AQEShuffleRead - Number of partitions":
+                        aqe_display.append(f"パーティション数: {aqe_metric['value']}")
+                    elif aqe_metric['name'] == "AQEShuffleRead - Partition data size":
+                        aqe_display.append(f"データサイズ: {aqe_metric['value']:,} bytes")
+                
+                if aqe_display:
+                    report_lines.append(f"    🔄 AQEShuffleRead: {' | '.join(aqe_display)}")
+                    
+                    # 平均パーティションサイズと警告表示
+                    avg_partition_size = parallelism_data.get('aqe_shuffle_avg_partition_size', 0)
+                    if avg_partition_size > 0:
+                        avg_size_mb = avg_partition_size / (1024 * 1024)
+                        report_lines.append(f"    📊 平均パーティションサイズ: {avg_size_mb:.2f} MB")
+                        
+                        # 512MB以上の場合に警告
+                        if parallelism_data.get('aqe_shuffle_skew_warning', False):
+                            report_lines.append(f"    ⚠️  【警告】 平均パーティションサイズが512MB以上 - 潜在的なスキューの可能性あり")
             
             # 効率性指標（行/秒）を計算
             if duration_ms > 0:
