@@ -172,8 +172,8 @@ LLM_CONFIG = {
         "endpoint_name": "databricks-claude-3-7-sonnet",  # Model Servingエンドポイント名
         "max_tokens": 131072,  # 128K tokens（Claude 3.7 Sonnetの最大制限）
         "temperature": 0.0,    # 決定的な出力のため（0.1→0.0）
-        "thinking_enabled": False,  # 拡張思考モード（デフォルト: 無効 - 高速実行優先）
-        "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens（有効時のみ使用）
+        # "thinking_enabled": False,  # 拡張思考モード（デフォルト: 無効 - 高速実行優先）- Claude 3 Sonnet専用
+        # "thinking_budget_tokens": 65536  # 思考用トークン予算 64K tokens（有効時のみ使用）- Claude 3 Sonnet専用
     },
     
     # OpenAI設定（完全なSQL生成用に最適化）
