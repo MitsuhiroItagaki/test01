@@ -47,6 +47,7 @@
 - **Liquid Clustering**: Databricks SQL準拠の正しい構文での実装
 - **BROADCAST最適化**: 既存の最適化状況を考慮した推奨
 - **クエリ最適化**: 元のSQLクエリの改善版生成
+- **NULLリテラル最適化**: SELECT句でのNULLリテラルを適切な型でCASTする機能
 - **フィルタリング率計算**: 各ノードの処理効率詳細分析
 
 ## 🚀 最新の機能強化
@@ -79,6 +80,12 @@
 - **クラスタリングキー抽出**: JOIN、GROUP BY、WHERE条件に基づく最適なキー選択
 - **優先度付き推奨**: HIGH/MEDIUM/LOW優先度による実装順序の明確化
 - **SQL実装例**: 具体的なCLUSTER BY構文での実装コード生成
+
+### 🚀 LLMベースのSQL最適化強化
+- **NULLリテラル処理**: SELECT句での`null`リテラルを適切な型でCASTする機能
+- **自動型推論**: 他のカラムとの整合性を考慮した型決定
+- **構文改善**: `SELECT null as col01` → `SELECT cast(null as String) as col01`
+- **多様な型対応**: String、Int、Long、Double、Date、Timestamp等の適切な型選択
 
 ## 📋 要件
 
@@ -189,6 +196,9 @@ clustering_analysis = analyze_liquid_clustering_opportunities(profiler_data, ext
 # 包括的なボトルネック分析
 bottleneck_analysis = analyze_bottlenecks_with_llm(extracted_metrics)
 
+# NULLリテラル処理を含むLLMベースのSQL最適化
+optimized_sql = generate_optimized_query_with_llm(original_query, bottleneck_analysis, extracted_metrics)
+
 # レポートの自動精製
 refined_report = refine_report_content_with_llm(bottleneck_analysis)
 ```
@@ -225,6 +235,25 @@ CLUSTER BY (user_id, transaction_date);
 -- MEDIUM優先度: product_sales テーブル
 ALTER TABLE product_sales 
 CLUSTER BY (product_id, sales_date);
+```
+
+### NULLリテラル最適化例
+```sql
+-- 最適化前
+SELECT 
+  user_id,
+  null as discount_amount,
+  null as coupon_code,
+  purchase_amount
+FROM user_transactions;
+
+-- 最適化後
+SELECT 
+  user_id,
+  cast(null as Double) as discount_amount,
+  cast(null as String) as coupon_code,
+  purchase_amount
+FROM user_transactions;
 ```
 
 ## 🔧 設定オプション
