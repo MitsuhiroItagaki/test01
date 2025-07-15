@@ -47,6 +47,7 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 - **Liquid Clustering**: Implementation using correct Databricks SQL syntax
 - **BROADCAST Optimization**: Recommendations considering existing optimization status
 - **Query Optimization**: Generation of improved versions of original SQL queries
+- **NULL Literal Optimization**: Functionality to appropriately CAST NULL literals in SELECT clauses
 - **Filter Rate Calculation**: Detailed analysis of processing efficiency for each node
 
 ## 🚀 Latest Enhancements
@@ -79,6 +80,12 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 - **Clustering Key Extraction**: Optimal key selection based on JOIN, GROUP BY, and WHERE conditions
 - **Prioritized Recommendations**: Clear implementation order through HIGH/MEDIUM/LOW priorities
 - **SQL Implementation Examples**: Concrete implementation code generation with CLUSTER BY syntax
+
+### 🚀 LLM-based SQL Optimization Enhancements
+- **NULL Literal Processing**: Functionality to appropriately CAST `null` literals in SELECT clauses
+- **Automatic Type Inference**: Type determination considering consistency with other columns
+- **Syntax Improvements**: `SELECT null as col01` → `SELECT cast(null as String) as col01`
+- **Diverse Type Support**: Appropriate type selection for String, Int, Long, Double, Date, Timestamp, etc.
 
 ## 📋 Requirements
 
@@ -189,6 +196,9 @@ clustering_analysis = analyze_liquid_clustering_opportunities(profiler_data, ext
 # Comprehensive bottleneck analysis
 bottleneck_analysis = analyze_bottlenecks_with_llm(extracted_metrics)
 
+# LLM-based SQL optimization including NULL literal processing
+optimized_sql = generate_optimized_query_with_llm(original_query, bottleneck_analysis, extracted_metrics)
+
 # Automatic report refinement
 refined_report = refine_report_content_with_llm(bottleneck_analysis)
 ```
@@ -225,6 +235,25 @@ CLUSTER BY (user_id, transaction_date);
 -- MEDIUM priority: product_sales table
 ALTER TABLE product_sales 
 CLUSTER BY (product_id, sales_date);
+```
+
+### NULL Literal Optimization Examples
+```sql
+-- Before optimization
+SELECT 
+  user_id,
+  null as discount_amount,
+  null as coupon_code,
+  purchase_amount
+FROM user_transactions;
+
+-- After optimization
+SELECT 
+  user_id,
+  cast(null as Double) as discount_amount,
+  cast(null as String) as coupon_code,
+  purchase_amount
+FROM user_transactions;
 ```
 
 ## 🔧 Configuration Options
