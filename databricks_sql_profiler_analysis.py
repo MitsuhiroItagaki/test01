@@ -447,7 +447,7 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
                 'Photon Time': {'value': overall_metrics['photon_total_time_ms'], 'display_name': 'Photon Time'},
                 'Rows Read': {'value': overall_metrics['rows_read_count'], 'display_name': 'Rows Read Count'},
                 'Cache Hit Ratio': {'value': performance_insights['cache_efficiency']['cache_hit_ratio'], 'display_name': 'Cache Hit Ratio'},
-                'Data Selectivity': {'value': performance_insights['data_efficiency']['data_selectivity'], 'display_name': 'Data Selectivity'},
+                'Filter Rate': {'value': performance_insights['data_efficiency']['data_selectivity'], 'display_name': 'Filter Rate'},
                 'Throughput': {'value': performance_insights['parallelization']['throughput_mb_per_second'], 'display_name': 'Throughput (MB/s)'}
             },
             'graph_index': 0,
@@ -472,7 +472,7 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'raw_profiler_data': profiler_data,
             'performance_insights': performance_insights,  # 詳細なパフォーマンス洞察を追加
             'analysis_capabilities': [
-                'メトリクスベースのボトルネック分析（キャッシュ効率、データ選択性、Photon効率）',
+                'メトリクスベースのボトルネック分析（キャッシュ効率、フィルタ率、Photon効率）',
                 'リソース使用状況分析（スピル、並列化効率、スループット）',
                 'パフォーマンス指標計算（ファイル効率、パーティション効率）',
                 'ポテンシャルボトルネック特定（メトリクスベース）'
@@ -1581,7 +1581,7 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     # データ処理効率（容量ベース）
     read_bytes = overall.get('read_bytes', 0)
     
-    # 容量ベースのデータ選択性を計算（フィルタ情報を使用）
+    # 容量ベースのフィルタ率を計算（フィルタ情報を使用）
     data_selectivity = 0
     if read_bytes > 0:
         # フィルタ情報が利用可能な場合は容量ベースで計算
@@ -1599,20 +1599,21 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
                 files_read_bytes = filter_result.get('files_read_bytes', 0)
                 files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
                 if files_read_bytes > 0:
-                    # データ選択性 = 実際に処理されたデータ / スキャンされたデータ
-                    data_selectivity = (files_read_bytes - files_pruned_bytes) / files_read_bytes
+                    # フィルタ率 = プルーンされたデータ / スキャンされたデータ
+                    data_selectivity = files_pruned_bytes / files_read_bytes
                 else:
-                    # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
-                    data_selectivity = 1.0
+                    # フィルタ情報なし：フィルタされていない（0%として扱う）
+                    data_selectivity = 0.0
             else:
-                # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
-                data_selectivity = 1.0
+                # フィルタ情報なし：フィルタされていない（0%として扱う）
+                data_selectivity = 0.0
         except Exception:
-            # フォールバック：行数ベースの計算
+            # フォールバック：行数ベースでフィルタ率を計算
             rows_read = overall.get('rows_read_count', 0)
             rows_produced = overall.get('rows_produced_count', 0)
             if rows_read > 0:
-                data_selectivity = rows_produced / rows_read
+                # フィルタ率 = (読み込み行数 - 出力行数) / 読み込み行数
+                data_selectivity = max(0, (rows_read - rows_produced) / rows_read)
             else:
                 data_selectivity = 0
     
@@ -1845,15 +1846,15 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any],
     spill_bytes = overall_metrics.get('spill_to_disk_bytes', 0)
     
     # 1. データ効率分析（容量ベース）
-    # 容量ベースのデータ選択性を計算
+    # 容量ベースのフィルタ率を計算
     # metricsがNoneの場合は空の辞書で初期化
     if metrics is None:
         metrics = {'node_metrics': []}
     
-    data_selectivity_capacity = calculate_capacity_based_data_selectivity(overall_metrics, metrics)
+    filter_rate_capacity = calculate_filter_rate_percentage(overall_metrics, metrics)
     
     insights['data_efficiency'] = {
-        'data_selectivity': data_selectivity_capacity,
+        'data_selectivity': filter_rate_capacity,
         'avg_bytes_per_file': read_bytes / max(read_files, 1),
         'avg_bytes_per_partition': read_bytes / max(read_partitions, 1),
         'avg_rows_per_file': rows_read / max(read_files, 1),
@@ -1904,33 +1905,36 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any],
         bottlenecks.append('低Photon効率')
     if spill_bytes > 0:
         bottlenecks.append('メモリスピル発生')
-    if insights['data_efficiency']['data_selectivity'] < 0.1:
-        bottlenecks.append('低データ選択性')
+    if insights['data_efficiency']['data_selectivity'] < 0.2:
+        bottlenecks.append('低フィルタ効率')
     
     insights['potential_bottlenecks'] = bottlenecks
     
     return insights
 
-def calculate_capacity_based_data_selectivity(overall_metrics: Dict[str, Any], metrics: Dict[str, Any]) -> float:
+def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: Dict[str, Any]) -> float:
     """
-    容量ベースのデータ選択性を計算する
+    容量ベースのフィルタ率を計算する
     
     Args:
         overall_metrics: 全体メトリクス
         metrics: 全メトリクス（node_metricsを含む）
         
     Returns:
-        float: データ選択性（0.0-1.0）
+        float: フィルタ率（0.0-1.0、高い値ほど効率的）
     """
     read_bytes = overall_metrics.get('read_bytes', 0)
     
     if read_bytes <= 0:
-        # フォールバック：行数ベースの計算
+        # フォールバック：行数ベースでフィルタ率を計算
         rows_read = overall_metrics.get('rows_read_count', 0)
         rows_produced = overall_metrics.get('rows_produced_count', 0)
-        return rows_produced / max(rows_read, 1) if rows_read > 0 else 0
+        if rows_read > 0:
+            # フィルタ率 = (読み込み行数 - 出力行数) / 読み込み行数
+            return max(0, (rows_read - rows_produced) / rows_read)
+        return 0
     
-    # 容量ベースのデータ選択性を計算
+    # 容量ベースのフィルタ率を計算
     try:
         # node_metricsからフィルタ情報を取得
         node_metrics = metrics.get('node_metrics', [])
@@ -1941,17 +1945,19 @@ def calculate_capacity_based_data_selectivity(overall_metrics: Dict[str, Any], m
                     files_read_bytes = filter_result.get('files_read_bytes', 0)
                     files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
                     if files_read_bytes > 0:
-                        # データ選択性 = 実際に処理されたデータ / スキャンされたデータ
-                        return (files_read_bytes - files_pruned_bytes) / files_read_bytes
+                        # フィルタ率 = プルーンされたデータ / スキャンされたデータ
+                        return files_pruned_bytes / files_read_bytes
         
-        # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
-        return 1.0
+        # フィルタ情報なし：フィルタされていない（0%として扱う）
+        return 0.0
         
     except Exception:
-        # フォールバック：行数ベースの計算
+        # フォールバック：行数ベースでフィルタ率を計算
         rows_read = overall_metrics.get('rows_read_count', 0)
         rows_produced = overall_metrics.get('rows_produced_count', 0)
-        return rows_produced / max(rows_read, 1) if rows_read > 0 else 0
+        if rows_read > 0:
+            return max(0, (rows_read - rows_produced) / rows_read)
+        return 0
 
 def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -1992,7 +1998,7 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             "data_size_gb": overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024,
             "rows_read": overall_metrics.get('rows_read_count', 0),
             "rows_produced": overall_metrics.get('rows_produced_count', 0),
-            "data_selectivity": calculate_capacity_based_data_selectivity(overall_metrics, metrics),
+            "data_selectivity": calculate_filter_rate_percentage(overall_metrics, metrics),
             "avg_file_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_files_count', 1), 1),
             "avg_partition_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_partitions_count', 1), 1),
             "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。"
@@ -2228,7 +2234,7 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 - データ読み込み: {read_gb:.2f}GB
 - 出力行数: {rows_produced:,}行
 - 読み込み行数: {rows_read:,}行
-- データ選択性: {calculate_capacity_based_data_selectivity(overall_metrics, metrics):.4f}
+- フィルタ率: {calculate_filter_rate_percentage(overall_metrics, metrics):.4f}
 
 【抽出されたカラム使用パターン】
 
@@ -2299,7 +2305,7 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
                 "read_gb": read_gb,
                 "rows_produced": rows_produced,
                 "rows_read": rows_read,
-                "data_selectivity": calculate_capacity_based_data_selectivity(overall_metrics, metrics)
+                "data_selectivity": calculate_filter_rate_percentage(overall_metrics, metrics)
             },
             "summary": {
                 "analysis_method": "LLM-based",
@@ -2414,7 +2420,7 @@ def generate_liquid_clustering_markdown_report(clustering_analysis: Dict[str, An
 | データ読み込み | {performance_context.get('read_gb', 0):.2f}GB |
 | 出力行数 | {performance_context.get('rows_produced', 0):,}行 |
 | 読み込み行数 | {performance_context.get('rows_read', 0):,}行 |
-| データ選択性 | {performance_context.get('data_selectivity', 0):.4f} |
+| フィルタ率 | {performance_context.get('data_selectivity', 0):.4f} |
 
 ## 🔍 抽出されたメタデータ
 
@@ -2750,7 +2756,7 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     report_lines.append(f"| データ読み込み | {read_gb:.2f}GB | {'✅ 良好' if read_gb < 10 else '⚠️ 大容量'} |")
     report_lines.append(f"| Photon有効 | {'はい' if photon_enabled else 'いいえ'} | {'✅ 良好' if photon_enabled else '❌ 未有効'} |")
     report_lines.append(f"| キャッシュ効率 | {cache_hit_ratio:.1f}% | {'✅ 良好' if cache_hit_ratio > 80 else '⚠️ 改善必要'} |")
-    report_lines.append(f"| データ選択性 | {data_selectivity:.1f}% | {'✅ 良好' if data_selectivity > 10 else '⚠️ 改善必要'} |")
+    report_lines.append(f"| フィルタ率 | {data_selectivity:.1f}% | {'✅ 良好' if data_selectivity > 50 else '⚠️ フィルタ条件を確認'} |")
     report_lines.append(f"| シャッフル操作 | {shuffle_count}回 | {'✅ 良好' if shuffle_count < 5 else '⚠️ 多数'} |")
     report_lines.append(f"| スピル発生 | {'はい' if has_spill else 'いいえ'} | {'❌ 問題あり' if has_spill else '✅ 良好'} |")
     report_lines.append("")
@@ -2886,8 +2892,8 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
         medium_priority_actions.append("**Liquid Clustering実装** - 主要テーブルのクラスタリング")
     
     # LOWアクション
-    if data_selectivity < 10:
-        low_priority_actions.append("**WHERE句最適化** - データ選択性の向上")
+    if data_selectivity < 50:
+        low_priority_actions.append("**WHERE句最適化** - フィルタ効率の向上")
     
     # アクションの出力
     if high_priority_actions:
@@ -3310,7 +3316,7 @@ print(f"⏱️ 実行時間: {overall_metrics['total_time_ms']:,} ms ({overall_m
 print(f"💾 読み込みデータ: {overall_metrics['read_bytes']/1024/1024/1024:.2f} GB")
 print(f"📈 出力行数: {overall_metrics['rows_produced_count']:,} 行")
 print(f"📉 読み込み行数: {overall_metrics['rows_read_count']:,} 行")
-print(f"🎯 データ選択性: {bottleneck_indicators.get('data_selectivity', 0):.4f} ({bottleneck_indicators.get('data_selectivity', 0)*100:.2f}%)")
+print(f"🎯 フィルタ率: {bottleneck_indicators.get('data_selectivity', 0):.4f} ({bottleneck_indicators.get('data_selectivity', 0)*100:.2f}%)")
 print(f"🔧 ステージ数: {len(extracted_metrics['stage_metrics'])}")
 print(f"🏗️ ノード数: {len(extracted_metrics['node_metrics'])}")
 
@@ -4270,7 +4276,7 @@ print(f"\n⚡ パフォーマンス情報:")
 print(f"   ⏱️ 実行時間: {performance_context.get('total_time_sec', 0):.1f}秒")
 print(f"   💾 データ読み込み: {performance_context.get('read_gb', 0):.2f}GB")
 print(f"   📊 出力行数: {performance_context.get('rows_produced', 0):,}行")
-print(f"   🎯 データ選択性: {performance_context.get('data_selectivity', 0):.4f}")
+print(f"   🎯 フィルタ率: {performance_context.get('data_selectivity', 0):.4f}")
 
 # 分析結果をファイルに出力
 print(f"\n💾 分析結果をファイルに出力中...")
@@ -6869,7 +6875,7 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
 | 実行時間 | {overall_metrics.get('total_time_ms', 0):,} ms | {'✅ 良好' if overall_metrics.get('total_time_ms', 0) < 60000 else '⚠️ 改善必要'} |
 | Photon有効 | {'はい' if overall_metrics.get('photon_enabled', False) else 'いいえ'} | {'✅ 良好' if overall_metrics.get('photon_enabled', False) else '❌ 未有効'} |
 | キャッシュ効率 | {bottleneck_indicators.get('cache_hit_ratio', 0) * 100:.1f}% | {'✅ 良好' if bottleneck_indicators.get('cache_hit_ratio', 0) > 0.8 else '⚠️ 改善必要'} |
-| データ選択性 | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ 良好' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ 改善必要'} |
+| フィルタ率 | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ 良好' if bottleneck_indicators.get('data_selectivity', 0) > 0.5 else '⚠️ フィルタ条件を確認'} |
 | シャッフル操作 | {bottleneck_indicators.get('shuffle_operations_count', 0)}回 | {'✅ 良好' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ 多数'} |
 | スピル発生 | {'はい' if bottleneck_indicators.get('has_spill', False) else 'いいえ'} | {'❌ 問題あり' if bottleneck_indicators.get('has_spill', False) else '✅ 良好'} |
 | スキュー検出 | {'AQEで検出・対応済' if bottleneck_indicators.get('has_skew', False) else '潜在的なスキューの可能性あり' if bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False) else '未検出'} | {'🔧 AQE対応済' if bottleneck_indicators.get('has_skew', False) else '⚠️ 改善必要' if bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False) else '✅ 良好'} |
@@ -6899,8 +6905,8 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
         if not overall_metrics.get('photon_enabled', False):
             bottlenecks.append("**Photon未有効**: 高速処理エンジンが利用されていない")
         
-        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
-            bottlenecks.append("**データ選択性低下**: 必要以上のデータを読み込んでいる")
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.2:
+            bottlenecks.append("**フィルタ効率低下**: 必要以上のデータを読み込んでいる")
         
         if bottlenecks:
             for i, bottleneck in enumerate(bottlenecks, 1):
@@ -6927,7 +6933,7 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
 | データ読み込み | {performance_context.get('read_gb', 0):.2f}GB |
 | 出力行数 | {performance_context.get('rows_produced', 0):,}行 |
 | 読み込み行数 | {performance_context.get('rows_read', 0):,}行 |
-| データ選択性 | {performance_context.get('data_selectivity', 0):.4f} |
+| フィルタ率 | {performance_context.get('data_selectivity', 0):.4f} |
 
 ### 🤖 AI分析結果
 
@@ -7004,8 +7010,8 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
         if not overall_metrics.get('photon_enabled', False):
             expected_improvements.append("**Photon有効化**: 2-10倍の処理速度向上が期待されます")
         
-        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
-            expected_improvements.append("**データ選択性改善**: 40-90%のデータ読み込み量削減が期待されます")
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.2:
+            expected_improvements.append("**フィルタ効率改善**: 40-90%のデータ読み込み量削減が期待されます")
         
         if expected_improvements:
             for i, improvement in enumerate(expected_improvements, 1):
@@ -7057,7 +7063,7 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
 | Execution Time | {overall_metrics.get('total_time_ms', 0):,} ms | {'✅ Good' if overall_metrics.get('total_time_ms', 0) < 60000 else '⚠️ Needs Improvement'} |
 | Photon Enabled | {'Yes' if overall_metrics.get('photon_enabled', False) else 'No'} | {'✅ Good' if overall_metrics.get('photon_enabled', False) else '❌ Not Enabled'} |
 | Cache Efficiency | {bottleneck_indicators.get('cache_hit_ratio', 0) * 100:.1f}% | {'✅ Good' if bottleneck_indicators.get('cache_hit_ratio', 0) > 0.8 else '⚠️ Needs Improvement'} |
-| Data Selectivity | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ Good' if bottleneck_indicators.get('data_selectivity', 0) > 0.1 else '⚠️ Needs Improvement'} |
+| Filter Rate | {bottleneck_indicators.get('data_selectivity', 0) * 100:.2f}% | {'✅ Good' if bottleneck_indicators.get('data_selectivity', 0) > 0.5 else '⚠️ Check Filter Conditions'} |
 | Shuffle Operations | {bottleneck_indicators.get('shuffle_operations_count', 0)} times | {'✅ Good' if bottleneck_indicators.get('shuffle_operations_count', 0) < 5 else '⚠️ High'} |
 | Spill Occurrence | {'Yes' if bottleneck_indicators.get('has_spill', False) else 'No'} | {'❌ Issues' if bottleneck_indicators.get('has_spill', False) else '✅ Good'} |
 | Skew Detection | {'AQE Detected & Handled' if bottleneck_indicators.get('has_skew', False) else 'Not Detected'} | {'🔧 AQE Handled' if bottleneck_indicators.get('has_skew', False) else '✅ Good'} |
@@ -7087,8 +7093,8 @@ Detailed analysis of Photon-incompatible operations and optimization opportuniti
         if not overall_metrics.get('photon_enabled', False):
             bottlenecks.append("**Photon Not Enabled**: High-speed processing engine not utilized")
         
-        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
-            bottlenecks.append("**Poor Data Selectivity**: Reading more data than necessary")
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.2:
+            bottlenecks.append("**Poor Filter Efficiency**: Reading more data than necessary")
         
         if bottlenecks:
             for i, bottleneck in enumerate(bottlenecks, 1):
@@ -7154,7 +7160,7 @@ The following topics are analyzed for process evaluation:
 | Data Read | {performance_context.get('read_gb', 0):.2f}GB |
 | Output Rows | {performance_context.get('rows_produced', 0):,} |
 | Read Rows | {performance_context.get('rows_read', 0):,} |
-| Data Selectivity | {performance_context.get('data_selectivity', 0):.4f} |
+| Filter Rate | {performance_context.get('data_selectivity', 0):.4f} |
 
 ### 🤖 AI Analysis Results
 
@@ -7191,8 +7197,8 @@ The following topics are analyzed for process evaluation:
         if not overall_metrics.get('photon_enabled', False):
             expected_improvements.append("**Photon Enablement**: 2-10x processing speed improvement expected")
         
-        if bottleneck_indicators.get('data_selectivity', 0) < 0.01:
-            expected_improvements.append("**Data Selectivity**: 40-90% data read volume reduction expected")
+        if bottleneck_indicators.get('data_selectivity', 0) < 0.2:
+            expected_improvements.append("**Filter Efficiency**: 40-90% data read volume reduction expected")
         
         if expected_improvements:
             for i, improvement in enumerate(expected_improvements, 1):
