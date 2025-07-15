@@ -144,7 +144,7 @@ try:
 except ImportError:
     print("Warning: pandas is not installed, some features may not work")
     pd = None
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 print("✅ 基本ライブラリインポート完了")
@@ -424,8 +424,8 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'plans_state': query_data.get('plansState', '')
         }
         
-        # 詳細なパフォーマンス洞察を計算
-        performance_insights = calculate_performance_insights_from_metrics(overall_metrics)
+        # 詳細なパフォーマンス洞察を計算（後でnode_metricsと一緒に再計算）
+        performance_insights = calculate_performance_insights_from_metrics(overall_metrics, None)
         
         # 擬似的なノードメトリクス（サマリー情報から生成）
         summary_node = {
@@ -453,6 +453,13 @@ def extract_performance_metrics_from_query_summary(profiler_data: Dict[str, Any]
             'graph_index': 0,
             'performance_insights': performance_insights
         }
+        
+        # 完全なmetricsでperformance_insightsを再計算
+        complete_metrics = {
+            'overall_metrics': overall_metrics,
+            'node_metrics': [summary_node]
+        }
+        performance_insights = calculate_performance_insights_from_metrics(overall_metrics, complete_metrics)
         
         return {
             'data_format': 'sql_query_summary',
@@ -1571,11 +1578,45 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     if read_bytes > 0:
         indicators['cache_hit_ratio'] = cache_bytes / read_bytes
     
-    # データ処理効率
-    rows_read = overall.get('rows_read_count', 0)
-    rows_produced = overall.get('rows_produced_count', 0)
-    if rows_read > 0:
-        indicators['data_selectivity'] = rows_produced / rows_read
+    # データ処理効率（容量ベース）
+    read_bytes = overall.get('read_bytes', 0)
+    
+    # 容量ベースのデータ選択性を計算（フィルタ情報を使用）
+    data_selectivity = 0
+    if read_bytes > 0:
+        # フィルタ情報が利用可能な場合は容量ベースで計算
+        try:
+            # プロファイラーデータから容量ベースのフィルタ情報を取得
+            # node_metricsの中からフィルタ情報を取得
+            filter_result = None
+            node_metrics = metrics.get('node_metrics', [])
+            for node in node_metrics:
+                if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan']:
+                    filter_result = calculate_filter_rate(node)
+                    if filter_result.get('has_filter_metrics', False):
+                        break
+            if filter_result and filter_result.get('has_filter_metrics', False):
+                files_read_bytes = filter_result.get('files_read_bytes', 0)
+                files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
+                if files_read_bytes > 0:
+                    # データ選択性 = 実際に処理されたデータ / スキャンされたデータ
+                    data_selectivity = (files_read_bytes - files_pruned_bytes) / files_read_bytes
+                else:
+                    # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
+                    data_selectivity = 1.0
+            else:
+                # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
+                data_selectivity = 1.0
+        except Exception:
+            # フォールバック：行数ベースの計算
+            rows_read = overall.get('rows_read_count', 0)
+            rows_produced = overall.get('rows_produced_count', 0)
+            if rows_read > 0:
+                data_selectivity = rows_produced / rows_read
+            else:
+                data_selectivity = 0
+    
+    indicators['data_selectivity'] = data_selectivity
     
     # Photon使用率（タスク実行時間に対する割合）
     task_time = overall.get('task_total_time_ms', 0)
@@ -1784,7 +1825,7 @@ print("✅ 関数定義完了: calculate_bottleneck_indicators")
 
 # COMMAND ----------
 
-def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any], metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     メトリクス情報のみから詳細なパフォーマンス洞察を計算
     """
@@ -1803,9 +1844,16 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any])
     task_time = overall_metrics.get('task_total_time_ms', 0)
     spill_bytes = overall_metrics.get('spill_to_disk_bytes', 0)
     
-    # 1. データ効率分析
+    # 1. データ効率分析（容量ベース）
+    # 容量ベースのデータ選択性を計算
+    # metricsがNoneの場合は空の辞書で初期化
+    if metrics is None:
+        metrics = {'node_metrics': []}
+    
+    data_selectivity_capacity = calculate_capacity_based_data_selectivity(overall_metrics, metrics)
+    
     insights['data_efficiency'] = {
-        'data_selectivity': rows_produced / max(rows_read, 1),
+        'data_selectivity': data_selectivity_capacity,
         'avg_bytes_per_file': read_bytes / max(read_files, 1),
         'avg_bytes_per_partition': read_bytes / max(read_partitions, 1),
         'avg_rows_per_file': rows_read / max(read_files, 1),
@@ -1863,6 +1911,48 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any])
     
     return insights
 
+def calculate_capacity_based_data_selectivity(overall_metrics: Dict[str, Any], metrics: Dict[str, Any]) -> float:
+    """
+    容量ベースのデータ選択性を計算する
+    
+    Args:
+        overall_metrics: 全体メトリクス
+        metrics: 全メトリクス（node_metricsを含む）
+        
+    Returns:
+        float: データ選択性（0.0-1.0）
+    """
+    read_bytes = overall_metrics.get('read_bytes', 0)
+    
+    if read_bytes <= 0:
+        # フォールバック：行数ベースの計算
+        rows_read = overall_metrics.get('rows_read_count', 0)
+        rows_produced = overall_metrics.get('rows_produced_count', 0)
+        return rows_produced / max(rows_read, 1) if rows_read > 0 else 0
+    
+    # 容量ベースのデータ選択性を計算
+    try:
+        # node_metricsからフィルタ情報を取得
+        node_metrics = metrics.get('node_metrics', [])
+        for node in node_metrics:
+            if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan']:
+                filter_result = calculate_filter_rate(node)
+                if filter_result.get('has_filter_metrics', False):
+                    files_read_bytes = filter_result.get('files_read_bytes', 0)
+                    files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
+                    if files_read_bytes > 0:
+                        # データ選択性 = 実際に処理されたデータ / スキャンされたデータ
+                        return (files_read_bytes - files_pruned_bytes) / files_read_bytes
+        
+        # フィルタ情報なし：read_bytesをそのまま使用（100%として扱う）
+        return 1.0
+        
+    except Exception:
+        # フォールバック：行数ベースの計算
+        rows_read = overall_metrics.get('rows_read_count', 0)
+        rows_produced = overall_metrics.get('rows_produced_count', 0)
+        return rows_produced / max(rows_read, 1) if rows_read > 0 else 0
+
 def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     SQLプロファイラーデータからLiquid Clustering分析に必要なデータを抽出（LLM分析用）
@@ -1902,7 +1992,7 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             "data_size_gb": overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024,
             "rows_read": overall_metrics.get('rows_read_count', 0),
             "rows_produced": overall_metrics.get('rows_produced_count', 0),
-            "data_selectivity": overall_metrics.get('rows_produced_count', 0) / max(overall_metrics.get('rows_read_count', 1), 1),
+            "data_selectivity": calculate_capacity_based_data_selectivity(overall_metrics, metrics),
             "avg_file_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_files_count', 1), 1),
             "avg_partition_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_partitions_count', 1), 1),
             "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。"
@@ -2138,7 +2228,7 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 - データ読み込み: {read_gb:.2f}GB
 - 出力行数: {rows_produced:,}行
 - 読み込み行数: {rows_read:,}行
-- データ選択性: {(rows_produced/max(rows_read,1)):.4f}
+- データ選択性: {calculate_capacity_based_data_selectivity(overall_metrics, metrics):.4f}
 
 【抽出されたカラム使用パターン】
 
@@ -2209,7 +2299,7 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
                 "read_gb": read_gb,
                 "rows_produced": rows_produced,
                 "rows_read": rows_read,
-                "data_selectivity": rows_produced/max(rows_read,1)
+                "data_selectivity": calculate_capacity_based_data_selectivity(overall_metrics, metrics)
             },
             "summary": {
                 "analysis_method": "LLM-based",
