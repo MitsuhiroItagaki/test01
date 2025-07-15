@@ -2652,11 +2652,17 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     # パフォーマンス概要
     report_lines.append("## 1. パフォーマンス概要")
     report_lines.append("")
-    report_lines.append("### 基本メトリクス")
-    report_lines.append(f"- **実行時間**: {total_time_sec:.1f}秒")
-    report_lines.append(f"- **データ読み込み**: {read_gb:.2f}GB")
-    report_lines.append(f"- **キャッシュ効率**: {cache_hit_ratio:.1f}%")
-    report_lines.append(f"- **データ選択性**: {data_selectivity:.1f}%")
+    report_lines.append("### 主要パフォーマンス指標")
+    report_lines.append("")
+    report_lines.append("| 指標 | 値 | 評価 |")
+    report_lines.append("|------|-----|------|")
+    report_lines.append(f"| 実行時間 | {total_time_sec:.1f}秒 | {'✅ 良好' if total_time_sec < 60 else '⚠️ 改善必要'} |")
+    report_lines.append(f"| データ読み込み | {read_gb:.2f}GB | {'✅ 良好' if read_gb < 10 else '⚠️ 大容量'} |")
+    report_lines.append(f"| Photon有効 | {'はい' if photon_enabled else 'いいえ'} | {'✅ 良好' if photon_enabled else '❌ 未有効'} |")
+    report_lines.append(f"| キャッシュ効率 | {cache_hit_ratio:.1f}% | {'✅ 良好' if cache_hit_ratio > 80 else '⚠️ 改善必要'} |")
+    report_lines.append(f"| データ選択性 | {data_selectivity:.1f}% | {'✅ 良好' if data_selectivity > 10 else '⚠️ 改善必要'} |")
+    report_lines.append(f"| シャッフル操作 | {shuffle_count}回 | {'✅ 良好' if shuffle_count < 5 else '⚠️ 多数'} |")
+    report_lines.append(f"| スピル発生 | {'はい' if has_spill else 'いいえ'} | {'❌ 問題あり' if has_spill else '✅ 良好'} |")
     report_lines.append("")
     
     # 主要ボトルネック分析
