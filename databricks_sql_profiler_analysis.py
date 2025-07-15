@@ -5559,6 +5559,14 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
      - コンパイル時最適化の活用
 
 【🔄 REPARTITIONヒント適用ルール】
+REPARTITIONヒントを付与する場合は以下の最適化ルールを守ってください：
+
+- **JOINやGROUP BYが発生する場合は、処理の直前に適切な REPARTITION ヒントを付与してください**
+- **REPARTITIONヒントは SELECT /*+ REPARTITION(パーティション数, カラム名) の形式で、JOIN対象列やGROUP BY列に対して指定してください**
+- **REPARTITIONヒントの適用位置は、対象となるJOINやGROUP BYを含むSELECTの直前である必要があります**
+- **REPARTITIONヒントは、シャッフルの効率化・スキュー防止などパフォーマンス最適化が目的です**
+
+従来のルール：
 - **スピルが検出された場合のみ適用**
 - GROUP BYクエリの場合: GROUP BY前にREPARTITION(推奨数, group_by_column)
 - JOINクエリの場合: JOIN前にREPARTITION(推奨数, join_key)
