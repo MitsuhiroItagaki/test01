@@ -74,8 +74,8 @@ EXPLAIN_ENABLED = 'Y'
 DEBUG_ENABLE = 'N'
 
 # 🗂️ カタログとデータベース設定（EXPLAIN文実行時に使用）
-CATALOG = 'tpcds'
-DATABASE = 'tpcds_sf1000_delta_lc'  # デフォルト: 日本語
+CATALOG = 'main'
+DATABASE = 'default'
 
 # 💡 使用例:
 # OUTPUT_LANGUAGE = 'ja'  # 日本語でファイル出力
