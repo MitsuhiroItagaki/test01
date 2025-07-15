@@ -5558,12 +5558,18 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
      - Photon利用率向上のための関数選択
      - コンパイル時最適化の活用
 
-【🔄 REPARTITIONヒント適用ルール】
+【🔄 REPARTITIONヒント適用ルール - 構文エラー防止】
 REPARTITIONヒントを付与する場合は以下の最適化ルールを守ってください：
 
 - **シャッフルの効率化・スキュー防止などパフォーマンス最適化が目的であるため、スピルアウトしていない場合には REPARTITION ヒントは不要**
 - **REPARTITIONヒントは SELECT /*+ REPARTITION(パーティション数, カラム名) の形式で指定**
 - **REPARTITIONヒントの適用位置は、対象となるJOINやGROUP BYを含むSELECTの直前であるため、出力されたoutput_explain_plan_*.txtのPhysical Planから実行計画を理解し、適切な位置にREPARTITION ヒントを付与すること**
+
+**🚨 REPARTITIONヒント配置の重要な構文ルール:**
+1. **JOINやGROUP BYの処理段階で効果を発揮するため、必ずサブクエリ内部に配置する**
+2. **トップレベルのSELECT文に配置すると最終出力段階のみに影響し、JOIN/GROUP BY処理段階には影響しない**
+3. **複数のREPARTITIONヒントは各サブクエリ内部に個別に配置する**
+4. **パーティション数とカラム名は必須パラメータとして指定する**
 
 従来のルール：
 - **スピルが検出された場合のみ適用**
@@ -5703,8 +5709,8 @@ FROM table1
 - 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
 - 実際に実行できる完全なSQLクエリのみを出力してください
 
-【🚨 BROADCASTヒント配置の厳格なルール】
-**絶対に守るべき文法ルール:**
+【🚨 BROADCASTヒント配置の厳格なルール - 構文エラー防止】
+**絶対に守るべき文法ルール（構文エラー防止のため必須）:**
 
 ✅ **正しい配置（必須）:**
 ```sql
@@ -5714,7 +5720,7 @@ FROM table1 t1
   JOIN table2 t2 ON t1.id = t2.id
 ```
 
-❌ **絶対に禁止される誤った配置:**
+❌ **絶対に禁止される誤った配置（構文エラーの原因）:**
 ```sql
 -- これらは全て文法エラーになります
 FROM table1 /*+ BROADCAST(table1) */
@@ -5727,6 +5733,13 @@ LEFT JOIN (
   FROM prd_delta.qtz_s3_etl.fm_coupon_pos COUPON
 ) COUPON ON ...
 ```
+
+**🚨 構文エラー防止のための必須確認事項:**
+1. **BROADCASTヒントは必ずメインクエリの最初のSELECT文の直後のみ**
+2. **サブクエリ、CTE、JOINサブクエリ内部には絶対に配置しない**
+3. **FROM句、JOIN句、WHERE句内には絶対に配置しない**
+4. **複数のBROADCASTヒントは1つのメインクエリSELECT直後に統合する**
+5. **BROADCASTヒントには必ずテーブル名またはエイリアス名を指定する**
 
 **重要な配置ルール:**
 1. **ヒントは必ずメインクエリのSELECT文の直後**に配置
@@ -5805,18 +5818,23 @@ FROM cte1 c
 - [BROADCASTヒントの適用詳細 - SELECT直後配置]
 - [推定される性能改善効果]
 
-**🚨 BROADCASTヒント配置確認**:
-- ✅ 全てのBROADCASTヒントがSELECT文の直後に配置されている
+**🚨 構文エラー防止の最終確認**:
+- ✅ 全てのBROADCASTヒントがメインクエリの最初のSELECT文の直後に配置されている
+- ✅ サブクエリ、CTE、JOINサブクエリ内部にBROADCASTヒントが配置されていない
 - ✅ FROM句、JOIN句、WHERE句内にヒントが配置されていない
 - ✅ BROADCASTヒントに必ずテーブル名/エイリアス名が指定されている
+- ✅ REPARTITIONヒントは適切なサブクエリ内部に配置されている
 - ✅ 複数ヒントはカンマ区切りで指定されている
-- ✅ 文法的に正しいSQL構文になっている
+- ✅ プレースホルダー（...、[省略]等）が一切使用されていない
+- ✅ 完全なSQL構文になっている（不完全なクエリではない）
+- ✅ NULLリテラルが適切な型でキャストされている
 
 ```sql
--- 🚨 重要: BROADCASTヒントは必ずSELECT文の直後に配置
+-- 🚨 重要: BROADCASTヒントは必ずメインクエリの最初のSELECT文の直後に配置
 -- 例: SELECT /*+ BROADCAST(table_name) */ column1, column2, ...
 -- 複数ヒント例（スピル検出時のみ）: SELECT /*+ REPARTITION(100), BROADCAST(small_table) */ column1, column2, ...
 -- 無効な例: SELECT /*+ BROADCAST */ column1, column2, ... (テーブル名なし - 無効)
+-- 🚨 REPARTITIONヒントはサブクエリ内部に配置: SELECT ... FROM (SELECT /*+ REPARTITION(200, join_key) */ ... FROM table) ...
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
 ```
 
@@ -7207,6 +7225,295 @@ def refine_report_with_llm(raw_report: str, query_id: str) -> str:
         print("📄 元のレポートを返します")
         return raw_report
 
+def validate_and_fix_sql_syntax(sql_query: str) -> str:
+    """
+    SQL構文の基本チェックと修正を行う（構文エラー防止）
+    
+    主要チェック項目：
+    1. BROADCASTヒントの配置位置検証
+    2. 完全性チェック（SELECT、FROM、WHERE等の基本構文）
+    3. 基本的な構文エラーの修正
+    4. コメントやプレースホルダーの除去
+    
+    Args:
+        sql_query: チェック対象のSQLクエリ
+        
+    Returns:
+        str: 修正されたSQLクエリ
+    """
+    import re
+    
+    if not sql_query or not sql_query.strip():
+        return ""
+    
+    # 基本的なクリーンアップ
+    sql_query = sql_query.strip()
+    
+    # 1. BROADCASTヒントの配置位置チェック
+    sql_query = fix_broadcast_hint_placement(sql_query)
+    
+    # 2. 不完全なSQL構文の検出と修正
+    sql_query = fix_incomplete_sql_syntax(sql_query)
+    
+    # 3. プレースホルダーや省略記号の除去
+    sql_query = remove_sql_placeholders(sql_query)
+    
+    # 4. 基本的な構文エラーの修正
+    sql_query = fix_basic_syntax_errors(sql_query)
+    
+    return sql_query
+
+def fix_broadcast_hint_placement(sql_query: str) -> str:
+    """
+    BROADCASTヒントの配置位置を修正（サブクエリ内部配置を禁止）
+    
+    修正内容：
+    - サブクエリ内部のBROADCASTヒントをメインクエリに移動
+    - FROM句、JOIN句、WHERE句内のヒントを削除
+    - 複数のBROADCASTヒントを統合
+    """
+    import re
+    
+    # サブクエリ内部のBROADCASTヒントを検出と削除
+    # パターン1: LEFT JOIN (SELECT /*+ BROADCAST(...) */ ... のパターン
+    subquery_broadcast_pattern = r'JOIN\s*\(\s*SELECT\s*/\*\+\s*BROADCAST\([^)]+\)\s*\*/'
+    sql_query = re.sub(subquery_broadcast_pattern, 'JOIN (\n  SELECT', sql_query, flags=re.IGNORECASE)
+    
+    # パターン2: WITH句やサブクエリ内部のBROADCASTヒント
+    cte_broadcast_pattern = r'(WITH\s+\w+\s+AS\s*\(\s*SELECT\s*)/\*\+\s*BROADCAST\([^)]+\)\s*\*/'
+    sql_query = re.sub(cte_broadcast_pattern, r'\1', sql_query, flags=re.IGNORECASE)
+    
+    # パターン3: FROM句内のBROADCASTヒント
+    from_broadcast_pattern = r'FROM\s+\w+\s*/\*\+\s*BROADCAST\([^)]+\)\s*\*/'
+    sql_query = re.sub(from_broadcast_pattern, 'FROM', sql_query, flags=re.IGNORECASE)
+    
+    # パターン4: WHERE句内のBROADCASTヒント
+    where_broadcast_pattern = r'WHERE\s*/\*\+\s*BROADCAST\([^)]+\)\s*\*/'
+    sql_query = re.sub(where_broadcast_pattern, 'WHERE', sql_query, flags=re.IGNORECASE)
+    
+    # BROADCASTヒントがメインクエリのSELECT直後にあるかチェック
+    main_select_pattern = r'^\s*SELECT\s*(/\*\+[^*]*\*/)?\s*'
+    if not re.search(main_select_pattern, sql_query, re.IGNORECASE):
+        # メインクエリのSELECT直後にBROADCASTヒントがない場合の処理
+        # 削除されたBROADCASTヒントを復元してメインクエリに配置
+        broadcast_tables = extract_broadcast_tables_from_sql(sql_query)
+        if broadcast_tables:
+            broadcast_hint = f"/*+ BROADCAST({', '.join(broadcast_tables)}) */"
+            sql_query = re.sub(r'^\s*SELECT\s*', f'SELECT {broadcast_hint}\n  ', sql_query, flags=re.IGNORECASE)
+    
+    return sql_query
+
+def fix_incomplete_sql_syntax(sql_query: str) -> str:
+    """
+    不完全なSQL構文の検出と修正
+    """
+    import re
+    
+    # 基本的なSQLキーワードの存在チェック
+    has_select = bool(re.search(r'\bSELECT\b', sql_query, re.IGNORECASE))
+    has_from = bool(re.search(r'\bFROM\b', sql_query, re.IGNORECASE))
+    
+    # SELECTがない場合は基本的なSQLではない可能性が高い
+    if not has_select:
+        return sql_query
+    
+    # FROMがない場合は不完全なSQLの可能性
+    if not has_from:
+        # 不完全なSQLの場合はコメントで警告を追加
+        sql_query = f"-- ⚠️ 不完全なSQL構文が検出されました。手動で確認してください。\n{sql_query}"
+    
+    return sql_query
+
+def remove_sql_placeholders(sql_query: str) -> str:
+    """
+    プレースホルダーや省略記号の除去（SQLヒントは保持）
+    """
+    import re
+    
+    # 一般的なプレースホルダーパターン（SQLヒントは除外）
+    placeholders = [
+        r'\.\.\.',  # 省略記号
+        r'\[省略\]',  # 省略表記
+        r'\[カラム名\]',  # プレースホルダー
+        r'\[テーブル名\]',  # プレースホルダー
+        r'column1, column2, \.\.\.',  # カラム省略
+        r'-- \.\.\.',  # コメント内の省略
+        r'column1, column2, \.\.\.',  # カラム省略パターン
+        r', \.\.\.',  # 末尾の省略記号
+        r'完全なSQL - すべてのカラム.*?を省略なしで記述',  # 指示文の除去
+        r'\[完全なSQL.*?\]',  # 完全なSQL指示の除去
+    ]
+    
+    for pattern in placeholders:
+        sql_query = re.sub(pattern, '', sql_query, flags=re.IGNORECASE)
+    
+    # SQLヒント以外の複数行コメントを除去（ヒントは保持）
+    # /*+ ... */ 形式のヒントは保持し、その他の /* ... */ コメントのみ削除
+    sql_query = re.sub(r'/\*(?!\+).*?\*/', '', sql_query, flags=re.DOTALL)
+    
+    # 不完全なSQL指示コメントを除去
+    instruction_comments = [
+        r'-- 🚨 重要:.*',
+        r'-- 例:.*',
+        r'-- 複数ヒント例.*',
+        r'-- 無効な例:.*',
+        r'-- 🚨 REPARTITIONヒント.*',
+    ]
+    
+    for pattern in instruction_comments:
+        sql_query = re.sub(pattern, '', sql_query, flags=re.IGNORECASE)
+    
+    # 空行を正規化
+    sql_query = re.sub(r'\n\s*\n\s*\n+', '\n\n', sql_query)
+    
+    return sql_query.strip()
+
+def fix_basic_syntax_errors(sql_query: str) -> str:
+    """
+    基本的な構文エラーの修正
+    """
+    import re
+    
+    # 1. NULLリテラルの型キャスト修正
+    # SELECT null as col01 → SELECT cast(null as String) as col01
+    null_literal_pattern = r'\bnull\s+as\s+(\w+)'
+    sql_query = re.sub(null_literal_pattern, r'cast(null as String) as \1', sql_query, flags=re.IGNORECASE)
+    
+    # 2. 連続するカンマの修正
+    sql_query = re.sub(r',\s*,', ',', sql_query)
+    
+    # 3. 不正な空白の修正（行内の連続する空白を1つに）
+    sql_query = re.sub(r'[ \t]+', ' ', sql_query)
+    
+    # 4. 行末の不要な文字削除
+    sql_query = re.sub(r'[,;]\s*$', '', sql_query.strip())
+    
+    # 5. 不完全なSELECT文の修正
+    # SELECTの後に直接FROMが来る場合を修正
+    sql_query = re.sub(r'SELECT\s+FROM', 'SELECT *\nFROM', sql_query, flags=re.IGNORECASE)
+    
+    # 6. 不完全なJOIN句の修正
+    # JOINの後にONが来ない場合の基本的な修正
+    lines = sql_query.split('\n')
+    fixed_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        if line:
+            # JOINの後にONがない場合の警告コメント追加
+            if re.search(r'\bJOIN\s+\w+\s*$', line, re.IGNORECASE):
+                fixed_lines.append(line)
+                fixed_lines.append('  -- ⚠️ JOIN条件（ON句）を確認してください')
+            else:
+                fixed_lines.append(line)
+    
+    sql_query = '\n'.join(fixed_lines)
+    
+    # 7. 基本的な構文チェック
+    sql_query = add_syntax_warnings(sql_query)
+    
+    return sql_query
+
+def add_syntax_warnings(sql_query: str) -> str:
+    """
+    基本的な構文チェックと警告の追加
+    """
+    import re
+    
+    warnings = []
+    
+    # 基本的なSQLキーワードの存在チェック
+    has_select = bool(re.search(r'\bSELECT\b', sql_query, re.IGNORECASE))
+    has_from = bool(re.search(r'\bFROM\b', sql_query, re.IGNORECASE))
+    
+    # JOINがあるがONがない場合
+    joins = re.findall(r'\b(LEFT|RIGHT|INNER|OUTER)?\s*JOIN\s+\w+', sql_query, re.IGNORECASE)
+    ons = re.findall(r'\bON\b', sql_query, re.IGNORECASE)
+    
+    if len(joins) > len(ons):
+        warnings.append('-- ⚠️ JOIN句の数に対してON句が不足している可能性があります')
+    
+    # WITH句がある場合の基本チェック
+    if re.search(r'\bWITH\s+\w+\s+AS\s*\(', sql_query, re.IGNORECASE):
+        if not re.search(r'\)\s*SELECT\b', sql_query, re.IGNORECASE):
+            warnings.append('-- ⚠️ WITH句の後のメインSELECT文を確認してください')
+    
+    # 警告がある場合は先頭に追加
+    if warnings:
+        sql_query = '\n'.join(warnings) + '\n\n' + sql_query
+    
+    return sql_query
+
+def extract_broadcast_tables_from_sql(sql_query: str) -> list:
+    """
+    SQLクエリからBROADCASTされるべきテーブル名を抽出
+    """
+    import re
+    
+    # 削除されたBROADCASTヒントからテーブル名を抽出
+    broadcast_pattern = r'BROADCAST\(([^)]+)\)'
+    matches = re.findall(broadcast_pattern, sql_query, re.IGNORECASE)
+    
+    tables = []
+    for match in matches:
+        # カンマで区切られたテーブル名を分割
+        table_names = [name.strip() for name in match.split(',')]
+        tables.extend(table_names)
+    
+    return list(set(tables))  # 重複を除去
+
+def validate_final_sql_syntax(sql_query: str) -> bool:
+    """
+    最終的なSQL構文チェック（保存前の確認）
+    
+    Returns:
+        bool: 構文が正しいと判定された場合True、問題がある場合False
+    """
+    import re
+    
+    if not sql_query or not sql_query.strip():
+        return False
+    
+    # 基本的なSQLキーワードの存在チェック
+    has_select = bool(re.search(r'\bSELECT\b', sql_query, re.IGNORECASE))
+    
+    # SELECTがない場合は不正
+    if not has_select:
+        return False
+    
+    # 明らかに不完全なパターンのチェック
+    incomplete_patterns = [
+        r'\.\.\.',  # 省略記号
+        r'\[省略\]',  # 省略表記
+        r'\[カラム名\]',  # プレースホルダー
+        r'\[テーブル名\]',  # プレースホルダー
+        r'column1, column2, \.\.\.',  # カラム省略
+        r'完全なSQL.*?を.*?記述',  # 指示文
+    ]
+    
+    for pattern in incomplete_patterns:
+        if re.search(pattern, sql_query, re.IGNORECASE):
+            return False
+    
+    # BROADCASTヒント配置の基本チェック
+    broadcast_hints = re.findall(r'/\*\+\s*BROADCAST\([^)]+\)\s*\*/', sql_query, re.IGNORECASE)
+    if broadcast_hints:
+        # BROADCASTヒントがサブクエリ内部にあるかチェック
+        subquery_broadcast = re.search(r'JOIN\s*\(\s*SELECT\s*/\*\+\s*BROADCAST', sql_query, re.IGNORECASE)
+        if subquery_broadcast:
+            return False
+    
+    # 基本的な構文エラーチェック
+    # 連続するカンマ
+    if re.search(r',\s*,', sql_query):
+        return False
+    
+    # 不正な空白パターン
+    if re.search(r'\s{5,}', sql_query):  # 5個以上の連続する空白
+        return False
+    
+    return True
+
 def save_optimized_sql_files(original_query: str, optimized_result: str, metrics: Dict[str, Any], analysis_result: str = "") -> Dict[str, str]:
     """
     最適化されたSQLクエリを実行可能な形でファイルに保存
@@ -7240,49 +7547,81 @@ def save_optimized_sql_files(original_query: str, optimized_result: str, metrics
     # 最適化されたクエリの抽出と保存
     optimized_filename = f"output_optimized_query_{timestamp}.sql"
     
-    # 最適化結果からSQLコードを抽出（主要コンテンツから抽出）
+    # 最適化結果からSQLコードを抽出（主要コンテンツから抽出） - 改善版
     sql_pattern = r'```sql\s*(.*?)\s*```'
     sql_matches = re.findall(sql_pattern, optimized_result_main_content, re.DOTALL | re.IGNORECASE)
     
     optimized_sql = ""
     if sql_matches:
-        # 最初に見つかったSQLブロックを使用
-        optimized_sql = sql_matches[0].strip()
+        # 最も長いSQLブロックを使用（完全性を優先）
+        optimized_sql = max(sql_matches, key=len).strip()
     else:
-        # SQLブロックが見つからない場合は、SQL関連の行を抽出
+        # SQLブロックが見つからない場合は、SQL関連の行を抽出（改善版）
         lines = optimized_result_main_content.split('\n')
         sql_lines = []
         in_sql_section = False
         
         for line in lines:
-            if any(keyword in line.upper() for keyword in ['SELECT', 'FROM', 'WHERE', 'WITH', 'CREATE']):
+            line_stripped = line.strip()
+            
+            # SQLの開始を検出
+            if any(keyword in line.upper() for keyword in ['SELECT', 'FROM', 'WHERE', 'WITH', 'CREATE', 'INSERT', 'UPDATE', 'DELETE']):
                 in_sql_section = True
             
             if in_sql_section:
-                if line.strip().startswith('#') or line.strip().startswith('*'):
+                # SQLの終了を検出（マークダウンセクションやレポートセクション）
+                if (line_stripped.startswith('#') or 
+                    line_stripped.startswith('*') or 
+                    line_stripped.startswith('##') or
+                    line_stripped.startswith('**') or
+                    line_stripped.startswith('---') or
+                    line_stripped.startswith('===') or
+                    '改善ポイント' in line_stripped or
+                    '期待効果' in line_stripped or
+                    'BROADCAST適用根拠' in line_stripped):
                     in_sql_section = False
                 else:
+                    # 空行や有効なSQL行を追加
                     sql_lines.append(line)
         
         optimized_sql = '\n'.join(sql_lines).strip()
     
-    # 最適化されたクエリファイルの保存
-    with open(optimized_filename, 'w', encoding='utf-8') as f:
-        f.write(f"-- 最適化されたSQLクエリ\n")
-        f.write(f"-- 元クエリID: {query_id}\n")
-        f.write(f"-- 最適化日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"-- ファイル: {optimized_filename}\n\n")
-        
-        if optimized_sql:
-            # SQLの末尾にセミコロンを確実に追加
-            optimized_sql_clean = optimized_sql.strip()
-            if optimized_sql_clean and not optimized_sql_clean.endswith(';'):
-                optimized_sql_clean += ';'
-            f.write(optimized_sql_clean)
-        else:
-            f.write("-- ⚠️ SQLコードの自動抽出に失敗しました\n")
-            f.write("-- 以下は最適化分析の全結果です:\n\n")
-            f.write(f"/*\n{optimized_result_main_content}\n*/")
+    # SQL構文の基本チェック（完全性確認）
+    if optimized_sql:
+        optimized_sql = validate_and_fix_sql_syntax(optimized_sql)
+    
+    # 最適化されたクエリファイルの保存（エラーハンドリング強化）
+    try:
+        with open(optimized_filename, 'w', encoding='utf-8') as f:
+            f.write(f"-- 最適化されたSQLクエリ\n")
+            f.write(f"-- 元クエリID: {query_id}\n")
+            f.write(f"-- 最適化日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"-- ファイル: {optimized_filename}\n\n")
+            
+            if optimized_sql:
+                # SQLの末尾にセミコロンを確実に追加
+                optimized_sql_clean = optimized_sql.strip()
+                if optimized_sql_clean and not optimized_sql_clean.endswith(';'):
+                    optimized_sql_clean += ';'
+                
+                # 最終的な構文チェック
+                if validate_final_sql_syntax(optimized_sql_clean):
+                    f.write(optimized_sql_clean)
+                else:
+                    f.write("-- ⚠️ 構文エラーが検出されました。手動で確認してください。\n")
+                    f.write(f"-- 元のSQL:\n{optimized_sql_clean}\n")
+                    f.write("-- 以下は最適化分析の全結果です:\n\n")
+                    f.write(f"/*\n{optimized_result_main_content}\n*/")
+            else:
+                f.write("-- ⚠️ SQLコードの自動抽出に失敗しました\n")
+                f.write("-- 以下は最適化分析の全結果です:\n\n")
+                f.write(f"/*\n{optimized_result_main_content}\n*/")
+    except Exception as e:
+        print(f"⚠️ SQLファイル保存中にエラーが発生しました: {str(e)}")
+        # エラー時は基本的なファイルを生成
+        with open(optimized_filename, 'w', encoding='utf-8') as f:
+            f.write(f"-- ⚠️ SQLファイル保存中にエラーが発生しました: {str(e)}\n")
+            f.write(f"-- 最適化結果:\n{optimized_result_main_content}\n")
     
     # 分析レポートファイルの保存（LLMで推敲された読みやすいレポート）
     report_filename = f"output_optimization_report_{timestamp}.md"
