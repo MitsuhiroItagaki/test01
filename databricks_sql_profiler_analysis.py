@@ -1404,10 +1404,19 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
     overall_metrics = extracted_metrics.get('overall_metrics', {})
     total_duration = overall_metrics.get('total_time_ms', 0)
     
+    # 🚨 重要修正: フォールバック時の計算ロジックを修正
     if total_duration <= 0:
-        # 2. フォールバック: 全ノード中の最大実行時間を使用
-        # 注意: 並列実行ノードの合計は絶対に使用しない！
-        total_duration = max([node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes], default=1)
+        # execution_time_msまたはクエリ実行時間を最優先で使用
+        execution_time_ms = overall_metrics.get('execution_time_ms', 0)
+        if execution_time_ms > 0:
+            total_duration = execution_time_ms
+        else:
+            # 最後のフォールバック: 全ノードの実行時間の総合的な推定
+            # 並列実行を考慮し、最大値とノード数を使った推定を行う
+            max_node_time = max([node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes], default=1)
+            node_count = len(sorted_nodes)
+            # 推定: 最大ノード時間 + オーバーヘッド（10%）
+            total_duration = int(max_node_time * 1.1)
     
     for i, node in enumerate(final_sorted_nodes):
         duration_ms = node.get('key_metrics', {}).get('durationMs', 0)
@@ -2891,11 +2900,21 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     # 1. overall_metrics.total_time_msを優先使用（wall-clock time）
     total_time_ms = overall_metrics.get('total_time_ms', 0)
     
+    # 🚨 重要修正: フォールバック時の計算ロジックを修正
     if total_time_ms <= 0:
-        # 2. フォールバック: 全ノード中の最大実行時間を使用
-        # 注意: 並列実行ノードの合計は絶対に使用しない！
-        total_time_ms = max([node['key_metrics'].get('durationMs', 0) for node in all_sorted_nodes], default=1)
-        print(f"⚠️ デバッグ: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバックに使用: {total_time_ms} ms")
+        # execution_time_msまたはクエリ実行時間を最優先で使用
+        execution_time_ms = overall_metrics.get('execution_time_ms', 0)
+        if execution_time_ms > 0:
+            total_time_ms = execution_time_ms
+            print(f"⚠️ デバッグ: total_time_ms利用不可、execution_time_ms使用: {total_time_ms} ms")
+        else:
+            # 最後のフォールバック: 全ノードの実行時間の総合的な推定
+            # 並列実行を考慮し、最大値とノード数を使った推定を行う
+            max_node_time = max([node['key_metrics'].get('durationMs', 0) for node in all_sorted_nodes], default=1)
+            node_count = len(all_sorted_nodes)
+            # 推定: 最大ノード時間 + オーバーヘッド（10%）
+            total_time_ms = int(max_node_time * 1.1)
+            print(f"⚠️ デバッグ: 両方の時間が利用不可。推定全体時間を使用: {total_time_ms} ms (最大ノード時間 {max_node_time} ms + 10%オーバーヘッド)")
     
     print(f"📊 デバッグ: パーセンテージ計算に使用する全体時間: {total_time_ms:,} ms ({total_time_ms/1000:.1f} sec)")
     
@@ -4023,13 +4042,23 @@ if final_sorted_nodes:
     overall_metrics = extracted_metrics.get('overall_metrics', {})
     total_duration = overall_metrics.get('total_time_ms', 0)
     
+    # 🚨 重要修正: フォールバック時の計算ロジックを修正
     if total_duration <= 0:
-        # 2. フォールバック: 全ノード中の最大実行時間を使用
-        # 注意: 並列実行ノードの合計は絶対に使用しない！
-        total_duration = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
-        print(f"⚠️ コンソール表示: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバック使用: {total_duration} ms")
+        # execution_time_msまたはクエリ実行時間を最優先で使用
+        execution_time_ms = overall_metrics.get('execution_time_ms', 0)
+        if execution_time_ms > 0:
+            total_duration = execution_time_ms
+            print(f"⚠️ コンソール表示: total_time_ms利用不可、execution_time_ms使用: {total_duration} ms")
+        else:
+            # 最後のフォールバック: 全ノードの実行時間の総合的な推定
+            # 並列実行を考慮し、最大値とノード数を使った推定を行う
+            max_node_time = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
+            node_count = len(sorted_nodes)
+            # 推定: 最大ノード時間 + オーバーヘッド（10%）
+            total_duration = int(max_node_time * 1.1)
+            print(f"⚠️ コンソール表示: 両方の時間が利用不可。推定全体時間を使用: {total_duration} ms (最大ノード時間 {max_node_time} ms + 10%オーバーヘッド)")
     
-    print(f"📊 全体実行時間（wall-clock）: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
+    print(f"📊 全体実行時間（wall-clock推定）: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
     print(f"📈 TOP10合計時間（並列実行）: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
 
     print()
@@ -6353,11 +6382,21 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
         overall_metrics = extracted_metrics.get('overall_metrics', {})
         total_duration = overall_metrics.get('total_time_ms', 0)
         
+        # 🚨 重要修正: フォールバック時の計算ロジックを修正
         if total_duration <= 0:
-            # 2. フォールバック: 全ノード中の最大実行時間を使用
-            # 注意: 並列実行ノードの合計は絶対に使用しない！
-            total_duration = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
-            print(f"⚠️ generate_top10レポート: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバック使用: {total_duration} ms")
+            # execution_time_msまたはクエリ実行時間を最優先で使用
+            execution_time_ms = overall_metrics.get('execution_time_ms', 0)
+            if execution_time_ms > 0:
+                total_duration = execution_time_ms
+                print(f"⚠️ generate_top10レポート: total_time_ms利用不可、execution_time_ms使用: {total_duration} ms")
+            else:
+                # 最後のフォールバック: 全ノードの実行時間の総合的な推定
+                # 並列実行を考慮し、最大値とノード数を使った推定を行う
+                max_node_time = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
+                node_count = len(sorted_nodes)
+                # 推定: 最大ノード時間 + オーバーヘッド（10%）
+                total_duration = int(max_node_time * 1.1)
+                print(f"⚠️ generate_top10レポート: 両方の時間が利用不可。推定全体時間を使用: {total_duration} ms (最大ノード時間 {max_node_time} ms + 10%オーバーヘッド)")
         
         report_lines.append(f"📊 全体実行時間（wall-clock）: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
         report_lines.append(f"📈 TOP{limit_nodes}合計時間（並列実行）: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
