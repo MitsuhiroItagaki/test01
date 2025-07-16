@@ -5718,6 +5718,45 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
      - Photon利用率向上のための関数選択
      - コンパイル時最適化の活用
 
+9. **🎯 結合とパーティショニングの最適化順序**（重要な構造的最適化）
+   - **BROADCAST結合を最優先**: 小さいテーブルとの結合では必ずBROADCAST結合を使用
+   - **BROADCAST効果を妨げない**: REPARTITIONは結合前に入れず、BROADCAST結合の効果を最大化
+   - **結合後のREPARTITION**: 結合後にGROUP BYの効率化のためREPARTITIONヒントを適用
+   - **CTE構造の活用**: 必要に応じてCTEを使ってBROADCAST結合後にREPARTITIONする構造で出力
+   - **スピル回避と並列度**: スピルを回避しつつ、並列度の高い処理ができるよう最適化
+   
+   **🔄 推奨する処理フロー:**
+   ```sql
+   -- ✅ 推奨パターン: BROADCAST結合 → CTE → REPARTITION → GROUP BY
+   WITH broadcast_joined AS (
+     SELECT /*+ BROADCAST(small_table) */
+       large_table.columns...,
+       small_table.columns...
+     FROM large_table
+       JOIN small_table ON large_table.key = small_table.key
+   ),
+   repartitioned_for_groupby AS (
+     SELECT /*+ REPARTITION(200, group_key) */
+       columns...
+     FROM broadcast_joined
+   )
+   SELECT 
+     group_key,
+     COUNT(*),
+     SUM(amount)
+   FROM repartitioned_for_groupby
+   GROUP BY group_key
+   ```
+   
+   **❌ 避けるべきパターン:**
+   ```sql
+   -- ❌ 悪い例: REPARTITION → BROADCAST (BROADCAST効果を阻害)
+   SELECT /*+ REPARTITION(200, key), BROADCAST(small_table) */
+     columns...
+   FROM (SELECT /*+ REPARTITION(200, key) */ * FROM large_table) large_table
+     JOIN small_table ON large_table.key = small_table.key
+   ```
+
 【🔄 REPARTITIONヒント適用ルール - 構文エラー防止】
 REPARTITIONヒントを付与する場合は以下の最適化ルールを守ってください：
 
@@ -5976,6 +6015,8 @@ FROM cte1 c
 - [具体的な最適化手法のリスト]
 - [REPARTITIONヒントの適用詳細（スピル検出時のみ）]
 - [BROADCASTヒントの適用詳細 - SELECT直後配置]
+- [BROADCAST結合優先とREPARTITION順序最適化の詳細]
+- [CTE構造による段階的最適化の適用詳細]
 - [推定される性能改善効果]
 
 **🚨 構文エラー防止の最終確認**:
@@ -5988,6 +6029,9 @@ FROM cte1 c
 - ✅ プレースホルダー（...、[省略]等）が一切使用されていない
 - ✅ 完全なSQL構文になっている（不完全なクエリではない）
 - ✅ NULLリテラルが適切な型でキャストされている
+- ✅ BROADCAST結合を優先し、REPARTITIONで効果を妨げていない
+- ✅ 必要に応じてCTE構造でBROADCAST結合後にREPARTITIONを配置している
+- ✅ スピル回避と並列度向上の両方を考慮した構造になっている
 
 ```sql
 -- 🚨 重要: BROADCASTヒントは必ずメインクエリの最初のSELECT文の直後に配置
