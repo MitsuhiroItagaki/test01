@@ -62,11 +62,21 @@
 # 
 # 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
 
+# ノートブック環境用のファイルパス設定（以下の中から選択してください）
+
+# オプション1: チューニング前プランファイル（推奨）
+JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/チューニング前プランファイル.json'
+
+# オプション2: 他のJSONファイルを使用する場合は、以下のコメントアウトを解除して編集
+# JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'
+# JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/POC1.json'
+# JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/your_file.json'
+
+# コマンドライン環境用（オプション）
 import sys
-if len(sys.argv) > 1:
-    JSON_FILE_PATH = sys.argv[1]  # コマンドライン引数から取得
-else:
-    JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'  # デフォルト
+if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+    # コマンドライン引数がフラグ（-で始まる）でない場合のみ使用
+    JSON_FILE_PATH = sys.argv[1]
 
 # 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
 OUTPUT_LANGUAGE = 'ja'
@@ -3303,10 +3313,27 @@ print("=" * 80)
 print(f"📁 分析対象ファイル: {JSON_FILE_PATH}")
 print()
 
+# ファイル存在チェック
+import os
+if not os.path.exists(JSON_FILE_PATH):
+    print("❌ ファイルが見つかりません:")
+    print(f"   指定パス: {JSON_FILE_PATH}")
+    print()
+    print("💡 ファイルパス設定のヒント:")
+    print("   1. セル2でJSON_FILE_PATH変数を正しいパスに設定してください")
+    print("   2. 利用可能なオプション例:")
+    print("      - /Volumes/main/base/mitsuhiro_vol/チューニング前プランファイル.json")
+    print("      - /Volumes/main/base/mitsuhiro_vol/nophoton.json")
+    print("      - /Volumes/main/base/mitsuhiro_vol/POC1.json")
+    print("   3. ファイルがDBFS FileStoreにある場合:")
+    print("      - /FileStore/shared_uploads/your_username/filename.json")
+    print("⚠️ 処理を停止します。")
+    raise RuntimeError(f"指定されたファイルが見つかりません: {JSON_FILE_PATH}")
+
 # SQLプロファイラーJSONファイルの読み込み
 profiler_data = load_profiler_json(JSON_FILE_PATH)
 if not profiler_data:
-    print("❌ JSONファイルの読み込みに失敗しました。ファイルパスを確認してください。")
+    print("❌ JSONファイルの読み込みに失敗しました。ファイル形式を確認してください。")
     print("⚠️ 処理を停止します。")
     # dbutils.notebook.exit("File loading failed")  # 安全のためコメントアウト
     raise RuntimeError("JSONファイルの読み込みに失敗しました。")
