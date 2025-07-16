@@ -2305,10 +2305,12 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
     for i, item in enumerate(extracted_data["aggregate_columns"][:5]):
         aggregate_summary.append(f"  {i+1}. {item['expression']} (ノード: {item['node_name']})")
     
-    # テーブル情報のサマリー
+    # テーブル情報のサマリー（現在のクラスタリングキー情報を含む）
     table_summary = []
     for table_name, table_info in extracted_data["table_info"].items():
-        table_summary.append(f"  - {table_name} (ノード: {table_info['node_name']})")
+        current_keys = table_info.get('current_clustering_keys', [])
+        current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
+        table_summary.append(f"  - {table_name} (ノード: {table_info['node_name']}, 現在のクラスタリングキー: {current_keys_str})")
     
     # スキャンノードのパフォーマンス情報
     scan_performance = []
@@ -2355,9 +2357,10 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 【分析要求】
 1. 各テーブルに対する最適なLiquid Clusteringカラムの推奨（最大4カラム）
 2. カラム選定の根拠（フィルター、JOIN、GROUP BYでの使用頻度と重要度）
-3. 実装優先順位（パフォーマンス向上効果順）
-4. 具体的なSQL実装例（正しいDatabricks SQL構文）
-5. 期待されるパフォーマンス改善効果（数値で）
+3. 現在のクラスタリングキーと推奨キーの比較分析
+4. 実装優先順位（パフォーマンス向上効果順）
+5. 具体的なSQL実装例（正しいDatabricks SQL構文、現在のクラスタリングキー情報をコメントに明記）
+6. 期待されるパフォーマンス改善効果（数値で）
 
 【制約事項】
 - パーティショニングやZORDERは提案しない（Liquid Clusteringのみ）
@@ -2368,6 +2371,29 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 - データスキューや並列度の問題も考慮
 
 簡潔で実践的な分析結果を日本語で提供してください。
+
+【重要な出力形式指示】
+各テーブルの分析では、必ず以下の形式で現在のクラスタリングキー情報を含めてください：
+
+## テーブル別推奨クラスタリング
+
+### 1. [テーブル名] テーブル (最優先/高優先度/中優先度)
+**現在のクラスタリングキー**: [現在設定されているキー または "設定なし"]
+**推奨クラスタリングカラム**: 
+```sql
+ALTER TABLE [テーブル名] 
+CLUSTER BY ([推奨カラム1], [推奨カラム2], [推奨カラム3], [推奨カラム4])
+```
+
+**選定根拠**:
+- [カラム1]: [使用パターンと重要度]
+- [カラム2]: [使用パターンと重要度]
+- [以下同様...]
+
+**期待される改善効果**:
+- [具体的な数値での改善見込み]
+
+この形式により、現在の設定と推奨設定を明確に比較できるようにしてください。
 """
 
     try:
