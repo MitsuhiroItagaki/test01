@@ -1234,16 +1234,17 @@ def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
     files_read_bytes = 0
     debug_info = []
     
-    # 検索対象のメトリクス名（複数パターン対応）
+    # 検索対象のメトリクス名（実際のJSONファイルで確認されたパターンを優先）
     pruned_metrics = [
-        "Size of files pruned",
+        "Size of files pruned",  # 実際に存在することを確認済み
+        "Size of files pruned before dynamic pruning",  # 実際に存在することを確認済み
         "Pruned files size", 
         "Files pruned size",
         "Num pruned files size"
     ]
     
     read_metrics = [
-        "Size of files read",
+        "Size of files read",  # 実際に存在することを確認済み
         "Files read size",
         "Read files size",
         "Num files read size"
@@ -1258,17 +1259,21 @@ def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
         metric_label = metric_info.get('label', '')
         metric_value = metric_info.get('value', 0)
         
-        # Pruned関連
-        if any(target in metric_label for target in pruned_metrics) and metric_value > 0:
-            files_pruned_bytes = metric_value
-            if debug_mode:
-                debug_info.append(f"Found pruned metric: {metric_label} = {metric_value}")
+        # Pruned関連（labelを優先的にチェック）
+        for target in pruned_metrics:
+            if target in metric_label and metric_value > 0:
+                files_pruned_bytes += metric_value  # 複数のメトリクスがある場合は合計
+                if debug_mode:
+                    debug_info.append(f"Found pruned metric: {metric_label} = {metric_value}")
+                break
         
-        # Read関連
-        if any(target in metric_label for target in read_metrics) and metric_value > 0:
-            files_read_bytes = metric_value
-            if debug_mode:
-                debug_info.append(f"Found read metric: {metric_label} = {metric_value}")
+        # Read関連（labelを優先的にチェック）
+        for target in read_metrics:
+            if target in metric_label and metric_value > 0:
+                files_read_bytes += metric_value  # 複数のメトリクスがある場合は合計
+                if debug_mode:
+                    debug_info.append(f"Found read metric: {metric_label} = {metric_value}")
+                break
     
     # raw_metricsから検索（フォールバック）
     if files_pruned_bytes == 0 or files_read_bytes == 0:
@@ -1280,17 +1285,21 @@ def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
             metric_label = metric.get('label', '')
             metric_value = metric.get('value', 0)
             
-            # Pruned関連
-            if files_pruned_bytes == 0 and any(target in metric_label for target in pruned_metrics) and metric_value > 0:
-                files_pruned_bytes = metric_value
-                if debug_mode:
-                    debug_info.append(f"Found pruned metric in raw: {metric_label} = {metric_value}")
+            # Pruned関連（labelを優先的にチェック）
+            for target in pruned_metrics:
+                if target in metric_label and metric_value > 0:
+                    files_pruned_bytes += metric_value  # 複数のメトリクスがある場合は合計
+                    if debug_mode:
+                        debug_info.append(f"Found pruned metric in raw: {metric_label} = {metric_value}")
+                    break
             
-            # Read関連
-            if files_read_bytes == 0 and any(target in metric_label for target in read_metrics) and metric_value > 0:
-                files_read_bytes = metric_value
-                if debug_mode:
-                    debug_info.append(f"Found read metric in raw: {metric_label} = {metric_value}")
+            # Read関連（labelを優先的にチェック）
+            for target in read_metrics:
+                if target in metric_label and metric_value > 0:
+                    files_read_bytes += metric_value  # 複数のメトリクスがある場合は合計
+                    if debug_mode:
+                        debug_info.append(f"Found read metric in raw: {metric_label} = {metric_value}")
+                    break
     
     # フィルタ率計算（files_readが存在する場合は常に計算）
     if files_read_bytes > 0:
@@ -1581,41 +1590,8 @@ def calculate_bottleneck_indicators(metrics: Dict[str, Any]) -> Dict[str, Any]:
     # データ処理効率（容量ベース）
     read_bytes = overall.get('read_bytes', 0)
     
-    # 容量ベースのフィルタ率を計算（フィルタ情報を使用）
-    data_selectivity = 0
-    if read_bytes > 0:
-        # フィルタ情報が利用可能な場合は容量ベースで計算
-        try:
-            # プロファイラーデータから容量ベースのフィルタ情報を取得
-            # node_metricsの中からフィルタ情報を取得
-            filter_result = None
-            node_metrics = metrics.get('node_metrics', [])
-            for node in node_metrics:
-                if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan']:
-                    filter_result = calculate_filter_rate(node)
-                    if filter_result.get('has_filter_metrics', False):
-                        break
-            if filter_result and filter_result.get('has_filter_metrics', False):
-                files_read_bytes = filter_result.get('files_read_bytes', 0)
-                files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
-                if files_read_bytes > 0:
-                    # フィルタ率 = プルーンされたデータ / スキャンされたデータ
-                    data_selectivity = files_pruned_bytes / files_read_bytes
-                else:
-                    # フィルタ情報なし：フィルタされていない（0%として扱う）
-                    data_selectivity = 0.0
-            else:
-                # フィルタ情報なし：フィルタされていない（0%として扱う）
-                data_selectivity = 0.0
-        except Exception:
-            # フォールバック：行数ベースでフィルタ率を計算
-            rows_read = overall.get('rows_read_count', 0)
-            rows_produced = overall.get('rows_produced_count', 0)
-            if rows_read > 0:
-                # フィルタ率 = (読み込み行数 - 出力行数) / 読み込み行数
-                data_selectivity = max(0, (rows_read - rows_produced) / rows_read)
-            else:
-                data_selectivity = 0
+    # 容量ベースのフィルタ率を計算（正しい実装）
+    data_selectivity = calculate_filter_rate_percentage(overall, metrics)
     
     indicators['data_selectivity'] = data_selectivity
     
@@ -1846,11 +1822,11 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any],
     spill_bytes = overall_metrics.get('spill_to_disk_bytes', 0)
     
     # 1. データ効率分析（容量ベース）
-    # 容量ベースのフィルタ率を計算
     # metricsがNoneの場合は空の辞書で初期化
     if metrics is None:
         metrics = {'node_metrics': []}
     
+    # 容量ベースのフィルタ率を計算（正しい実装）
     filter_rate_capacity = calculate_filter_rate_percentage(overall_metrics, metrics)
     
     insights['data_efficiency'] = {
@@ -1914,7 +1890,7 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any],
 
 def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: Dict[str, Any]) -> float:
     """
-    容量ベースのフィルタ率を計算する
+    容量ベースのフィルタ率を計算する（正しい実装）
     
     Args:
         overall_metrics: 全体メトリクス
@@ -1922,42 +1898,64 @@ def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: D
         
     Returns:
         float: フィルタ率（0.0-1.0、高い値ほど効率的）
+               files_pruned_bytes / files_read_bytes
     """
+    import os
+    debug_mode = os.environ.get('DEBUG_FILTER_ANALYSIS', 'false').lower() == 'true'
+    
     read_bytes = overall_metrics.get('read_bytes', 0)
     
-    if read_bytes <= 0:
-        # フォールバック：行数ベースでフィルタ率を計算
-        rows_read = overall_metrics.get('rows_read_count', 0)
-        rows_produced = overall_metrics.get('rows_produced_count', 0)
-        if rows_read > 0:
-            # フィルタ率 = (読み込み行数 - 出力行数) / 読み込み行数
-            return max(0, (rows_read - rows_produced) / rows_read)
-        return 0
+    if debug_mode:
+        print(f"🔍 フィルタ率計算デバッグ（容量ベース）:")
+        print(f"   total_read_bytes: {read_bytes:,}")
     
-    # 容量ベースのフィルタ率を計算
+    # 容量ベースのフィルタ率を計算（必須）
     try:
         # node_metricsからフィルタ情報を取得
         node_metrics = metrics.get('node_metrics', [])
+        total_files_read_bytes = 0
+        total_files_pruned_bytes = 0
+        filter_metrics_found = False
+        
+        # 全てのスキャンノードからフィルタ情報を集計
         for node in node_metrics:
-            if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan']:
+            if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan', 'UNKNOWN_DATA_SOURCE_SCAN_EXEC']:
                 filter_result = calculate_filter_rate(node)
                 if filter_result.get('has_filter_metrics', False):
                     files_read_bytes = filter_result.get('files_read_bytes', 0)
                     files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
+                    
                     if files_read_bytes > 0:
-                        # フィルタ率 = プルーンされたデータ / スキャンされたデータ
-                        return files_pruned_bytes / files_read_bytes
+                        total_files_read_bytes += files_read_bytes
+                        total_files_pruned_bytes += files_pruned_bytes
+                        filter_metrics_found = True
+                        
+                        if debug_mode:
+                            node_filter_rate = files_pruned_bytes / files_read_bytes if files_read_bytes > 0 else 0
+                            print(f"   ノード {node.get('node_id', 'unknown')}: フィルタ率 {node_filter_rate:.4f}")
+                            print(f"     files_read_bytes: {files_read_bytes:,}")
+                            print(f"     files_pruned_bytes: {files_pruned_bytes:,}")
         
-        # フィルタ情報なし：フィルタされていない（0%として扱う）
+        # 集計されたフィルタ率を計算
+        if filter_metrics_found and total_files_read_bytes > 0:
+            overall_filter_rate = total_files_pruned_bytes / total_files_read_bytes
+            if debug_mode:
+                print(f"   集計容量ベースフィルタ率: {overall_filter_rate:.4f}")
+                print(f"     total_files_read_bytes: {total_files_read_bytes:,}")
+                print(f"     total_files_pruned_bytes: {total_files_pruned_bytes:,}")
+            return overall_filter_rate
+        
+        if debug_mode:
+            print(f"   容量ベースフィルタメトリクス: {'検出' if filter_metrics_found else '未検出'}")
+            print(f"   ⚠️ 容量ベースフィルタ情報が利用できません - 計算不可")
+        
+        # 容量ベース情報がない場合は0を返す（行数ベースは使用しない）
         return 0.0
         
-    except Exception:
-        # フォールバック：行数ベースでフィルタ率を計算
-        rows_read = overall_metrics.get('rows_read_count', 0)
-        rows_produced = overall_metrics.get('rows_produced_count', 0)
-        if rows_read > 0:
-            return max(0, (rows_read - rows_produced) / rows_read)
-        return 0
+    except Exception as e:
+        if debug_mode:
+            print(f"   フィルタ率計算エラー: {e}")
+        return 0.0
 
 def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
