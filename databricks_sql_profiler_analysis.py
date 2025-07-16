@@ -7582,9 +7582,9 @@ def refine_report_with_llm(raw_report: str, query_id: str) -> str:
         str: LLMで推敲された読みやすいレポート
     """
     
-    # 🚫 LLM推敲機能無効化チェック
-    print("🚫 LLM推敲機能を無効化しています。クリーンなレポートを返します。")
-    return raw_report
+    print("🤖 LLMによるレポート推敲を実行中...")
+    
+    # 修正情報が確実に反映されるよう、推敲処理を有効化
 
     
     refinement_prompt = f"""
