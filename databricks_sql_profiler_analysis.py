@@ -2013,20 +2013,39 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
         # test2.json形式では planMetadatas が空のため、graphs metadata は利用不可
         # メトリクス重視のアプローチでボトルネック分析を行う
         
+        # 全体的なフィルタ率情報を計算
+        overall_filter_rate = calculate_filter_rate_percentage(overall_metrics, metrics)
+        read_bytes = overall_metrics.get('read_bytes', 0)
+        read_gb = read_bytes / (1024**3) if read_bytes > 0 else 0
+        
+        # プルーン量を推定（フィルタ率から逆算）
+        if overall_filter_rate > 0 and read_bytes > 0:
+            pruned_bytes = (read_bytes * overall_filter_rate) / (1 - overall_filter_rate)
+            pruned_gb = pruned_bytes / (1024**3)
+        else:
+            pruned_bytes = 0
+            pruned_gb = 0
+        
         extracted_data["table_info"]["metrics_summary"] = {
             "node_name": "Metrics-Based Analysis",
             "node_tag": "QUERY_SUMMARY", 
             "node_id": "summary",
             "files_count": overall_metrics.get('read_files_count', 0),
             "partitions_count": overall_metrics.get('read_partitions_count', 0),
-            "data_size_gb": overall_metrics.get('read_bytes', 0) / 1024 / 1024 / 1024,
+            "data_size_gb": read_gb,
             "rows_read": overall_metrics.get('rows_read_count', 0),
             "rows_produced": overall_metrics.get('rows_produced_count', 0),
-            "data_selectivity": calculate_filter_rate_percentage(overall_metrics, metrics),
+            "data_selectivity": overall_filter_rate,
             "avg_file_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_files_count', 1), 1),
             "avg_partition_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_partitions_count', 1), 1),
             "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。",
-            "current_clustering_keys": []  # 現在のクラスタリングキー
+            "current_clustering_keys": [],  # 現在のクラスタリングキー
+            "filter_info": {  # フィルタ率情報を追加
+                "filter_rate": overall_filter_rate,
+                "files_read_bytes": read_bytes,
+                "files_pruned_bytes": pruned_bytes,
+                "has_filter_metrics": read_bytes > 0
+            }
         }
         
         # サマリーノードの情報を使用
@@ -2197,18 +2216,29 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
                             table_name_from_node = match.group(1) if match.lastindex and match.lastindex >= 1 else match.group(0)
                         break
             
-            # テーブル情報にクラスタリングキーを追加
-            if table_name_from_node and cluster_attributes:
+            # フィルタ率情報を計算
+            filter_result = calculate_filter_rate(node)
+            filter_rate_info = {
+                "filter_rate": filter_result.get("filter_rate", 0),
+                "files_read_bytes": filter_result.get("files_read_bytes", 0),
+                "files_pruned_bytes": filter_result.get("files_pruned_bytes", 0),
+                "has_filter_metrics": filter_result.get("has_filter_metrics", False)
+            }
+            
+            # テーブル情報にクラスタリングキーとフィルタ率を追加
+            if table_name_from_node:
                 # 既存のテーブル情報を更新
                 if table_name_from_node in extracted_data["table_info"]:
                     extracted_data["table_info"][table_name_from_node]["current_clustering_keys"] = cluster_attributes
+                    extracted_data["table_info"][table_name_from_node]["filter_info"] = filter_rate_info
                 else:
                     # 新しいテーブル情報を作成
                     extracted_data["table_info"][table_name_from_node] = {
                         "node_name": node_name,
                         "node_tag": node_type,
                         "node_id": node.get('node_id', ''),
-                        "current_clustering_keys": cluster_attributes
+                        "current_clustering_keys": cluster_attributes,
+                        "filter_info": filter_rate_info
                     }
             
             extracted_data["scan_nodes"].append({
@@ -2305,12 +2335,28 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
     for i, item in enumerate(extracted_data["aggregate_columns"][:5]):
         aggregate_summary.append(f"  {i+1}. {item['expression']} (ノード: {item['node_name']})")
     
-    # テーブル情報のサマリー（現在のクラスタリングキー情報を含む）
+    # テーブル情報のサマリー（現在のクラスタリングキー情報とフィルタ率を含む）
     table_summary = []
     for table_name, table_info in extracted_data["table_info"].items():
         current_keys = table_info.get('current_clustering_keys', [])
         current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
-        table_summary.append(f"  - {table_name} (ノード: {table_info['node_name']}, 現在のクラスタリングキー: {current_keys_str})")
+        
+        # フィルタ率情報を追加
+        filter_info = table_info.get('filter_info', {})
+        filter_rate = filter_info.get('filter_rate', 0)
+        files_read_bytes = filter_info.get('files_read_bytes', 0)
+        files_pruned_bytes = filter_info.get('files_pruned_bytes', 0)
+        
+        # バイト数をGB単位に変換
+        read_gb = files_read_bytes / (1024**3) if files_read_bytes > 0 else 0
+        pruned_gb = files_pruned_bytes / (1024**3) if files_pruned_bytes > 0 else 0
+        
+        if filter_info.get('has_filter_metrics', False):
+            filter_str = f", フィルタ率: {filter_rate*100:.1f}% (読み込み: {read_gb:.2f}GB, プルーン: {pruned_gb:.2f}GB)"
+        else:
+            filter_str = ", フィルタ率: 情報なし"
+        
+        table_summary.append(f"  - {table_name} (ノード: {table_info['node_name']}, 現在のクラスタリングキー: {current_keys_str}{filter_str})")
     
     # スキャンノードのパフォーマンス情報
     scan_performance = []
@@ -2373,7 +2419,7 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 簡潔で実践的な分析結果を日本語で提供してください。
 
 【重要な出力形式指示】
-各テーブルの分析では、必ず以下の形式で現在のクラスタリングキー情報を含めてください：
+各テーブルの分析では、必ず以下の形式で現在のクラスタリングキー情報とフィルタ率を含めてください：
 
 ## テーブル別推奨クラスタリング
 
@@ -2393,7 +2439,9 @@ CLUSTER BY ([推奨カラム1], [推奨カラム2], [推奨カラム3], [推奨�
 **期待される改善効果**:
 - [具体的な数値での改善見込み]
 
-この形式により、現在の設定と推奨設定を明確に比較できるようにしてください。
+**フィルタ率**: [X.X]% (読み込み: [XX.XX]GB, プルーン: [XX.XX]GB)
+
+この形式により、現在の設定、推奨設定、および各テーブルの現在のフィルタリング効率を明確に表示してください。フィルタ率情報は上記テーブル情報から正確な数値を使用してください。
 """
 
     try:
