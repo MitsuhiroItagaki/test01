@@ -2025,7 +2025,8 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
             "data_selectivity": calculate_filter_rate_percentage(overall_metrics, metrics),
             "avg_file_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_files_count', 1), 1),
             "avg_partition_size_mb": (overall_metrics.get('read_bytes', 0) / 1024 / 1024) / max(overall_metrics.get('read_partitions_count', 1), 1),
-            "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。"
+            "note": "詳細なテーブル情報はSQLクエリサマリー形式では利用不可。メトリクスベース分析を実行。",
+            "current_clustering_keys": []  # 現在のクラスタリングキー
         }
         
         # サマリーノードの情報を使用
@@ -2153,10 +2154,11 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
                 extracted_data["table_info"][table_name] = {
                     "node_name": node_name,
                     "node_tag": node_tag,
-                    "node_id": node.get('id', '')
+                    "node_id": node.get('id', ''),
+                    "current_clustering_keys": []  # 現在のクラスタリングキーを追加
                 }
 
-    # ノードタイプ別の分類
+    # ノードタイプ別の分類と現在のクラスタリングキー情報の関連付け
     node_metrics = metrics.get('node_metrics', [])
     for node in node_metrics:
         node_name = node.get('name', '')
@@ -2164,12 +2166,59 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
         key_metrics = node.get('key_metrics', {})
         
         if any(keyword in node_name.upper() for keyword in ['SCAN', 'FILESCAN', 'PARQUET', 'DELTA']):
+            # スキャンノードからクラスタリングキーを抽出
+            cluster_attributes = extract_cluster_attributes(node)
+            
+            # ノードからテーブル名を抽出してマッピング
+            node_metadata = node.get('metadata', [])
+            table_name_from_node = None
+            
+            for meta in node_metadata:
+                meta_key = meta.get('key', '')
+                meta_value = meta.get('value', '')
+                if meta_key == 'SCAN_IDENTIFIER' and meta_value:
+                    table_name_from_node = meta_value
+                    break
+            
+            # テーブル名が見つからない場合はノード名から推測
+            if not table_name_from_node:
+                import re
+                table_patterns = [
+                    r'[Ss]can\s+([a-zA-Z_][a-zA-Z0-9_.]*[a-zA-Z0-9_])',
+                    r'([a-zA-Z_][a-zA-Z0-9_]*\.)+([a-zA-Z_][a-zA-Z0-9_]*)',
+                ]
+                
+                for pattern in table_patterns:
+                    match = re.search(pattern, node_name)
+                    if match:
+                        if '.' in match.group(0):
+                            table_name_from_node = match.group(0)
+                        else:
+                            table_name_from_node = match.group(1) if match.lastindex and match.lastindex >= 1 else match.group(0)
+                        break
+            
+            # テーブル情報にクラスタリングキーを追加
+            if table_name_from_node and cluster_attributes:
+                # 既存のテーブル情報を更新
+                if table_name_from_node in extracted_data["table_info"]:
+                    extracted_data["table_info"][table_name_from_node]["current_clustering_keys"] = cluster_attributes
+                else:
+                    # 新しいテーブル情報を作成
+                    extracted_data["table_info"][table_name_from_node] = {
+                        "node_name": node_name,
+                        "node_tag": node_type,
+                        "node_id": node.get('node_id', ''),
+                        "current_clustering_keys": cluster_attributes
+                    }
+            
             extracted_data["scan_nodes"].append({
                 "name": node_name,
                 "type": node_type,
                 "rows": key_metrics.get('rowsNum', 0),
                 "duration_ms": key_metrics.get('durationMs', 0),
-                "node_id": node.get('node_id', '')
+                "node_id": node.get('node_id', ''),
+                "table_name": table_name_from_node,
+                "current_clustering_keys": cluster_attributes
             })
         elif any(keyword in node_name.upper() for keyword in ['JOIN', 'HASH']):
             extracted_data["join_nodes"].append({
@@ -2201,6 +2250,23 @@ def extract_liquid_clustering_data(profiler_data: Dict[str, Any], metrics: Dict[
     }
     
     print(f"✅ データ抽出完了: {extracted_data['metadata_summary']}")
+    
+    # 現在のクラスタリングキー情報の詳細表示
+    clustering_info_found = False
+    for table_name, table_info in extracted_data["table_info"].items():
+        current_keys = table_info.get('current_clustering_keys', [])
+        if current_keys:
+            if not clustering_info_found:
+                print(f"🔍 現在のクラスタリングキー情報:")
+                clustering_info_found = True
+            print(f"  📊 テーブル: {table_name}")
+            print(f"     現在のキー: {', '.join(current_keys)}")
+            print(f"     ノード: {table_info.get('node_name', 'Unknown')}")
+            print()
+    
+    if not clustering_info_found:
+        print(f"ℹ️ 現在のクラスタリングキーは検出されませんでした")
+    
     return extracted_data
 
 def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
@@ -2500,10 +2566,13 @@ def generate_liquid_clustering_markdown_report(clustering_analysis: Dict[str, An
 
 """
     
-    # テーブル情報の詳細
+    # テーブル情報の詳細（現在のクラスタリングキーを含む）
     table_info = extracted_data.get('table_info', {})
     for table_name, table_details in table_info.items():
+        current_keys = table_details.get('current_clustering_keys', [])
+        current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
         markdown_content += f"- **{table_name}** (ノード: {table_details.get('node_name', '')})\n"
+        markdown_content += f"  - 現在のクラスタリングキー: `{current_keys_str}`\n"
     
     markdown_content += f"""
 ## 🔎 スキャンノード分析 ({summary.get('scan_nodes_count', 0)}個)
@@ -2561,9 +2630,14 @@ def generate_liquid_clustering_sql_implementations(clustering_analysis: Dict[str
     
     # テーブルごとのSQL実装例を生成
     for table_name, table_details in table_info.items():
+        # 現在のクラスタリングキー情報を取得
+        current_keys = table_details.get('current_clustering_keys', [])
+        current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
+        
         sql_content += f"""
 -- =====================================================
 -- テーブル: {table_name}
+-- 現在のクラスタリングキー: {current_keys_str}
 -- =====================================================
 
 -- 既存テーブルにLiquid Clusteringを適用する場合:
@@ -2860,7 +2934,13 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     if identified_tables:
         report_lines.append("### 対象テーブル")
         for i, table_name in enumerate(identified_tables, 1):
+            # 現在のクラスタリングキー情報を取得
+            table_details = table_info.get(table_name, {})
+            current_keys = table_details.get('current_clustering_keys', [])
+            current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
+            
             report_lines.append(f"{i}. `{table_name}`")
+            report_lines.append(f"   - 現在のクラスタリングキー: `{current_keys_str}`")
         report_lines.append("")
     
     if filter_columns or join_columns or groupby_columns:
@@ -2892,8 +2972,14 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     if identified_tables:
         report_lines.append("### 実装SQL例")
         for table_name in identified_tables[:2]:  # TOP2テーブルのみ
+            # 現在のクラスタリングキー情報を取得
+            table_details = table_info.get(table_name, {})
+            current_keys = table_details.get('current_clustering_keys', [])
+            current_keys_str = ', '.join(current_keys) if current_keys else '設定なし'
+            
             report_lines.append(f"```sql")
             report_lines.append(f"-- {table_name}テーブルにLiquid Clusteringを適用")
+            report_lines.append(f"-- 現在のクラスタリングキー: {current_keys_str}")
             report_lines.append(f"ALTER TABLE {table_name}")
             report_lines.append(f"CLUSTER BY (column1, column2, column3, column4);")
             report_lines.append(f"```")
