@@ -4,6 +4,14 @@
 # MAGIC
 # MAGIC このnotebookは、DatabricksのSQLプロファイラーJSONログファイルを読み込み、ボトルネック特定と改善案の提示に必要なメトリクスを抽出して分析を行います。
 # MAGIC
+# MAGIC ## 🚨 重要: 開発者向け注意事項
+# MAGIC
+# MAGIC **パーセンテージ計算デグレ防止**
+# MAGIC - 並列実行ノードの時間合計を全体時間として使用することは絶対に禁止
+# MAGIC - overall_metrics.total_time_ms（wall-clock time）を優先使用
+# MAGIC - フォールバック時は最大ノード時間を使用（合計ではない）
+# MAGIC - 複数ノードが「100%」表示される問題の再発防止
+# MAGIC
 # MAGIC ## 機能概要
 # MAGIC
 # MAGIC 1. **SQLプロファイラーJSONファイルの読み込み**
@@ -1357,6 +1365,11 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
     """
     セル33スタイルの詳細ボトルネック分析を実行し、構造化されたデータを返す
     
+    🚨 重要: パーセンテージ計算デグレ防止
+    - 並列実行ノードの時間合計を全体時間として使用することは絶対に禁止
+    - overall_metrics.total_time_ms（wall-clock time）を優先使用
+    - フォールバック時は最大ノード時間を使用（合計ではない）
+    
     Args:
         extracted_metrics: 抽出されたメトリクス
         
@@ -1386,7 +1399,15 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
     # 最大10個のノードを処理
     final_sorted_nodes = sorted_nodes[:10]
     
-    total_duration = sum(node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes)
+    # 🚨 重要: 正しい全体時間の計算（デグレ防止）
+    # 1. overall_metricsから全体実行時間を取得（wall-clock time）
+    overall_metrics = extracted_metrics.get('overall_metrics', {})
+    total_duration = overall_metrics.get('total_time_ms', 0)
+    
+    if total_duration <= 0:
+        # 2. フォールバック: 全ノード中の最大実行時間を使用
+        # 注意: 並列実行ノードの合計は絶対に使用しない！
+        total_duration = max([node.get('key_metrics', {}).get('durationMs', 0) for node in sorted_nodes], default=1)
     
     for i, node in enumerate(final_sorted_nodes):
         duration_ms = node.get('key_metrics', {}).get('durationMs', 0)
@@ -1455,7 +1476,9 @@ def extract_detailed_bottleneck_analysis(extracted_metrics: Dict[str, Any]) -> D
                     continue
         
         node_name = get_meaningful_node_name(node, extracted_metrics)
-        time_percentage = (duration_ms / max(total_duration, 1)) * 100
+        # 🚨 重要: 正しいパーセンテージ計算（デグレ防止）
+        # wall-clock timeに対する各ノードの実行時間の割合
+        time_percentage = min((duration_ms / max(total_duration, 1)) * 100, 100.0)
         
         # スキュー判定（AQEスキュー検出とAQEShuffleRead平均パーティションサイズの両方を考慮）
         aqe_shuffle_skew_warning = parallelism_data.get('aqe_shuffle_skew_warning', False)
@@ -2814,6 +2837,11 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     """
     包括的なパフォーマンス分析レポートを生成
     セル33（TOP10プロセス）、セル35（Liquid Clustering）、セル47（最適化実行）の情報を統合
+    
+    🚨 重要: パーセンテージ計算デグレ防止
+    - 並列実行ノードの時間合計を全体時間として使用することは絶対に禁止
+    - overall_metrics.total_time_ms（wall-clock time）を優先使用
+    - フォールバック時は最大ノード時間を使用（合計ではない）
     """
     from datetime import datetime
     
@@ -2851,20 +2879,25 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     has_aqe_shuffle_skew_warning = bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False)
     
     # === 2. セル33: TOP10プロセス分析情報の取得 ===
-    # TOP10プロセスから主要ボトルネックを抽出
-    sorted_nodes = sorted(metrics['node_metrics'], 
-                         key=lambda x: x['key_metrics'].get('durationMs', 0), 
-                         reverse=True)[:5]  # TOP5のみ抽出
+    # 全ノードを実行時間でソート（パーセンテージ計算用）
+    all_sorted_nodes = sorted(metrics['node_metrics'], 
+                             key=lambda x: x['key_metrics'].get('durationMs', 0), 
+                             reverse=True)
     
-    # 適切な全体時間を計算
+    # TOP5ボトルネック抽出用
+    sorted_nodes = all_sorted_nodes[:5]
+    
+    # 🚨 重要: 正しい全体時間の計算（デグレ防止）
+    # 1. overall_metrics.total_time_msを優先使用（wall-clock time）
     total_time_ms = overall_metrics.get('total_time_ms', 0)
+    
     if total_time_ms <= 0:
-        # overall_metricsに適切な値がない場合、全ノードの実行時間の合計を使用
-        total_time_ms = sum([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes])
-        # 合計が0の場合は最大値を使用
-        if total_time_ms <= 0:
-            max_node_time = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
-            total_time_ms = max_node_time
+        # 2. フォールバック: 全ノード中の最大実行時間を使用
+        # 注意: 並列実行ノードの合計は絶対に使用しない！
+        total_time_ms = max([node['key_metrics'].get('durationMs', 0) for node in all_sorted_nodes], default=1)
+        print(f"⚠️ デバッグ: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバックに使用: {total_time_ms} ms")
+    
+    print(f"📊 デバッグ: パーセンテージ計算に使用する全体時間: {total_time_ms:,} ms ({total_time_ms/1000:.1f} sec)")
     
     critical_processes = []
     for i, node in enumerate(sorted_nodes):
@@ -3985,11 +4018,19 @@ sorted_nodes = sorted(extracted_metrics['node_metrics'],
 final_sorted_nodes = sorted_nodes[:10]
 
 if final_sorted_nodes:
-    # 全体の実行時間を計算
-    total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
+    # 🚨 重要: 正しい全体時間の計算（デグレ防止）
+    # 1. overall_metricsから全体実行時間を取得（wall-clock time）
+    overall_metrics = extracted_metrics.get('overall_metrics', {})
+    total_duration = overall_metrics.get('total_time_ms', 0)
     
-    print(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
-    print(f"📈 TOP10合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
+    if total_duration <= 0:
+        # 2. フォールバック: 全ノード中の最大実行時間を使用
+        # 注意: 並列実行ノードの合計は絶対に使用しない！
+        total_duration = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
+        print(f"⚠️ コンソール表示: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバック使用: {total_duration} ms")
+    
+    print(f"📊 全体実行時間（wall-clock）: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
+    print(f"📈 TOP10合計時間（並列実行）: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
 
     print()
     
@@ -3998,8 +4039,9 @@ if final_sorted_nodes:
         duration_ms = node['key_metrics'].get('durationMs', 0)
         memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
         
-        # 全体に対する時間の割合を計算
-        time_percentage = (duration_ms / max(total_duration, 1)) * 100
+        # 🚨 重要: 正しいパーセンテージ計算（デグレ防止）
+        # wall-clock timeに対する各ノードの実行時間の割合
+        time_percentage = min((duration_ms / max(total_duration, 1)) * 100, 100.0)
         
         # 時間の重要度に基づいてアイコンを選択
         if duration_ms >= 10000:  # 10秒以上
@@ -6274,6 +6316,11 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     """
     最も時間がかかっている処理のレポートを文字列として生成
     
+    🚨 重要: パーセンテージ計算デグレ防止
+    - 並列実行ノードの時間合計を全体時間として使用することは絶対に禁止
+    - overall_metrics.total_time_ms（wall-clock time）を優先使用
+    - フォールバック時は最大ノード時間を使用（合計ではない）
+    
     Args:
         extracted_metrics: 抽出されたメトリクス
         limit_nodes: 表示するノード数（デフォルト10、ファイル出力時は5）
@@ -6301,11 +6348,19 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
     final_sorted_nodes = sorted_nodes[:limit_nodes]
 
     if final_sorted_nodes:
-        # 全体の実行時間を計算（元のsorted_nodesから）
-        total_duration = sum(node['key_metrics'].get('durationMs', 0) for node in sorted_nodes)
+        # 🚨 重要: 正しい全体時間の計算（デグレ防止）
+        # 1. overall_metricsから全体実行時間を取得（wall-clock time）
+        overall_metrics = extracted_metrics.get('overall_metrics', {})
+        total_duration = overall_metrics.get('total_time_ms', 0)
         
-        report_lines.append(f"📊 全体実行時間: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
-        report_lines.append(f"📈 TOP{limit_nodes}合計時間: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
+        if total_duration <= 0:
+            # 2. フォールバック: 全ノード中の最大実行時間を使用
+            # 注意: 並列実行ノードの合計は絶対に使用しない！
+            total_duration = max([node['key_metrics'].get('durationMs', 0) for node in sorted_nodes], default=1)
+            print(f"⚠️ generate_top10レポート: overall_metrics.total_time_msが利用不可。最大ノード時間をフォールバック使用: {total_duration} ms")
+        
+        report_lines.append(f"📊 全体実行時間（wall-clock）: {total_duration:,} ms ({total_duration/1000:.1f} sec)")
+        report_lines.append(f"📈 TOP{limit_nodes}合計時間（並列実行）: {sum(node['key_metrics'].get('durationMs', 0) for node in final_sorted_nodes):,} ms")
 
         report_lines.append("")
         
@@ -6315,8 +6370,9 @@ def generate_top10_time_consuming_processes_report(extracted_metrics: Dict[str, 
             rows_num = node['key_metrics'].get('numOutputRows', 0)
             memory_mb = node['key_metrics'].get('peakMemoryBytes', 0) / 1024 / 1024
             
-            # 全体に対する時間の割合を計算
-            time_percentage = (duration_ms / max(total_duration, 1)) * 100
+            # 🚨 重要: 正しいパーセンテージ計算（デグレ防止）
+            # wall-clock timeに対する各ノードの実行時間の割合
+            time_percentage = min((duration_ms / max(total_duration, 1)) * 100, 100.0)
             
             # 時間の重要度に基づいてアイコンを選択
             if duration_ms >= 10000:  # 10秒以上
