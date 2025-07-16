@@ -2674,6 +2674,10 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     spill_bytes = bottleneck_indicators.get('spill_bytes', 0)
     spill_gb = spill_bytes / 1024 / 1024 / 1024 if spill_bytes > 0 else 0
     
+    # スキュー検出情報
+    has_skew = bottleneck_indicators.get('has_skew', False)
+    has_aqe_shuffle_skew_warning = bottleneck_indicators.get('has_aqe_shuffle_skew_warning', False)
+    
     # === 2. セル33: TOP10プロセス分析情報の取得 ===
     # TOP10プロセスから主要ボトルネックを抽出
     sorted_nodes = sorted(metrics['node_metrics'], 
@@ -2759,6 +2763,19 @@ def analyze_bottlenecks_with_llm(metrics: Dict[str, Any]) -> str:
     report_lines.append(f"| フィルタ率 | {data_selectivity:.1f}% | {'✅ 良好' if data_selectivity > 50 else '⚠️ フィルタ条件を確認'} |")
     report_lines.append(f"| シャッフル操作 | {shuffle_count}回 | {'✅ 良好' if shuffle_count < 5 else '⚠️ 多数'} |")
     report_lines.append(f"| スピル発生 | {'はい' if has_spill else 'いいえ'} | {'❌ 問題あり' if has_spill else '✅ 良好'} |")
+    
+    # スキュー検出の判定
+    if has_skew:
+        skew_status = "AQEで検出・対応済"
+        skew_evaluation = "🔧 AQE対応済"
+    elif has_aqe_shuffle_skew_warning:
+        skew_status = "潜在的なスキューの可能性あり"
+        skew_evaluation = "⚠️ 改善必要"
+    else:
+        skew_status = "未検出"
+        skew_evaluation = "✅ 良好"
+    
+    report_lines.append(f"| スキュー検出 | {skew_status} | {skew_evaluation} |")
     report_lines.append("")
     
     # 主要ボトルネック分析
