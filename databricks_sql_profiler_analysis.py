@@ -6065,6 +6065,8 @@ FROM table1
 - すべてのカラム名、テーブル名、CTE名を完全に記述してください
 - プレースホルダー（...、[省略]、空白など）は一切使用しないでください
 - オリジナルクエリのすべてのSELECT項目を保持してください
+- **🚨 DISTINCT句の絶対保持**: 元のクエリにDISTINCT句がある場合は、**必ずDISTINCT句を保持**してください
+- **ヒント句追加時のDISTINCT保持**: BROADCASTヒントやREPARTITIONヒントを追加する際も、DISTINCT句は絶対に削除しないでください
 - 元のクエリが長い場合でも、すべてのカラムを省略せずに記述してください
 - 実際に実行できる完全なSQLクエリのみを出力してください
 
@@ -6075,6 +6077,21 @@ FROM table1
 ```sql
 SELECT /*+ BROADCAST(table_name) */
   column1, column2, ...
+FROM table1 t1
+  JOIN table2 t2 ON t1.id = t2.id
+```
+
+✅ **DISTINCT句との正しい組み合わせ（絶対必須）:**
+```sql
+-- 🚨 重要: DISTINCT句は必ずヒント句の後に配置
+SELECT /*+ BROADCAST(table_name) */ DISTINCT
+  cs.ID, cs.column1, cs.column2, ...
+FROM table1 cs
+  JOIN table2 t2 ON cs.id = t2.id
+
+-- 複数ヒントとDISTINCTの組み合わせ
+SELECT /*+ REPARTITION(200), BROADCAST(small_table) */ DISTINCT
+  t1.column1, t2.column2
 FROM table1 t1
   JOIN table2 t2 ON t1.id = t2.id
 ```
@@ -6186,6 +6203,9 @@ FROM cte1 c
 - ✅ BROADCASTヒントに必ずテーブル名/エイリアス名が指定されている
 - ✅ REPARTITIONヒントは適切なサブクエリ内部に配置されている
 - ✅ 複数ヒントはカンマ区切りで指定されている
+- ✅ **DISTINCT句が元のクエリにある場合は必ず保持されている**
+- ✅ **ヒント句追加時にDISTINCT句が削除されていない**
+- ✅ **DISTINCT句がヒント句の直後に正しく配置されている（例: SELECT /*+ BROADCAST(table) */ DISTINCT）**
 - ✅ プレースホルダー（...、[省略]等）が一切使用されていない
 - ✅ 完全なSQL構文になっている（不完全なクエリではない）
 - ✅ NULLリテラルが適切な型でキャストされている
@@ -6197,6 +6217,8 @@ FROM cte1 c
 -- 🚨 重要: BROADCASTヒントは必ずメインクエリの最初のSELECT文の直後に配置
 -- 例: SELECT /*+ BROADCAST(table_name) */ column1, column2, ...
 -- 複数ヒント例（スピル検出時のみ）: SELECT /*+ REPARTITION(100), BROADCAST(small_table) */ column1, column2, ...
+-- 🚨 DISTINCT句保持例: SELECT /*+ BROADCAST(table_name) */ DISTINCT cs.ID, cs.column1, ...
+-- 🚨 複数ヒント+DISTINCT例: SELECT /*+ REPARTITION(200), BROADCAST(small_table) */ DISTINCT t1.column1, t2.column2, ...
 -- 無効な例: SELECT /*+ BROADCAST */ column1, column2, ... (テーブル名なし - 無効)
 -- 🚨 REPARTITIONヒントはサブクエリ内部に配置: SELECT ... FROM (SELECT /*+ REPARTITION(200, join_key) */ ... FROM table) ...
 [完全なSQL - すべてのカラム・CTE・テーブル名を省略なしで記述]
@@ -7635,6 +7657,7 @@ def fix_broadcast_hint_placement(sql_query: str) -> str:
     - サブクエリ内部のBROADCASTヒントをメインクエリに移動
     - FROM句、JOIN句、WHERE句内のヒントを削除
     - 複数のBROADCASTヒントを統合
+    - DISTINCT句の保持を確保
     """
     import re
     
@@ -7655,15 +7678,31 @@ def fix_broadcast_hint_placement(sql_query: str) -> str:
     where_broadcast_pattern = r'WHERE\s*/\*\+\s*BROADCAST\([^)]+\)\s*\*/'
     sql_query = re.sub(where_broadcast_pattern, 'WHERE', sql_query, flags=re.IGNORECASE)
     
+    # DISTINCT句の存在確認（大文字小文字を区別しない）
+    distinct_pattern = r'^\s*SELECT\s*(/\*\+[^*]*\*/)?\s*DISTINCT\b'
+    has_distinct = bool(re.search(distinct_pattern, sql_query, re.IGNORECASE))
+    
     # BROADCASTヒントがメインクエリのSELECT直後にあるかチェック
-    main_select_pattern = r'^\s*SELECT\s*(/\*\+[^*]*\*/)?\s*'
+    main_select_pattern = r'^\s*SELECT\s*(/\*\+[^*]*\*/)?\s*(DISTINCT\s*)?'
     if not re.search(main_select_pattern, sql_query, re.IGNORECASE):
         # メインクエリのSELECT直後にBROADCASTヒントがない場合の処理
         # 削除されたBROADCASTヒントを復元してメインクエリに配置
         broadcast_tables = extract_broadcast_tables_from_sql(sql_query)
         if broadcast_tables:
             broadcast_hint = f"/*+ BROADCAST({', '.join(broadcast_tables)}) */"
-            sql_query = re.sub(r'^\s*SELECT\s*', f'SELECT {broadcast_hint}\n  ', sql_query, flags=re.IGNORECASE)
+            if has_distinct:
+                # DISTINCT句がある場合：SELECT /*+ BROADCAST(...) */ DISTINCT の形式にする
+                sql_query = re.sub(r'^\s*SELECT\s*', f'SELECT {broadcast_hint} ', sql_query, flags=re.IGNORECASE)
+            else:
+                # DISTINCT句がない場合：従来の形式
+                sql_query = re.sub(r'^\s*SELECT\s*', f'SELECT {broadcast_hint}\n  ', sql_query, flags=re.IGNORECASE)
+    else:
+        # 既にヒントがある場合、DISTINCT句が正しい位置にあるか確認
+        # 間違った順序（SELECT DISTINCT /*+ BROADCAST(...) */ ）を修正
+        wrong_order_pattern = r'^\s*SELECT\s*DISTINCT\s*(/\*\+[^*]*\*/)'
+        if re.search(wrong_order_pattern, sql_query, re.IGNORECASE):
+            # 間違った順序を修正：SELECT DISTINCT /*+ HINT */ → SELECT /*+ HINT */ DISTINCT
+            sql_query = re.sub(wrong_order_pattern, lambda m: f'SELECT {m.group(1)} DISTINCT', sql_query, flags=re.IGNORECASE)
     
     return sql_query
 
