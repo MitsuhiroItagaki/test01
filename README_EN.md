@@ -167,8 +167,8 @@ EXPLAIN_ENABLED = 'Y'  # 'Y' = execute, 'N' = skip
 DEBUG_ENABLE = 'N'  # 'Y' = retain intermediate files, 'N' = keep only final files
 
 # Catalog and database configuration (used for EXPLAIN statement execution)
-CATALOG = 'main'
-DATABASE = 'default'
+CATALOG = 'tpcds'
+DATABASE = 'tpcds_sf1000_delta_lc'
 ```
 
 ## 📊 Usage
@@ -285,8 +285,8 @@ EXPLAIN_ENABLED = 'Y'  # 'Y' = execute, 'N' = skip
 DEBUG_ENABLE = 'N'  # 'Y' = retain intermediate files, 'N' = keep only final files
 
 # 🗂️ Catalog and database configuration
-CATALOG = 'main'
-DATABASE = 'default'
+CATALOG = 'tpcds'
+DATABASE = 'tpcds_sf1000_delta_lc'
 ```
 
 ### File Management Behavior

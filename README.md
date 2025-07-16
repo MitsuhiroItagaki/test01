@@ -167,8 +167,8 @@ EXPLAIN_ENABLED = 'Y'  # 'Y' = 実行する, 'N' = 実行しない
 DEBUG_ENABLE = 'N'  # 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持
 
 # カタログとデータベース設定（EXPLAIN文実行時に使用）
-CATALOG = 'main'
-DATABASE = 'default'
+CATALOG = 'tpcds'
+DATABASE = 'tpcds_sf1000_delta_lc'
 ```
 
 ## 📊 使用方法
@@ -285,8 +285,8 @@ EXPLAIN_ENABLED = 'Y'  # 'Y' = 実行する, 'N' = 実行しない
 DEBUG_ENABLE = 'N'  # 'Y' = 中間ファイル保持, 'N' = 最終ファイルのみ保持
 
 # 🗂️ カタログとデータベース設定
-CATALOG = 'main'
-DATABASE = 'default'
+CATALOG = 'tpcds'
+DATABASE = 'tpcds_sf1000_delta_lc'
 ```
 
 ### ファイル管理動作
