@@ -78,6 +78,9 @@ This tool analyzes JSON log files output by Databricks SQL profiler and provides
 ### 🔧 Liquid Clustering Enhancements
 - **WHERE Condition Rewriting**: Implementation includes optimization of filtering conditions
 - **Clustering Key Extraction**: Optimal key selection based on JOIN, GROUP BY, and WHERE conditions
+- **Current Clustering Key Display**: Side-by-side display of existing and recommended clustering keys for each table
+- **Automatic Table-Key Mapping**: Auto-extraction of current clustering keys (SCAN_CLUSTERS) from scan nodes
+- **Comparative Analysis**: Clear identification of differences between current and recommended settings to determine optimization needs
 - **Prioritized Recommendations**: Clear implementation order through HIGH/MEDIUM/LOW priorities
 - **SQL Implementation Examples**: Concrete implementation code generation with CLUSTER BY syntax
 
@@ -226,14 +229,26 @@ refined_report = refine_report_content_with_llm(bottleneck_analysis)
 3. **MEDIUM**: HashAggregate processing (5.8 seconds)
 ```
 
-### Liquid Clustering Recommendations
-```sql
--- HIGH priority: user_transactions table
-ALTER TABLE user_transactions 
-CLUSTER BY (user_id, transaction_date);
+### Liquid Clustering Recommendations (with Current Clustering Key Display)
+```markdown
+### Target Tables
+1. `catalog.schema.user_transactions`
+   - Current clustering keys: `user_id, status`
+2. `catalog.schema.product_sales`
+   - Current clustering keys: `Not configured`
 
--- MEDIUM priority: product_sales table
-ALTER TABLE product_sales 
+### Implementation SQL Examples
+```sql
+-- Apply Liquid Clustering to user_transactions table
+-- Current clustering keys: user_id, status
+-- Recommendation: Change to more efficient key combination
+ALTER TABLE catalog.schema.user_transactions
+CLUSTER BY (user_id, transaction_date, category);
+
+-- Apply Liquid Clustering to product_sales table
+-- Current clustering keys: Not configured
+-- Recommendation: New configuration
+ALTER TABLE catalog.schema.product_sales
 CLUSTER BY (product_id, sales_date);
 ```
 

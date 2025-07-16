@@ -78,6 +78,9 @@
 ### 🔧 Liquid Clustering強化
 - **Where条件書き換え**: フィルタリング条件の最適化を含む検討実施
 - **クラスタリングキー抽出**: JOIN、GROUP BY、WHERE条件に基づく最適なキー選択
+- **現在のクラスタリングキー表示**: 各テーブルの既存クラスタリングキーと推奨キーの並列表示
+- **自動テーブル・キーマッピング**: スキャンノードから現在のクラスタリングキー（SCAN_CLUSTERS）を自動抽出
+- **比較分析機能**: 現在の設定と推奨設定の差分を明確化し、最適化の必要性を判定
 - **優先度付き推奨**: HIGH/MEDIUM/LOW優先度による実装順序の明確化
 - **SQL実装例**: 具体的なCLUSTER BY構文での実装コード生成
 
@@ -226,14 +229,26 @@ refined_report = refine_report_content_with_llm(bottleneck_analysis)
 3. **MEDIUM**: HashAggregate処理 (5.8秒)
 ```
 
-### Liquid Clustering推奨
-```sql
--- HIGH優先度: user_transactions テーブル
-ALTER TABLE user_transactions 
-CLUSTER BY (user_id, transaction_date);
+### Liquid Clustering推奨（現在のクラスタリングキー表示付き）
+```markdown
+### 対象テーブル
+1. `catalog.schema.user_transactions`
+   - 現在のクラスタリングキー: `user_id, status`
+2. `catalog.schema.product_sales`
+   - 現在のクラスタリングキー: `設定なし`
 
--- MEDIUM優先度: product_sales テーブル
-ALTER TABLE product_sales 
+### 実装SQL例
+```sql
+-- user_transactionsテーブルにLiquid Clusteringを適用
+-- 現在のクラスタリングキー: user_id, status
+-- 推奨: より効率的なキーの組み合わせに変更
+ALTER TABLE catalog.schema.user_transactions
+CLUSTER BY (user_id, transaction_date, category);
+
+-- product_salesテーブルにLiquid Clusteringを適用  
+-- 現在のクラスタリングキー: 設定なし
+-- 推奨: 新規設定
+ALTER TABLE catalog.schema.product_sales
 CLUSTER BY (product_id, sales_date);
 ```
 
