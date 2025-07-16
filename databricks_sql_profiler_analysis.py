@@ -2461,10 +2461,12 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
 
 ### 1. [テーブル名] テーブル (最優先/高優先度/中優先度)
 **現在のクラスタリングキー**: [現在設定されているキー または "設定なし"]
-**推奨クラスタリングカラム**: 
+**推奨クラスタリングカラム**: [推奨カラム1], [推奨カラム2], [推奨カラム3], [推奨カラム4]
+
 ```sql
 ALTER TABLE [テーブル名] 
-CLUSTER BY ([推奨カラム1], [推奨カラム2], [推奨カラム3], [推奨カラム4])
+CLUSTER BY ([推奨カラム1], [推奨カラム2], [推奨カラム3], [推奨カラム4]);
+OPTIMIZE [テーブル名] FULL;
 ```
 
 **選定根拠**:
@@ -8453,15 +8455,60 @@ def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
         }
         
     except Exception as e:
-        print(f"❌ EXPLAIN文の実行に失敗: {str(e)}")
+        error_message = str(e)
+        print(f"❌ EXPLAIN文の実行に失敗: {error_message}")
         
-        # エラーの詳細をファイルに記録
+        # 致命的なエラーのチェック
+        fatal_error_patterns = [
+            "Error occurred during query planning",
+            "error occurred during query planning",
+            "Query planning failed",
+            "query planning failed",
+            "Plan optimization failed",
+            "plan optimization failed",
+            "Failed to plan query",
+            "failed to plan query",
+            "Analysis exception",
+            "analysis exception"
+        ]
+        
+        # 致命的なエラーパターンのチェック
+        is_fatal_error = any(pattern in error_message.lower() for pattern in fatal_error_patterns)
+        
+        if is_fatal_error:
+            print(f"🚨 FATAL: EXPLAIN文でクエリプランニングエラーが発生しました")
+            print(f"🚨 エラー詳細: {error_message}")
+            print(f"🚨 処理を終了します。")
+            
+            # エラーファイルの保存
+            error_filename = f"output_explain_fatal_error_{timestamp}.txt"
+            try:
+                with open(error_filename, 'w', encoding='utf-8') as f:
+                    f.write(f"# FATAL EXPLAIN実行エラー\n")
+                    f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"エラー内容: {error_message}\n")
+                    f.write(f"エラータイプ: FATAL - Query Planning Error\n")
+                    f.write("\n" + "=" * 80 + "\n")
+                    f.write("実行しようとしたEXPLAIN文:\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(explain_query)
+                
+                print(f"📄 Fatal エラー詳細を保存: {error_filename}")
+                
+            except Exception as file_error:
+                print(f"❌ Fatal エラーファイルの保存にも失敗: {str(file_error)}")
+            
+            # プログラムを終了
+            import sys
+            sys.exit(1)
+        
+        # 非致命的なエラーの場合は従来通りの処理
         error_filename = f"output_explain_error_{timestamp}.txt"
         try:
             with open(error_filename, 'w', encoding='utf-8') as f:
                 f.write(f"# EXPLAIN実行エラー\n")
                 f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"エラー内容: {str(e)}\n")
+                f.write(f"エラー内容: {error_message}\n")
                 f.write("\n" + "=" * 80 + "\n")
                 f.write("実行しようとしたEXPLAIN文:\n")
                 f.write("=" * 80 + "\n\n")
@@ -8474,7 +8521,7 @@ def execute_explain_and_save_to_file(original_query: str) -> Dict[str, str]:
         
         return {
             'error_file': error_filename,
-            'error_message': str(e)
+            'error_message': error_message
         }
 
 # EXPLAIN文実行の実行
