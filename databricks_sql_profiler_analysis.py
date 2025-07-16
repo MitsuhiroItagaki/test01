@@ -1301,15 +1301,18 @@ def calculate_filter_rate(node: Dict[str, Any]) -> Dict[str, Any]:
                         debug_info.append(f"Found read metric in raw: {metric_label} = {metric_value}")
                     break
     
-    # フィルタ率計算（files_readが存在する場合は常に計算）
-    if files_read_bytes > 0:
-        filter_rate = files_pruned_bytes / files_read_bytes
+    # フィルタ率計算（正しい式: プルーニング効率）
+    total_available_bytes = files_read_bytes + files_pruned_bytes
+    if total_available_bytes > 0:
+        filter_rate = files_pruned_bytes / total_available_bytes
+    else:
+        filter_rate = 0.0
     
     result = {
         "filter_rate": filter_rate,
         "files_pruned_bytes": files_pruned_bytes,
         "files_read_bytes": files_read_bytes,
-        "has_filter_metrics": files_read_bytes > 0
+        "has_filter_metrics": (files_read_bytes > 0 or files_pruned_bytes > 0)
     }
     
     if debug_mode:
@@ -1898,7 +1901,7 @@ def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: D
         
     Returns:
         float: フィルタ率（0.0-1.0、高い値ほど効率的）
-               files_pruned_bytes / files_read_bytes
+               プルーニング効率 = files_pruned_bytes / (files_read_bytes + files_pruned_bytes)
     """
     import os
     debug_mode = os.environ.get('DEBUG_FILTER_ANALYSIS', 'false').lower() == 'true'
@@ -1931,18 +1934,28 @@ def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: D
                         filter_metrics_found = True
                         
                         if debug_mode:
-                            node_filter_rate = files_pruned_bytes / files_read_bytes if files_read_bytes > 0 else 0
+                            node_total_available = files_read_bytes + files_pruned_bytes
+                            node_filter_rate = files_pruned_bytes / node_total_available if node_total_available > 0 else 0
                             print(f"   ノード {node.get('node_id', 'unknown')}: フィルタ率 {node_filter_rate:.4f}")
                             print(f"     files_read_bytes: {files_read_bytes:,}")
                             print(f"     files_pruned_bytes: {files_pruned_bytes:,}")
+                            print(f"     total_available_bytes: {node_total_available:,}")
         
-        # 集計されたフィルタ率を計算
-        if filter_metrics_found and total_files_read_bytes > 0:
-            overall_filter_rate = total_files_pruned_bytes / total_files_read_bytes
+        # 集計されたフィルタ率を計算（正しい式）
+        if filter_metrics_found and (total_files_read_bytes > 0 or total_files_pruned_bytes > 0):
+            # 正しい計算: プルーニング効率 = files_pruned / (files_read + files_pruned)
+            total_available_bytes = total_files_read_bytes + total_files_pruned_bytes
+            if total_available_bytes > 0:
+                overall_filter_rate = total_files_pruned_bytes / total_available_bytes
+            else:
+                overall_filter_rate = 0.0
+                
             if debug_mode:
-                print(f"   集計容量ベースフィルタ率: {overall_filter_rate:.4f}")
+                print(f"   集計容量ベースフィルタ率（修正版）: {overall_filter_rate:.4f}")
                 print(f"     total_files_read_bytes: {total_files_read_bytes:,}")
                 print(f"     total_files_pruned_bytes: {total_files_pruned_bytes:,}")
+                print(f"     total_available_bytes: {total_available_bytes:,}")
+                print(f"     プルーニング効率: {overall_filter_rate*100:.2f}%")
             return overall_filter_rate
         
         if debug_mode:
