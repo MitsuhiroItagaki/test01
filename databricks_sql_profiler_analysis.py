@@ -62,7 +62,11 @@
 # 
 # 以下のJSON_FILE_PATHを実際のファイルパスに変更してください：
 
-JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'  # デフォルト
+import sys
+if len(sys.argv) > 1:
+    JSON_FILE_PATH = sys.argv[1]  # コマンドライン引数から取得
+else:
+    JSON_FILE_PATH = '/Volumes/main/base/mitsuhiro_vol/nophoton.json'  # デフォルト
 
 # 🌐 出力言語設定（OUTPUT_LANGUAGE: 'ja' = 日本語, 'en' = 英語）
 OUTPUT_LANGUAGE = 'ja'
@@ -1893,76 +1897,75 @@ def calculate_performance_insights_from_metrics(overall_metrics: Dict[str, Any],
 
 def calculate_filter_rate_percentage(overall_metrics: Dict[str, Any], metrics: Dict[str, Any]) -> float:
     """
-    容量ベースのフィルタ率を計算する（正しい実装）
+    容量ベースのフィルタ率を計算する（overall_metrics.read_bytes使用版）
+    
+    ❌ デグレ防止注意: この関数は必ずoverall_metrics.read_bytesを使用してください！
+    ❌ files_read_bytes（スキャンノード集計）は使用しないでください！
     
     Args:
-        overall_metrics: 全体メトリクス
-        metrics: 全メトリクス（node_metricsを含む）
+        overall_metrics: 全体メトリクス（read_bytesを使用）
+        metrics: 全メトリクス（node_metricsを含む、pruned_bytes取得用）
         
     Returns:
         float: フィルタ率（0.0-1.0、高い値ほど効率的）
-               プルーニング効率 = files_pruned_bytes / (files_read_bytes + files_pruned_bytes)
+               プルーニング効率 = files_pruned_bytes / (overall_read_bytes + files_pruned_bytes)
     """
     import os
     debug_mode = os.environ.get('DEBUG_FILTER_ANALYSIS', 'false').lower() == 'true'
     
-    read_bytes = overall_metrics.get('read_bytes', 0)
+    # ❌ デグレ防止: 必ずoverall_metrics.read_bytesを使用！
+    overall_read_bytes = overall_metrics.get('read_bytes', 0)
     
     if debug_mode:
-        print(f"🔍 フィルタ率計算デバッグ（容量ベース）:")
-        print(f"   total_read_bytes: {read_bytes:,}")
+        print(f"🔍 フィルタ率計算デバッグ（overall_metrics.read_bytes使用版）:")
+        print(f"   overall_read_bytes: {overall_read_bytes:,} ({overall_read_bytes / (1024**4):.2f} TB)")
     
-    # 容量ベースのフィルタ率を計算（必須）
     try:
-        # node_metricsからフィルタ情報を取得
+        # pruned_bytesのみnode_metricsから取得（read_bytesは使用しない）
         node_metrics = metrics.get('node_metrics', [])
-        total_files_read_bytes = 0
         total_files_pruned_bytes = 0
         filter_metrics_found = False
         
-        # 全てのスキャンノードからフィルタ情報を集計
+        # 全てのスキャンノードからpruned情報のみを集計
         for node in node_metrics:
             if node.get('tag') in ['FileScan', 'BatchScan', 'TableScan', 'UNKNOWN_DATA_SOURCE_SCAN_EXEC']:
                 filter_result = calculate_filter_rate(node)
                 if filter_result.get('has_filter_metrics', False):
-                    files_read_bytes = filter_result.get('files_read_bytes', 0)
                     files_pruned_bytes = filter_result.get('files_pruned_bytes', 0)
                     
-                    if files_read_bytes > 0:
-                        total_files_read_bytes += files_read_bytes
+                    if files_pruned_bytes > 0:
                         total_files_pruned_bytes += files_pruned_bytes
                         filter_metrics_found = True
                         
                         if debug_mode:
-                            node_total_available = files_read_bytes + files_pruned_bytes
-                            node_filter_rate = files_pruned_bytes / node_total_available if node_total_available > 0 else 0
-                            print(f"   ノード {node.get('node_id', 'unknown')}: フィルタ率 {node_filter_rate:.4f}")
-                            print(f"     files_read_bytes: {files_read_bytes:,}")
-                            print(f"     files_pruned_bytes: {files_pruned_bytes:,}")
-                            print(f"     total_available_bytes: {node_total_available:,}")
+                            print(f"   ノード {node.get('node_id', 'unknown')}: files_pruned_bytes = {files_pruned_bytes:,}")
         
-        # 集計されたフィルタ率を計算（正しい式）
-        if filter_metrics_found and (total_files_read_bytes > 0 or total_files_pruned_bytes > 0):
-            # 正しい計算: プルーニング効率 = files_pruned / (files_read + files_pruned)
-            total_available_bytes = total_files_read_bytes + total_files_pruned_bytes
+        # ❌ デグレ防止: overall_read_bytes + pruned_bytes で計算
+        if filter_metrics_found and overall_read_bytes > 0:
+            # 正しい計算: プルーニング効率 = files_pruned / (overall_read + files_pruned)
+            total_available_bytes = overall_read_bytes + total_files_pruned_bytes
             if total_available_bytes > 0:
                 overall_filter_rate = total_files_pruned_bytes / total_available_bytes
             else:
                 overall_filter_rate = 0.0
                 
             if debug_mode:
-                print(f"   集計容量ベースフィルタ率（修正版）: {overall_filter_rate:.4f}")
-                print(f"     total_files_read_bytes: {total_files_read_bytes:,}")
-                print(f"     total_files_pruned_bytes: {total_files_pruned_bytes:,}")
-                print(f"     total_available_bytes: {total_available_bytes:,}")
+                print(f"   ❌ デグレ防止版: overall_read_bytes使用")
+                print(f"     overall_read_bytes: {overall_read_bytes:,} ({overall_read_bytes / (1024**4):.2f} TB)")
+                print(f"     total_files_pruned_bytes: {total_files_pruned_bytes:,} ({total_files_pruned_bytes / (1024**4):.2f} TB)")
+                print(f"     total_available_bytes: {total_available_bytes:,} ({total_available_bytes / (1024**4):.2f} TB)")
                 print(f"     プルーニング効率: {overall_filter_rate*100:.2f}%")
             return overall_filter_rate
         
         if debug_mode:
-            print(f"   容量ベースフィルタメトリクス: {'検出' if filter_metrics_found else '未検出'}")
-            print(f"   ⚠️ 容量ベースフィルタ情報が利用できません - 計算不可")
+            print(f"   フィルタメトリクス: {'検出' if filter_metrics_found else '未検出'}")
+            print(f"   overall_read_bytes: {overall_read_bytes:,}")
+            if not filter_metrics_found:
+                print(f"   ⚠️ プルーニング情報が利用できません")
+            if overall_read_bytes == 0:
+                print(f"   ⚠️ 読み込みデータがありません")
         
-        # 容量ベース情報がない場合は0を返す（行数ベースは使用しない）
+        # プルーニング情報がない場合は0を返す
         return 0.0
         
     except Exception as e:
