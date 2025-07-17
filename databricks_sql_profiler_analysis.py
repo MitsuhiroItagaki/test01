@@ -4,14 +4,6 @@
 # MAGIC
 # MAGIC このnotebookは、DatabricksのSQLプロファイラーJSONログファイルを読み込み、ボトルネック特定と改善案の提示に必要なメトリクスを抽出して分析を行います。
 # MAGIC
-# MAGIC ## 🚨 重要: 開発者向け注意事項
-# MAGIC
-# MAGIC **並列実行時間のパーセンテージ計算デグレ防止**
-# MAGIC - 根本原因: 個別ノード時間（並列累積）vs Wall Clock時間の単位不整合
-# MAGIC - 解決策: task_total_time_ms（並列タスク合計時間）を優先使用
-# MAGIC - 結果例: Grouping Aggregate 49.4%, Shuffle 30.1% (適切範囲)
-# MAGIC - 複数ノードが「累積時間の100%」問題の根本解決済み
-# MAGIC
 # MAGIC ## 機能概要
 # MAGIC
 # MAGIC 1. **SQLプロファイラーJSONファイルの読み込み**
