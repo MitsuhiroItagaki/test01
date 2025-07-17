@@ -5850,6 +5850,22 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
         broadcast_summary.append("❌ JOINクエリではないため、BROADCASTヒント適用対象外")
     
     optimization_prompt = f"""
+🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+🚨 【緊急重要】CAST文の絶対的禁止事項 - 必ず遵守してください 🚨
+🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+
+❌❌❌ 絶対に禁止 - 冗長なネストCAST ❌❌❌
+CAST(cast(null as String) as STRING) AS col_name ← このパターンは絶対禁止！
+CAST(CAST(expression) AS TYPE) AS col_name ← このパターンも絶対禁止！
+
+✅✅✅ 正しい書き方 - シンプルなCAST ✅✅✅  
+CAST(null AS STRING) AS col_name ← この形のみ許可！
+CAST(expression AS TYPE) AS col_name ← この形のみ許可！
+
+🛑 絶対ルール: CASTは一度だけ！二重三重のCASTは完全に禁止！
+🛑 データ型は大文字（STRING, INT, DOUBLE）で記述！
+🛑 シンプルな構文のみ使用！複雑なネストは禁止！
+
 あなたはDatabricksのSQLパフォーマンス最適化の専門家です。以下の**詳細なボトルネック分析結果**を基に、**処理速度重視**でSQLクエリを最適化してください。
 
 【重要な処理方針】
@@ -6111,58 +6127,37 @@ FROM (
   JOIN table2 t2 ON t1.join_key = t2.join_key
 ```
 
-【🚨 NULLリテラルの適切な型キャスト - 冗長CAST防止】
-- SELECT句でNULLリテラルが使用されている場合は、適切なデータ型で明示的にCASTしてください
-- **重要**: CASTは一度のみ適用し、冗長なネストしたCASTは絶対に避けてください
-- 例: `SELECT null as col01` → `SELECT CAST(null AS STRING) as col01`
-- データ型が不明な場合は、STRING型を使用してください
-- 他の同等なカラムがある場合は、その型に合わせてCASTしてください
+【🚨🚨🚨 絶対に禁止: 冗長なネストCASTの防止 🚨🚨🚨】
+**最重要警告**: 以下のような冗長なCASTは絶対に生成しないでください！
 
-**NULLリテラル最適化の例:**
+**❌❌❌ 絶対に禁止される間違ったパターン ❌❌❌**
 ```sql
--- ❌ 改善前: データ型が不明
-SELECT 
-  null as col01,
-  null as col02,
-  column1,
-  column2
-FROM table1
-
--- ✅ 改善後: 適切なデータ型でCASTを明示（一度のみ）
-SELECT 
-  CAST(null AS STRING) as col01,
-  CAST(null AS INT) as col02,
-  column1,
-  column2
-FROM table1
+-- これらは全て間違い！絶対に避けること！
+CAST(cast(null as String) as STRING) AS col01    -- ❌ 二重CAST禁止
+CAST(CAST(null AS INT) AS INT) AS col02          -- ❌ ネストCAST禁止  
+CAST(cast(null as Double) as DOUBLE) AS col03    -- ❌ 大文字小文字混在禁止
 ```
 
-**❌ 絶対に禁止: 冗長なネストCASTの例**
+**✅✅✅ 正しいパターン（必ずこの形式を使用） ✅✅✅**
 ```sql
--- ❌ 冗長で間違った例
-SELECT 
-  CAST(cast(null as String) as STRING) AS col01,  -- 冗長
-  CAST(CAST(null AS INT) AS INT) AS col02         -- 冗長
-FROM table1
-
--- ✅ 正しい例
-SELECT 
-  CAST(null AS STRING) AS col01,  -- シンプルで正しい
-  CAST(null AS INT) AS col02      -- シンプルで正しい
-FROM table1
+-- これが正しい形式！
+CAST(null AS STRING) AS col01    -- ✅ シンプルで正しい
+CAST(null AS INT) AS col02       -- ✅ 一度のCASTのみ
+CAST(null AS DOUBLE) AS col03    -- ✅ 大文字で統一
 ```
+
+**🚨 CAST構文の絶対ルール:**
+1. **一度のCASTのみ**: `CAST(null AS STRING)` ✅
+2. **二重CAST禁止**: `CAST(CAST(...))` や `CAST(cast(...))` は絶対禁止 ❌
+3. **大文字統一**: データ型は大文字 `STRING`, `INT`, `DOUBLE` ✅
+4. **シンプル構文**: 複雑なネストは一切禁止 ❌
 
 **推奨データ型:**
-- 文字列系: `CAST(null AS STRING)`
-- 数値系: `CAST(null AS INT)`, `CAST(null AS BIGINT)`, `CAST(null AS DOUBLE)`
-- 日付系: `CAST(null AS DATE)`, `CAST(null AS TIMESTAMP)`
-- 他のカラムと同じテーブル内にある場合: 同じデータ型を使用
-
-**🚨 CAST構文の重要な注意点:**
-- CASTは大文字で統一: `CAST(null AS STRING)`
-- データ型も大文字で統一: `STRING`, `INT`, `BIGINT`, `DOUBLE`, `DATE`, `TIMESTAMP`
-- 冗長なネストCASTは絶対に避ける: `CAST(CAST(...))` は禁止
-- 一度のCASTで完了させる: `CAST(null AS STRING)` で十分
+- 文字列: `CAST(null AS STRING)`
+- 整数: `CAST(null AS INT)`, `CAST(null AS BIGINT)`
+- 数値: `CAST(null AS DOUBLE)`
+- 日付: `CAST(null AS DATE)`, `CAST(null AS TIMESTAMP)`
+- その他: 同じテーブル内の他のカラムと同じデータ型を使用
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
