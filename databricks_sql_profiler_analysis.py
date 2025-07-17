@@ -6103,10 +6103,11 @@ FROM (
   JOIN table2 t2 ON t1.join_key = t2.join_key
 ```
 
-【🚨 NULLリテラルの適切な型キャスト】
+【🚨 NULLリテラルの適切な型キャスト - 冗長CAST防止】
 - SELECT句でNULLリテラルが使用されている場合は、適切なデータ型で明示的にCASTしてください
-- 例: `SELECT null as col01` → `SELECT cast(null as String) as col01`
-- データ型が不明な場合は、String型を使用してください
+- **重要**: CASTは一度のみ適用し、冗長なネストしたCASTは絶対に避けてください
+- 例: `SELECT null as col01` → `SELECT CAST(null AS STRING) as col01`
+- データ型が不明な場合は、STRING型を使用してください
 - 他の同等なカラムがある場合は、その型に合わせてCASTしてください
 
 **NULLリテラル最適化の例:**
@@ -6119,20 +6120,41 @@ SELECT
   column2
 FROM table1
 
--- ✅ 改善後: 適切なデータ型でCASTを明示
+-- ✅ 改善後: 適切なデータ型でCASTを明示（一度のみ）
 SELECT 
-  cast(null as String) as col01,
-  cast(null as Int) as col02,
+  CAST(null AS STRING) as col01,
+  CAST(null AS INT) as col02,
   column1,
   column2
 FROM table1
 ```
 
+**❌ 絶対に禁止: 冗長なネストCASTの例**
+```sql
+-- ❌ 冗長で間違った例
+SELECT 
+  CAST(cast(null as String) as STRING) AS col01,  -- 冗長
+  CAST(CAST(null AS INT) AS INT) AS col02         -- 冗長
+FROM table1
+
+-- ✅ 正しい例
+SELECT 
+  CAST(null AS STRING) AS col01,  -- シンプルで正しい
+  CAST(null AS INT) AS col02      -- シンプルで正しい
+FROM table1
+```
+
 **推奨データ型:**
-- 文字列系: `cast(null as String)`
-- 数値系: `cast(null as Int)`, `cast(null as Long)`, `cast(null as Double)`
-- 日付系: `cast(null as Date)`, `cast(null as Timestamp)`
+- 文字列系: `CAST(null AS STRING)`
+- 数値系: `CAST(null AS INT)`, `CAST(null AS BIGINT)`, `CAST(null AS DOUBLE)`
+- 日付系: `CAST(null AS DATE)`, `CAST(null AS TIMESTAMP)`
 - 他のカラムと同じテーブル内にある場合: 同じデータ型を使用
+
+**🚨 CAST構文の重要な注意点:**
+- CASTは大文字で統一: `CAST(null AS STRING)`
+- データ型も大文字で統一: `STRING`, `INT`, `BIGINT`, `DOUBLE`, `DATE`, `TIMESTAMP`
+- 冗長なネストCASTは絶対に避ける: `CAST(CAST(...))` は禁止
+- 一度のCASTで完了させる: `CAST(null AS STRING)` で十分
 
 【重要な制約】
 - 絶対に不完全なクエリを生成しないでください
