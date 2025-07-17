@@ -2443,6 +2443,10 @@ def analyze_liquid_clustering_opportunities(profiler_data: Dict[str, Any], metri
   * 既存テーブル: ALTER TABLE table_name CLUSTER BY (col1, col2, ...)
 - 最大4カラムまでの推奨
 - データスキューや並列度の問題も考慮
+- **重要**: カラムの指定順序はパフォーマンスに影響しません（Liquid Clusteringの特性）
+  * 従来のパーティショニングやZ-ORDERとは異なり、CLUSTER BY内のカラム順序は任意
+  * (col1, col2, col3) と (col3, col1, col2) は同等のパフォーマンス
+  * カラム選定時は順序よりも、各カラムの重要度と使用頻度を重視
 
 簡潔で実践的な分析結果を日本語で提供してください。
 
@@ -2465,6 +2469,7 @@ OPTIMIZE [テーブル名] FULL;
 - [カラム1]: [使用パターンと重要度]
 - [カラム2]: [使用パターンと重要度]
 - [以下同様...]
+- 注記: カラムの指定順序はパフォーマンスに影響しないため、重要度順ではなく論理的順序で記載
 
 **期待される改善効果**:
 - [具体的な数値での改善見込み]
@@ -2811,6 +2816,9 @@ def generate_liquid_clustering_sql_implementations(clustering_analysis: Dict[str
 -- 3. 既存のZORDER BYは自動的に無効化される
 -- 4. クラスタリングの効果は時間とともに向上する（OPTIMIZE実行で最適化）
 -- 5. 定期的なOPTIMIZE実行を推奨
+-- 6. **重要**: カラムの指定順序はパフォーマンスに影響しません
+--    * CLUSTER BY (col1, col2, col3) と CLUSTER BY (col3, col1, col2) は同等
+--    * 従来のパーティショニングやZ-ORDERとは異なる重要な特性
 
 -- OPTIMIZE実行例:
 -- OPTIMIZE table_name;
