@@ -5854,13 +5854,15 @@ def generate_optimized_query_with_llm(original_query: str, analysis_result: str,
 🚨 【緊急重要】CAST文の絶対的禁止事項 - 必ず遵守してください 🚨
 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
 
-❌❌❌ 絶対に禁止 - 冗長なネストCAST ❌❌❌
-CAST(cast(null as String) as STRING) AS col_name ← このパターンは絶対禁止！
-CAST(CAST(expression) AS TYPE) AS col_name ← このパターンも絶対禁止！
+❌❌❌ 絶対に禁止 - 二重CASTの使用 ❌❌❌
+- CAST内部にさらにCASTやcastを配置することは完全に禁止
+- ネストした変換関数の使用は一切禁止
+- 複雑なCASTパターンは使用しない
 
 ✅✅✅ 正しい書き方 - シンプルなCAST ✅✅✅  
-CAST(null AS STRING) AS col_name ← この形のみ許可！
-CAST(expression AS TYPE) AS col_name ← この形のみ許可！
+- CAST(null AS STRING) の形式のみ使用
+- CAST(値 AS データ型) の単純な形式のみ使用
+- 一度のCASTのみで型変換を完了
 
 🛑 絶対ルール: CASTは一度だけ！二重三重のCASTは完全に禁止！
 🛑 データ型は大文字（STRING, INT, DOUBLE）で記述！
@@ -6128,27 +6130,21 @@ FROM (
 ```
 
 【🚨🚨🚨 絶対に禁止: 冗長なネストCASTの防止 🚨🚨🚨】
-**最重要警告**: 以下のような冗長なCASTは絶対に生成しないでください！
+**最重要警告**: 冗長なCASTパターンは絶対に生成しないでください！
 
-**❌❌❌ 絶対に禁止される間違ったパターン ❌❌❌**
-```sql
--- これらは全て間違い！絶対に避けること！
-CAST(cast(null as String) as STRING) AS col01    -- ❌ 二重CAST禁止
-CAST(CAST(null AS INT) AS INT) AS col02          -- ❌ ネストCAST禁止  
-CAST(cast(null as Double) as DOUBLE) AS col03    -- ❌ 大文字小文字混在禁止
-```
+**❌❌❌ 絶対に禁止される構文パターン ❌❌❌**
+- 二重CAST（CAST内部にCAST/castを含む構文）は完全に禁止
+- ネストしたCASTやcastの組み合わせは一切禁止  
+- 大文字小文字が混在した型変換は禁止
 
 **✅✅✅ 正しいパターン（必ずこの形式を使用） ✅✅✅**
-```sql
--- これが正しい形式！
-CAST(null AS STRING) AS col01    -- ✅ シンプルで正しい
-CAST(null AS INT) AS col02       -- ✅ 一度のCASTのみ
-CAST(null AS DOUBLE) AS col03    -- ✅ 大文字で統一
-```
+- シンプルで単一のCASTのみ使用
+- 一度のCASTのみで型変換を完了
+- 大文字でデータ型を統一
 
 **🚨 CAST構文の絶対ルール:**
-1. **一度のCASTのみ**: `CAST(null AS STRING)` ✅
-2. **二重CAST禁止**: `CAST(CAST(...))` や `CAST(cast(...))` は絶対禁止 ❌
+1. **一度のCASTのみ**: `CAST(値 AS データ型)` の単純な形式のみ使用 ✅
+2. **二重CAST禁止**: CAST内部に別のCASTを含むネスト構造は絶対禁止 ❌
 3. **大文字統一**: データ型は大文字 `STRING`, `INT`, `DOUBLE` ✅
 4. **シンプル構文**: 複雑なネストは一切禁止 ❌
 
